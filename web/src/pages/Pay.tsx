@@ -1,0 +1,604 @@
+import { useState, useEffect, useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  CreditCard,
+  DollarSign,
+  Users,
+  Loader2,
+  ChevronsUpDown,
+  Check,
+  Info,
+} from "lucide-react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { toast } from "@/hooks/use-toast";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  documentId,
+  collectionGroup,
+} from "firebase/firestore";
+import { db } from "@/lib/firebase";
+
+interface Member {
+  id: string;
+  name: string;
+}
+
+interface Share {
+  id: string;
+  matchId: string;
+  matchDate: string;
+  amount: number;
+  teamId: string;
+  // Detailed info
+  matchTotalAmount: number;
+  teamPercent: number;
+  teamName: string;
+  teamMemberCount: number;
+}
+
+// Helper function to remove Vietnamese diacritics
+const removeDiacritics = (str: string) => {
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+};
+
+// Define the PayOSCheckout type for TypeScript
+declare global {
+  interface Window {
+    PayOSCheckout: {
+      open: (options: {
+        paymentLinkId: string;
+        onSuccess: () => void;
+        onCancel: () => void;
+        onExit: () => void;
+      }) => void;
+    };
+  }
+}
+
+const Pay = () => {
+  const [members, setMembers] = useState<Member[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState<string>("");
+  const [unpaidShares, setUnpaidShares] = useState<Share[]>([]);
+  const [selectedShares, setSelectedShares] = useState<string[]>([]);
+  const [expandedItems, setExpandedItems] = useState<string[]>([]);
+  const [isComboboxOpen, setIsComboboxOpen] = useState(false);
+  const [isLoadingMembers, setIsLoadingMembers] = useState(true);
+  const [isLoadingShares, setIsLoadingShares] = useState(false);
+  const [isCreatingPayment, setIsCreatingPayment] = useState(false);
+
+  useEffect(() => {
+    const fetchMembers = async () => {
+      setIsLoadingMembers(true);
+      try {
+        const membersCollectionRef = collection(db, "members");
+        const querySnapshot = await getDocs(membersCollectionRef);
+        const membersList = querySnapshot.docs.map(
+          (doc) => ({ id: doc.id, ...doc.data() } as Member)
+        );
+        setMembers(membersList);
+      } catch (error) {
+        console.error("Error fetching members:", error);
+        toast({
+          variant: "destructive",
+          title: "Lỗi",
+          description: "Không thể tải danh sách thành viên.",
+        });
+      } finally {
+        setIsLoadingMembers(false);
+      }
+    };
+    fetchMembers();
+  }, []);
+
+  // Effect to load last selected member from localStorage
+  useEffect(() => {
+    const lastSelectedId = localStorage.getItem("lastSelectedMemberId");
+    if (lastSelectedId) {
+      setSelectedMemberId(lastSelectedId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedMemberId) {
+      setUnpaidShares([]);
+      setSelectedShares([]);
+      return;
+    }
+
+    const fetchUnpaidShares = async () => {
+      setIsLoadingShares(true);
+      setUnpaidShares([]);
+      setSelectedShares([]);
+      try {
+        const sharesQuery = query(
+          collectionGroup(db, "shares"),
+          where("memberId", "==", selectedMemberId),
+          where("status", "==", "PENDING")
+        );
+
+        const sharesSnapshot = await getDocs(sharesQuery);
+        if (sharesSnapshot.empty) {
+          setUnpaidShares([]);
+          return;
+        }
+
+        const sharesData = sharesSnapshot.docs.map(
+          (doc) =>
+            ({
+              id: doc.id,
+              ...doc.data(),
+            } as {
+              id: string;
+              matchId: string;
+              amount: number;
+              teamId: string;
+            })
+        );
+
+        const matchIds = [...new Set(sharesData.map((share) => share.matchId))];
+        if (matchIds.length === 0) {
+          setUnpaidShares([]);
+          setIsLoadingShares(false);
+          return;
+        }
+
+        const matchesQuery = query(
+          collection(db, "matches"),
+          where(documentId(), "in", matchIds)
+        );
+        const matchesSnapshot = await getDocs(matchesQuery);
+        const matchesData = new Map(
+          matchesSnapshot.docs.map((doc) => [doc.id, doc.data()])
+        );
+
+        // Fetch rosters for all relevant matches
+        const rostersPromises = matchIds.map(async (matchId) => {
+          const rostersSnapshot = await getDocs(
+            collection(db, "matches", matchId, "rosters")
+          );
+          const rostersData = new Map(
+            rostersSnapshot.docs.map((doc) => [
+              doc.id,
+              doc.data() as { memberIds: string[] },
+            ])
+          );
+          return { matchId, rostersData };
+        });
+
+        const rostersResults = await Promise.all(rostersPromises);
+        const rostersByMatch = new Map(
+          rostersResults.map((r) => [r.matchId, r.rostersData])
+        );
+
+        const sharesWithDetails = sharesData.map((share) => {
+          const matchData = matchesData.get(share.matchId);
+          const rostersData = rostersByMatch.get(share.matchId);
+
+          const dateObj = matchData?.date;
+          let formattedDate = "Không rõ";
+          if (dateObj && typeof dateObj.toDate === "function") {
+            formattedDate = dateObj.toDate().toLocaleDateString("vi-VN");
+          } else if (dateObj) {
+            const parsedDate = new Date(dateObj);
+            if (!isNaN(parsedDate.getTime())) {
+              formattedDate = parsedDate.toLocaleDateString("vi-VN");
+            }
+          }
+
+          const teamRoster = rostersData?.get(share.teamId);
+          const teamMemberCount = teamRoster?.memberIds.length || 1;
+          const teamPercent = matchData?.teamPercents?.[share.teamId] || 0;
+
+          const teamName = matchData?.teamNames?.[share.teamId] || "";
+
+          return {
+            id: share.id,
+            matchId: share.matchId,
+            amount: share.amount,
+            matchDate: formattedDate,
+            teamId: share.teamId,
+            matchTotalAmount: matchData?.totalAmount || 0,
+            teamPercent: teamPercent,
+            teamName: teamName,
+            teamMemberCount: teamMemberCount,
+          };
+        });
+
+        setUnpaidShares(sharesWithDetails);
+        setExpandedItems(sharesWithDetails.map((s) => s.id)); // Expand all by default
+      } catch (error) {
+        console.error("Error fetching unpaid shares:", error);
+        toast({
+          variant: "destructive",
+          title: "Lỗi",
+          description: "Không thể tải các khoản nợ chưa thanh toán.",
+        });
+      } finally {
+        setIsLoadingShares(false);
+      }
+    };
+
+    fetchUnpaidShares();
+  }, [selectedMemberId]);
+
+  const handleMemberChange = (memberId: string) => {
+    setSelectedMemberId(memberId);
+    localStorage.setItem("lastSelectedMemberId", memberId);
+  };
+
+  const totalAmount = useMemo(() => {
+    return unpaidShares
+      .filter((share) => selectedShares.includes(share.id))
+      .reduce((total, share) => total + share.amount, 0);
+  }, [selectedShares, unpaidShares]);
+
+  const handleShareSelection = (shareId: string) => {
+    setSelectedShares((prev) =>
+      prev.includes(shareId)
+        ? prev.filter((id) => id !== shareId)
+        : [...prev, shareId]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (selectedShares.length === unpaidShares.length) {
+      setSelectedShares([]);
+    } else {
+      setSelectedShares(unpaidShares.map((share) => share.id));
+    }
+  };
+
+  const handlePayment = async () => {
+    if (selectedShares.length === 0) {
+      toast({
+        title: "Chưa chọn khoản thanh toán",
+        description: "Vui lòng chọn ít nhất một trận để thanh toán.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setIsCreatingPayment(true);
+    try {
+      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/create-payment-link`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          shareIds: selectedShares,
+          memberId: selectedMemberId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Server responded with an error");
+      }
+
+      const paymentLinkData = await response.json();
+
+      if (!window.PayOSCheckout) {
+        throw new Error("PayOS Checkout script not loaded yet.");
+      }
+
+      window.PayOSCheckout.open({
+        paymentLinkId: paymentLinkData.paymentLinkId,
+        onSuccess: () => {
+          // This is a good place to show a success message and maybe refresh the unpaid shares list
+          toast({
+            title: "Thanh toán thành công!",
+            description: "Cảm ơn bạn đã hoàn tất thanh toán.",
+          });
+          // Refetch unpaid shares after a short delay to allow webhook to process
+          setTimeout(() => {
+            // A simple way to trigger refetch is to clear and set the memberId again
+            const currentMemberId = selectedMemberId;
+            setSelectedMemberId("");
+            setSelectedMemberId(currentMemberId);
+          }, 2000);
+        },
+        onCancel: () => {
+          toast({
+            title: "Thanh toán đã hủy",
+            description: "Bạn đã hủy giao dịch thanh toán.",
+            variant: "destructive",
+          });
+        },
+        onExit: () => {
+          console.log("PayOS Checkout exited.");
+        },
+      });
+    } catch (error) {
+      console.error("Error creating payment link:", error);
+      toast({
+        title: "Lỗi",
+        description: `Không thể tạo liên kết thanh toán: ${error.message}`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingPayment(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-pitch flex items-center justify-center p-2 sm:p-4">
+      <div className="w-full max-w-2xl">
+        <Card className="shadow-card-hover">
+          <CardHeader className="text-center px-4 pt-6 sm:px-6 sm:pt-8">
+            <div className="mx-auto mb-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-gradient-pitch flex items-center justify-center shadow-card">
+              <Users className="h-7 w-7 sm:h-8 sm:w-8 text-white" />
+            </div>
+            <CardTitle className="text-2xl sm:text-3xl">
+              Thanh toán công nợ
+            </CardTitle>
+            <CardDescription className="text-sm sm:text-base mt-1 sm:mt-2">
+              Chọn tên của bạn để xem và thanh toán các trận chưa trả tiền.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 sm:space-y-6 px-4 pb-4 sm:px-6 sm:pb-6">
+            <div>
+              <Popover open={isComboboxOpen} onOpenChange={setIsComboboxOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={isComboboxOpen}
+                    className="w-full justify-between h-12"
+                    disabled={isLoadingMembers}
+                  >
+                    {selectedMemberId
+                      ? members.find((member) => member.id === selectedMemberId)
+                          ?.name
+                      : "Chọn tên của bạn..."}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                  <Command
+                    filter={(value, search) => {
+                      const normalizedValue = removeDiacritics(
+                        value.toLowerCase()
+                      );
+                      const normalizedSearch = removeDiacritics(
+                        search.toLowerCase()
+                      );
+                      return normalizedValue.includes(normalizedSearch) ? 1 : 0;
+                    }}
+                  >
+                    <CommandInput placeholder="Tìm tên thành viên..." />
+                    <CommandList>
+                      <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
+                      <CommandGroup>
+                        {members.map((member) => (
+                          <CommandItem
+                            key={member.id}
+                            value={member.name}
+                            onSelect={() => {
+                              handleMemberChange(member.id);
+                              setIsComboboxOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={`mr-2 h-4 w-4 ${
+                                selectedMemberId === member.id
+                                  ? "opacity-100"
+                                  : "opacity-0"
+                              }`}
+                            />
+                            {member.name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {isLoadingShares && (
+              <div className="flex justify-center items-center h-40">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {!isLoadingShares &&
+              selectedMemberId &&
+              unpaidShares.length === 0 && (
+                <div className="text-center p-8 bg-gradient-card rounded-xl border">
+                  <h3 className="text-lg font-semibold">Tuyệt vời!</h3>
+                  <p className="text-muted-foreground">
+                    Bạn không có khoản nợ nào chưa thanh toán.
+                  </p>
+                </div>
+              )}
+
+            {!isLoadingShares && unpaidShares.length > 0 && (
+              <div>
+                <div className="mb-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base sm:text-lg font-semibold">
+                      Các trận chưa thanh toán
+                    </h3>
+                    <Button
+                      variant="link"
+                      onClick={handleSelectAll}
+                      className="text-sm sm:text-base px-2"
+                    >
+                      {selectedShares.length === unpaidShares.length
+                        ? "Bỏ chọn tất cả"
+                        : "Chọn tất cả"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-2 sm:space-y-3 max-h-[40vh] sm:max-h-72 overflow-y-auto p-1">
+                  <Accordion
+                    type="multiple"
+                    className="w-full space-y-2 sm:space-y-3"
+                    value={expandedItems}
+                    onValueChange={setExpandedItems}
+                  >
+                    {unpaidShares.map((share) => (
+                      <Card
+                        key={share.id}
+                        className="overflow-hidden bg-card hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="flex items-center p-3 sm:p-4">
+                          <Checkbox
+                            checked={selectedShares.includes(share.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleShareSelection(share.id);
+                            }}
+                            className="mr-3 sm:mr-4 h-5 w-5"
+                          />
+                          <AccordionItem
+                            value={share.id}
+                            className="border-b-0 flex-1"
+                          >
+                            <AccordionTrigger className="p-0 hover:no-underline">
+                              <div className="flex-1 flex justify-between items-center pr-2 sm:pr-4">
+                                <div>
+                                  <p className="font-medium text-sm sm:text-base text-left">
+                                    Trận ngày {share.matchDate}
+                                  </p>
+                                </div>
+                                <span className="font-semibold text-base sm:text-lg">
+                                  {share.amount.toLocaleString()}{" "}
+                                  <span className="text-xs sm:text-sm font-normal text-muted-foreground">
+                                    VND
+                                  </span>
+                                </span>
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent className="pt-3 sm:pt-4 pb-1 pr-1">
+                              <div className="space-y-2 text-xs sm:text-sm text-muted-foreground p-3 sm:p-4 bg-background rounded-lg border">
+                                <h4 className="font-semibold text-foreground mb-2 flex items-center gap-2 text-sm sm:text-base">
+                                  <Info className="h-4 w-4" />
+                                  Chi tiết cách tính
+                                </h4>
+                                <div className="flex justify-between">
+                                  <span>Tổng tiền sân:</span>
+                                  <span className="font-medium text-foreground">
+                                    {share.matchTotalAmount.toLocaleString()}{" "}
+                                    VND
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>
+                                    Đội {share.teamName} ({share.teamPercent}%):
+                                  </span>
+                                  <span className="font-medium text-foreground">
+                                    {(
+                                      (share.matchTotalAmount *
+                                        share.teamPercent) /
+                                      100
+                                    ).toLocaleString()}{" "}
+                                    VND
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Chia cho số người:</span>
+                                  <span className="font-medium text-foreground">
+                                    {share.teamMemberCount}
+                                  </span>
+                                </div>
+                                <hr className="my-1 sm:my-2 border-dashed" />
+                                <div className="flex justify-between text-sm sm:text-base">
+                                  <span className="font-semibold">
+                                    Số tiền của bạn:
+                                  </span>
+                                  <span className="font-bold text-primary">
+                                    {share.amount.toLocaleString()} VND
+                                  </span>
+                                </div>
+                              </div>
+                            </AccordionContent>
+                          </AccordionItem>
+                        </div>
+                      </Card>
+                    ))}
+                  </Accordion>
+                </div>
+
+                {selectedShares.length > 0 && (
+                  <div className="mt-4 sm:mt-6 space-y-3 sm:space-y-4">
+                    <div className="p-4 sm:p-6 rounded-xl bg-gradient-card border">
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground text-sm sm:text-base">
+                          Tổng cộng
+                        </span>
+                        <div className="flex items-baseline gap-1 sm:gap-2">
+                          <DollarSign className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                          <span className="text-2xl sm:text-3xl font-bold text-primary">
+                            {totalAmount.toLocaleString()}
+                          </span>
+                          <span className="text-sm sm:text-base text-muted-foreground">
+                            VND
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      size="lg"
+                      className="w-full h-12 text-base sm:h-14 sm:text-lg"
+                      onClick={handlePayment}
+                      disabled={totalAmount === 0 || isCreatingPayment}
+                    >
+                      {isCreatingPayment ? (
+                        <>
+                          <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                          Đang xử lý...
+                        </>
+                      ) : (
+                        <>
+                          <CreditCard className="h-5 w-5 mr-2" />
+                          Thanh toán ({selectedShares.length} trận)
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+export default Pay;

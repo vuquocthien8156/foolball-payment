@@ -117,8 +117,8 @@ app.post("/create-payment-link", async (req, res) => {
 
     const paymentLink = await payos.paymentRequests.create(paymentData);
 
-    // No need to store checkoutUrl in a separate collection anymore
-    res.json({ checkoutUrl: paymentLink.checkoutUrl });
+    // Return the entire payment link object for the embedded checkout
+    res.json(paymentLink);
   } catch (error) {
     console.error("Error creating payment link:", error);
     res
