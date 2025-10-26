@@ -9,7 +9,16 @@ const admin = require("firebase-admin");
 // --- Firebase Admin SDK Initialization ---
 // Ensure you have the service account key file in the `server` directory
 try {
-  const serviceAccount = require("./foolball-payment-firebase-adminsdk-fbsvc-24ed542325.json");
+  let serviceAccount;
+  // Check if the FIREBASE_CREDENTIALS environment variable is set (for production)
+  if (process.env.FIREBASE_CREDENTIALS) {
+    // Parse the credentials from the environment variable
+    serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+  } else {
+    // Fallback to the local service account file (for development)
+    serviceAccount = require("./foolball-payment-firebase-adminsdk-fbsvc-24ed542325.json");
+  }
+
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
