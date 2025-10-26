@@ -309,7 +309,7 @@ const Pay = () => {
     }
     setIsCreatingPayment(true);
     try {
-      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+      const API_URL = import.meta.env.VITE_API_URL;
       const response = await fetch(`${API_URL}/create-payment-link`, {
         method: "POST",
         headers: {

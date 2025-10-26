@@ -1,0 +1,8 @@
+{
+  "name": "football-payment-root",
+  "version": "1.0.0",
+  "scripts": {
+    "deploy": "cd web && npm run build && cd .. && firebase deploy"
+  },
+  "private": true
+}

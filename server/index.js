@@ -6,32 +6,15 @@ const cors = require("cors");
 const { PayOS } = require("@payos/node");
 const admin = require("firebase-admin");
 const axios = require("axios");
-const functions = require("firebase-functions");
+const { onRequest } = require("firebase-functions/v2/https");
 
 // --- Firebase Admin SDK Initialization ---
 // Ensure you have the service account key file in the `server` directory
-try {
-  let serviceAccount;
-  // Check if the FIREBASE_CREDENTIALS environment variable is set (for production)
-  if (functions.config().adminsdk) {
-    // Use the Firebase Functions configuration
-    serviceAccount = functions.config().adminsdk;
-  } else if (process.env.FIREBASE_CREDENTIALS) {
-    // Parse the credentials from the environment variable (alternative for local/other envs)
-    serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
-  } else {
-    // Fallback to the local service account file (for development)
-    serviceAccount = require("./foolball-payment-firebase-adminsdk-fbsvc-24ed542325.json");
-  }
-
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-  console.log("Firebase Admin SDK initialized successfully.");
-} catch (error) {
-  console.error("Failed to initialize Firebase Admin SDK:", error);
-  process.exit(1); // Exit if Firebase connection fails
-}
+// The SDK will automatically discover the service account credentials from
+// the environment when deployed. For local development, set the
+// GOOGLE_APPLICATION_CREDENTIALS environment variable.
+admin.initializeApp();
+console.log("Firebase Admin SDK initialized successfully.");
 
 // --- PayOS Initialization ---
 const payos = new PayOS(
@@ -41,7 +24,7 @@ const payos = new PayOS(
 );
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const port = process.env.PORT || 3001;
 
 // --- Middlewares ---
 app.use(cors()); // Configure this properly for production
@@ -286,9 +269,9 @@ app.post("/send-match-notification", async (req, res) => {
 });
 
 // --- Start Server ---
-// app.listen(PORT, () => {
-//   console.log(`Server is running on http://localhost:${PORT}`);
+// app.listen(port, () => {
+//   console.log(`Server is listening on port ${port}`);
 // });
 
 // Export the Express API as a Cloud Function
-exports.api = functions.https.onRequest(app);
+exports.api = onRequest({ invoker: "public" }, app);
