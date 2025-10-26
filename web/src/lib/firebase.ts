@@ -8,13 +8,13 @@ import { getMessaging, getToken, onMessage } from "firebase/messaging";
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  apiKey: "AIzaSyDn5uzZ3BgewpBcv5VHXXNm7RNKe1Pi3Yg",
+  authDomain: "foolball-payment.firebaseapp.com",
+  projectId: "foolball-payment",
+  storageBucket: "foolball-payment.appspot.com",
+  messagingSenderId: "398658240449",
+  appId: "1:398658240449:web:da59bcb3a2f7c1db2c3940",
+  measurementId: "G-TC5GWMCLL9",
 };
 
 // Initialize Firebase
@@ -31,7 +31,8 @@ export const requestNotificationPermission = async () => {
     if (permission === "granted") {
       console.log("Notification permission granted.");
       const currentToken = await getToken(messaging, {
-        vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+        vapidKey:
+          "BPwIdXHEntWSQ9AGkKSy7dcN7aO4TYQ67mV627wzVAvfPkFKau2DB7C8A91KRepbeBY93Pv9XsX_kn2Jv-5cn7Y",
       });
       if (currentToken) {
         console.log("FCM Token:", currentToken);

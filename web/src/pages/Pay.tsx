@@ -17,6 +17,7 @@ import {
   Check,
   Info,
   Bell,
+  Download,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -52,6 +53,7 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { db, requestNotificationPermission } from "@/lib/firebase";
+import { usePWAInstall } from "@/contexts/PWAInstallContext";
 
 interface Member {
   id: string;
@@ -95,6 +97,7 @@ declare global {
 }
 
 const Pay = () => {
+  const { canInstall, installPWA } = usePWAInstall();
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>("");
   const [unpaidShares, setUnpaidShares] = useState<Share[]>([]);
@@ -408,6 +411,15 @@ const Pay = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 sm:space-y-6 px-4 pb-4 sm:px-6 sm:pb-6">
+            {canInstall && (
+              <Button
+                onClick={installPWA}
+                className="w-full bg-indigo-600 hover:bg-indigo-700"
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Cài đặt ứng dụng
+              </Button>
+            )}
             <div>
               <Popover open={isComboboxOpen} onOpenChange={setIsComboboxOpen}>
                 <PopoverTrigger asChild>
