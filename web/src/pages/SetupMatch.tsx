@@ -406,6 +406,21 @@ const SetupMatch = () => {
 
       await batch.commit();
 
+      // --- Send Notification ---
+      try {
+        const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+        await fetch(`${API_URL}/send-match-notification`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ matchId: matchRef.id }),
+        });
+      } catch (notificationError) {
+        console.error("Failed to send notification:", notificationError);
+        // Don't block the success toast for this, just log it.
+      }
+
       toast({
         title: "Thành công!",
         description: `Đã tạo trận đấu và ${shares.length} lượt thanh toán.`,

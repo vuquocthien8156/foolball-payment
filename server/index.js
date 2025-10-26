@@ -197,6 +197,88 @@ app.get("/payos-webhook", (req, res) => {
 app.post("/payos-webhook", payosWebhookHandler);
 app.put("/payos-webhook", payosWebhookHandler);
 
+app.post("/send-match-notification", async (req, res) => {
+  const { matchId } = req.body;
+
+  if (!matchId) {
+    return res.status(400).json({ error: "matchId is required" });
+  }
+
+  try {
+    const db = admin.firestore();
+    const matchDoc = await db.collection("matches").doc(matchId).get();
+    if (!matchDoc.exists) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+
+    const matchData = matchDoc.data();
+    const rostersSnapshot = await db
+      .collection("matches")
+      .doc(matchId)
+      .collection("rosters")
+      .get();
+    if (rostersSnapshot.empty) {
+      return res.status(200).json({ message: "No rosters for this match." });
+    }
+
+    const memberIds = new Set();
+    rostersSnapshot.forEach((rosterDoc) => {
+      const rosterData = rosterDoc.data();
+      if (rosterData.memberIds && Array.isArray(rosterData.memberIds)) {
+        rosterData.memberIds.forEach((id) => memberIds.add(id));
+      }
+    });
+
+    if (memberIds.size === 0) {
+      return res.status(200).json({ message: "No members found in rosters." });
+    }
+
+    const uniqueMemberIds = Array.from(memberIds);
+    const membersSnapshot = await db
+      .collection("members")
+      .where(admin.firestore.FieldPath.documentId(), "in", uniqueMemberIds)
+      .get();
+
+    const tokens = [];
+    membersSnapshot.forEach((memberDoc) => {
+      const memberData = memberDoc.data();
+      if (memberData.fcmToken) {
+        tokens.push(memberData.fcmToken);
+      }
+    });
+
+    if (tokens.length === 0) {
+      return res
+        .status(200)
+        .json({ message: "No members have subscribed to notifications." });
+    }
+
+    const dateObj = matchData.date;
+    let formattedDate = "Không rõ";
+    if (dateObj && typeof dateObj.toDate === "function") {
+      formattedDate = dateObj.toDate().toLocaleDateString("vi-VN");
+    }
+
+    const message = {
+      notification: {
+        title: "Có hóa đơn trận đấu mới!",
+        body: `Bạn có một hóa đơn mới cho trận đấu ngày ${formattedDate}. Mở ứng dụng để thanh toán ngay.`,
+      },
+      tokens: tokens,
+    };
+
+    const response = await admin.messaging().sendMulticast(message);
+    console.log("Successfully sent message:", response);
+    res.status(200).json({
+      success: true,
+      message: `Notification sent to ${response.successCount} devices.`,
+    });
+  } catch (error) {
+    console.error("Error sending notification:", error);
+    res.status(500).json({ error: "Failed to send notification" });
+  }
+});
+
 // --- Start Server ---
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);

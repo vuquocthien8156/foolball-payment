@@ -16,7 +16,10 @@ import {
   ChevronsUpDown,
   Check,
   Info,
+  Bell,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   Accordion,
   AccordionContent,
@@ -44,8 +47,11 @@ import {
   where,
   documentId,
   collectionGroup,
+  doc,
+  updateDoc,
+  getDoc,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db, requestNotificationPermission } from "@/lib/firebase";
 
 interface Member {
   id: string;
@@ -98,6 +104,8 @@ const Pay = () => {
   const [isLoadingMembers, setIsLoadingMembers] = useState(true);
   const [isLoadingShares, setIsLoadingShares] = useState(false);
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
+  const [isNotificationEnabled, setIsNotificationEnabled] = useState(false);
+  const [isUpdatingNotification, setIsUpdatingNotification] = useState(false);
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -132,6 +140,30 @@ const Pay = () => {
   }, []);
 
   useEffect(() => {
+    const checkNotificationStatus = async () => {
+      if (!selectedMemberId) {
+        setIsNotificationEnabled(false);
+        return;
+      }
+      try {
+        const memberDocRef = doc(db, "members", selectedMemberId);
+        const memberDoc = await getDoc(memberDocRef);
+        if (memberDoc.exists() && memberDoc.data().fcmToken) {
+          setIsNotificationEnabled(true);
+        } else {
+          setIsNotificationEnabled(false);
+        }
+      } catch (error) {
+        console.error("Error checking notification status:", error);
+        setIsNotificationEnabled(false);
+      }
+    };
+    if (selectedMemberId) {
+      checkNotificationStatus();
+    }
+  }, [selectedMemberId]);
+
+  useEffect(() => {
     if (!selectedMemberId) {
       setUnpaidShares([]);
       setSelectedShares([]);
@@ -140,21 +172,17 @@ const Pay = () => {
 
     const fetchUnpaidShares = async () => {
       setIsLoadingShares(true);
-      setUnpaidShares([]);
-      setSelectedShares([]);
       try {
         const sharesQuery = query(
           collectionGroup(db, "shares"),
           where("memberId", "==", selectedMemberId),
           where("status", "==", "PENDING")
         );
-
         const sharesSnapshot = await getDocs(sharesQuery);
         if (sharesSnapshot.empty) {
           setUnpaidShares([]);
           return;
         }
-
         const sharesData = sharesSnapshot.docs.map(
           (doc) =>
             ({
@@ -167,14 +195,12 @@ const Pay = () => {
               teamId: string;
             })
         );
-
         const matchIds = [...new Set(sharesData.map((share) => share.matchId))];
         if (matchIds.length === 0) {
           setUnpaidShares([]);
           setIsLoadingShares(false);
           return;
         }
-
         const matchesQuery = query(
           collection(db, "matches"),
           where(documentId(), "in", matchIds)
@@ -183,8 +209,6 @@ const Pay = () => {
         const matchesData = new Map(
           matchesSnapshot.docs.map((doc) => [doc.id, doc.data()])
         );
-
-        // Fetch rosters for all relevant matches
         const rostersPromises = matchIds.map(async (matchId) => {
           const rostersSnapshot = await getDocs(
             collection(db, "matches", matchId, "rosters")
@@ -197,16 +221,13 @@ const Pay = () => {
           );
           return { matchId, rostersData };
         });
-
         const rostersResults = await Promise.all(rostersPromises);
         const rostersByMatch = new Map(
           rostersResults.map((r) => [r.matchId, r.rostersData])
         );
-
         const sharesWithDetails = sharesData.map((share) => {
           const matchData = matchesData.get(share.matchId);
           const rostersData = rostersByMatch.get(share.matchId);
-
           const dateObj = matchData?.date;
           let formattedDate = "Không rõ";
           if (dateObj && typeof dateObj.toDate === "function") {
@@ -217,13 +238,10 @@ const Pay = () => {
               formattedDate = parsedDate.toLocaleDateString("vi-VN");
             }
           }
-
           const teamRoster = rostersData?.get(share.teamId);
           const teamMemberCount = teamRoster?.memberIds.length || 1;
           const teamPercent = matchData?.teamPercents?.[share.teamId] || 0;
-
           const teamName = matchData?.teamNames?.[share.teamId] || "";
-
           return {
             id: share.id,
             matchId: share.matchId,
@@ -236,7 +254,6 @@ const Pay = () => {
             teamMemberCount: teamMemberCount,
           };
         });
-
         setUnpaidShares(sharesWithDetails);
         setExpandedItems(sharesWithDetails.map((s) => s.id)); // Expand all by default
       } catch (error) {
@@ -311,9 +328,24 @@ const Pay = () => {
 
       const paymentLinkData = await response.json();
 
-      if (!window.PayOSCheckout) {
-        throw new Error("PayOS Checkout script not loaded yet.");
-      }
+      // Wait for the PayOS script to be ready with a timeout
+      const waitForPayOS = () =>
+        new Promise<void>((resolve, reject) => {
+          let attempts = 0;
+          const interval = setInterval(() => {
+            if (window.PayOSCheckout) {
+              clearInterval(interval);
+              resolve();
+            } else if (attempts > 10) {
+              // Wait for max 2 seconds
+              clearInterval(interval);
+              reject(new Error("PayOS Checkout script not loaded yet."));
+            }
+            attempts++;
+          }, 200);
+        });
+
+      await waitForPayOS();
 
       window.PayOSCheckout.open({
         paymentLinkId: paymentLinkData.paymentLinkId,
@@ -351,6 +383,53 @@ const Pay = () => {
       });
     } finally {
       setIsCreatingPayment(false);
+    }
+  };
+
+  const handleNotificationToggle = async (enabled: boolean) => {
+    if (!selectedMemberId) return;
+
+    setIsUpdatingNotification(true);
+    const memberDocRef = doc(db, "members", selectedMemberId);
+
+    try {
+      if (enabled) {
+        const token = await requestNotificationPermission();
+        if (token) {
+          await updateDoc(memberDocRef, { fcmToken: token });
+          setIsNotificationEnabled(true);
+          toast({
+            title: "Thành công",
+            description: "Bạn đã bật nhận thông báo.",
+          });
+        } else {
+          // User denied permission or something went wrong
+          toast({
+            title: "Lỗi",
+            description:
+              "Không thể bật thông báo. Vui lòng cấp quyền trong cài đặt trình duyệt.",
+            variant: "destructive",
+          });
+          setIsNotificationEnabled(false); // Keep switch off
+        }
+      } else {
+        await updateDoc(memberDocRef, { fcmToken: null });
+        setIsNotificationEnabled(false);
+        toast({
+          title: "Đã tắt thông báo",
+          description: "Bạn sẽ không nhận được thông báo đẩy nữa.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Error updating notification preference:", error);
+      toast({
+        title: "Lỗi",
+        description: "Không thể cập nhật cài đặt thông báo.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingNotification(false);
     }
   };
 
@@ -428,6 +507,26 @@ const Pay = () => {
                 </PopoverContent>
               </Popover>
             </div>
+
+            {selectedMemberId && (
+              <div className="flex items-center justify-between rounded-lg border p-3 sm:p-4 bg-gradient-card">
+                <div className="flex items-center space-x-3">
+                  <Bell className="h-5 w-5 text-primary" />
+                  <Label
+                    htmlFor="notification-switch"
+                    className="text-sm sm:text-base font-medium"
+                  >
+                    Nhận thông báo khi có nợ mới
+                  </Label>
+                </div>
+                <Switch
+                  id="notification-switch"
+                  checked={isNotificationEnabled}
+                  onCheckedChange={handleNotificationToggle}
+                  disabled={isUpdatingNotification}
+                />
+              </div>
+            )}
 
             {isLoadingShares && (
               <div className="flex justify-center items-center h-40">
