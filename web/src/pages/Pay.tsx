@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -328,52 +328,11 @@ const Pay = () => {
 
       const paymentLinkData = await response.json();
 
-      // Wait for the PayOS script to be ready with a timeout
-      const waitForPayOS = () =>
-        new Promise<void>((resolve, reject) => {
-          let attempts = 0;
-          const interval = setInterval(() => {
-            if (window.PayOSCheckout) {
-              clearInterval(interval);
-              resolve();
-            } else if (attempts > 10) {
-              // Wait for max 2 seconds
-              clearInterval(interval);
-              reject(new Error("PayOS Checkout script not loaded yet."));
-            }
-            attempts++;
-          }, 200);
-        });
-
-      await waitForPayOS();
-
-      window.PayOSCheckout.open({
-        paymentLinkId: paymentLinkData.paymentLinkId,
-        onSuccess: () => {
-          // This is a good place to show a success message and maybe refresh the unpaid shares list
-          toast({
-            title: "Thanh toán thành công!",
-            description: "Cảm ơn bạn đã hoàn tất thanh toán.",
-          });
-          // Refetch unpaid shares after a short delay to allow webhook to process
-          setTimeout(() => {
-            // A simple way to trigger refetch is to clear and set the memberId again
-            const currentMemberId = selectedMemberId;
-            setSelectedMemberId("");
-            setSelectedMemberId(currentMemberId);
-          }, 2000);
-        },
-        onCancel: () => {
-          toast({
-            title: "Thanh toán đã hủy",
-            description: "Bạn đã hủy giao dịch thanh toán.",
-            variant: "destructive",
-          });
-        },
-        onExit: () => {
-          console.log("PayOS Checkout exited.");
-        },
-      });
+      if (paymentLinkData.checkoutUrl) {
+        window.location.href = paymentLinkData.checkoutUrl;
+      } else {
+        throw new Error("Không tìm thấy URL thanh toán.");
+      }
     } catch (error) {
       console.error("Error creating payment link:", error);
       toast({

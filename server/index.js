@@ -5,14 +5,19 @@ const express = require("express");
 const cors = require("cors");
 const { PayOS } = require("@payos/node");
 const admin = require("firebase-admin");
+const axios = require("axios");
+const functions = require("firebase-functions");
 
 // --- Firebase Admin SDK Initialization ---
 // Ensure you have the service account key file in the `server` directory
 try {
   let serviceAccount;
   // Check if the FIREBASE_CREDENTIALS environment variable is set (for production)
-  if (process.env.FIREBASE_CREDENTIALS) {
-    // Parse the credentials from the environment variable
+  if (functions.config().adminsdk) {
+    // Use the Firebase Functions configuration
+    serviceAccount = functions.config().adminsdk;
+  } else if (process.env.FIREBASE_CREDENTIALS) {
+    // Parse the credentials from the environment variable (alternative for local/other envs)
     serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
   } else {
     // Fallback to the local service account file (for development)
@@ -43,6 +48,7 @@ app.use(cors()); // Configure this properly for production
 app.use(express.json());
 
 // --- Routes ---
+
 app.post("/create-payment-link", async (req, res) => {
   const { shareIds, memberId } = req.body;
 
@@ -280,6 +286,9 @@ app.post("/send-match-notification", async (req, res) => {
 });
 
 // --- Start Server ---
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
+// app.listen(PORT, () => {
+//   console.log(`Server is running on http://localhost:${PORT}`);
+// });
+
+// Export the Express API as a Cloud Function
+exports.api = functions.https.onRequest(app);
