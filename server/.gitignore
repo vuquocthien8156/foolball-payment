@@ -1,0 +1,11 @@
+# Dependencies
+node_modules
+
+# Environment Variables
+.env
+
+# Firebase Service Account Key
+serviceAccountKey.json
+
+# Production
+build
