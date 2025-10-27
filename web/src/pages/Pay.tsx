@@ -114,11 +114,12 @@ const Pay = () => {
     const fetchMembers = async () => {
       setIsLoadingMembers(true);
       try {
-        const membersCollectionRef = collection(db, "members");
-        const querySnapshot = await getDocs(membersCollectionRef);
-        const membersList = querySnapshot.docs.map(
-          (doc) => ({ id: doc.id, ...doc.data() } as Member)
-        );
+        const API_URL = import.meta.env.VITE_API_URL;
+        const response = await fetch(`${API_URL}/members`);
+        if (!response.ok) {
+          throw new Error("Network response was not ok");
+        }
+        const membersList = await response.json();
         setMembers(membersList);
       } catch (error) {
         console.error("Error fetching members:", error);
@@ -404,7 +405,7 @@ const Pay = () => {
               <Users className="h-7 w-7 sm:h-8 sm:w-8 text-white" />
             </div>
             <CardTitle className="text-2xl sm:text-3xl">
-              Thanh toán công nợ
+              Chia tiền sân
             </CardTitle>
             <CardDescription className="text-sm sm:text-base mt-1 sm:mt-2">
               Chọn tên của bạn để xem và thanh toán các trận chưa trả tiền.

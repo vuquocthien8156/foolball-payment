@@ -32,7 +32,25 @@ app.use(express.json());
 
 // --- Routes ---
 
-app.post("/create-payment-link", async (req, res) => {
+const apiRoutes = express.Router();
+
+apiRoutes.get("/members", async (req, res) => {
+  try {
+    const db = admin.firestore();
+    const membersCollectionRef = db.collection("members");
+    const querySnapshot = await membersCollectionRef.get();
+    const membersList = querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+    res.json(membersList);
+  } catch (error) {
+    console.error("Error fetching members:", error);
+    res.status(500).json({ error: "Failed to fetch members" });
+  }
+});
+
+apiRoutes.post("/create-payment-link", async (req, res) => {
   const { shareIds, memberId } = req.body;
 
   if (
@@ -180,13 +198,13 @@ const payosWebhookHandler = async (req, res) => {
   }
 };
 
-app.get("/payos-webhook", (req, res) => {
+apiRoutes.get("/payos-webhook", (req, res) => {
   res.status(200).send("Webhook URL is active and ready to receive data.");
 });
-app.post("/payos-webhook", payosWebhookHandler);
-app.put("/payos-webhook", payosWebhookHandler);
+apiRoutes.post("/payos-webhook", payosWebhookHandler);
+apiRoutes.put("/payos-webhook", payosWebhookHandler);
 
-app.post("/send-match-notification", async (req, res) => {
+apiRoutes.post("/send-match-notification", async (req, res) => {
   const { matchId } = req.body;
 
   if (!matchId) {
@@ -267,6 +285,9 @@ app.post("/send-match-notification", async (req, res) => {
     res.status(500).json({ error: "Failed to send notification" });
   }
 });
+
+// Mount the API router under the /api prefix
+app.use("/api", apiRoutes);
 
 // --- Start Server ---
 // app.listen(port, () => {
