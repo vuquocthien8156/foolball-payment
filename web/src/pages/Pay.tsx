@@ -9,6 +9,22 @@ import {
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   CreditCard,
   DollarSign,
   Users,
@@ -18,6 +34,7 @@ import {
   Info,
   Bell,
   Download,
+  UsersRound,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -60,6 +77,14 @@ interface Member {
   name: string;
 }
 
+interface TeamShareInfo {
+  memberId: string;
+  memberName: string;
+  amount: number;
+  reason?: string;
+  isCurrentUser: boolean;
+}
+
 interface Share {
   id: string;
   matchId: string;
@@ -71,6 +96,15 @@ interface Share {
   teamPercent: number;
   teamName: string;
   teamMemberCount: number;
+  teamShares: TeamShareInfo[];
+  calculationDetails?: {
+    memberPercent?: number;
+    teamTotal: number;
+    totalFixedAmount: number;
+    remainingAmount: number;
+    regularMemberCount: number;
+    reason?: string;
+  };
 }
 
 // Helper function to remove Vietnamese diacritics
@@ -109,6 +143,10 @@ const Pay = () => {
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
   const [isNotificationEnabled, setIsNotificationEnabled] = useState(false);
   const [isUpdatingNotification, setIsUpdatingNotification] = useState(false);
+  const [isTeamSheetOpen, setIsTeamSheetOpen] = useState(false);
+  const [selectedTeamForSheet, setSelectedTeamForSheet] = useState<
+    TeamShareInfo[]
+  >([]);
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -197,14 +235,64 @@ const Pay = () => {
               matchId: string;
               amount: number;
               teamId: string;
+              calculationDetails?: {
+                memberPercent?: number;
+                teamTotal: number;
+                totalFixedAmount: number;
+                remainingAmount: number;
+                regularMemberCount: number;
+                reason?: string;
+              };
             })
         );
-        const matchIds = [...new Set(sharesData.map((share) => share.matchId))];
+
+        const matchIds = [...new Set(sharesData.map((s) => s.matchId))];
         if (matchIds.length === 0) {
           setUnpaidShares([]);
-          setIsLoadingShares(false);
           return;
         }
+
+        // Fetch all shares for the relevant matches to build team sheets
+        const allMatchSharesQuery = query(
+          collectionGroup(db, "shares"),
+          where("matchId", "in", matchIds)
+        );
+        const allMatchSharesSnapshot = await getDocs(allMatchSharesQuery);
+        interface RawShare {
+          id: string;
+          matchId: string;
+          memberId: string;
+          teamId: string;
+          amount: number;
+          calculationDetails?: { reason?: string };
+        }
+
+        const allSharesByMatch = new Map<string, RawShare[]>();
+        allMatchSharesSnapshot.forEach((doc) => {
+          const share = { id: doc.id, ...doc.data() } as RawShare;
+          const matchShares = allSharesByMatch.get(share.matchId) || [];
+          matchShares.push(share);
+          allSharesByMatch.set(share.matchId, matchShares);
+        });
+
+        // Fetch all member names
+        const allMemberIds = [
+          ...new Set(
+            allMatchSharesSnapshot.docs.flatMap(
+              (doc) => doc.data().memberId || []
+            )
+          ),
+        ];
+        const membersQuery = query(
+          collection(db, "members"),
+          where(documentId(), "in", allMemberIds)
+        );
+        const membersSnapshot = await getDocs(membersQuery);
+        const membersMap = new Map(
+          membersSnapshot.docs.map((doc) => [doc.id, doc.data().name])
+        );
+
+        // Fetch match details
         const matchesQuery = query(
           collection(db, "matches"),
           where(documentId(), "in", matchIds)
@@ -213,39 +301,29 @@ const Pay = () => {
         const matchesData = new Map(
           matchesSnapshot.docs.map((doc) => [doc.id, doc.data()])
         );
-        const rostersPromises = matchIds.map(async (matchId) => {
-          const rostersSnapshot = await getDocs(
-            collection(db, "matches", matchId, "rosters")
-          );
-          const rostersData = new Map(
-            rostersSnapshot.docs.map((doc) => [
-              doc.id,
-              doc.data() as { memberIds: string[] },
-            ])
-          );
-          return { matchId, rostersData };
-        });
-        const rostersResults = await Promise.all(rostersPromises);
-        const rostersByMatch = new Map(
-          rostersResults.map((r) => [r.matchId, r.rostersData])
-        );
-        const sharesWithDetails = sharesData.map((share) => {
+
+        const sharesWithDetails: Share[] = sharesData.map((share) => {
           const matchData = matchesData.get(share.matchId);
-          const rostersData = rostersByMatch.get(share.matchId);
+          const teamSharesRaw = allSharesByMatch.get(share.matchId) || [];
+          const teamShares = teamSharesRaw
+            .filter((s) => s.teamId === share.teamId)
+            .map(
+              (s): TeamShareInfo => ({
+                memberId: s.memberId,
+                memberName: membersMap.get(s.memberId) || "Không rõ",
+                amount: s.amount,
+                reason: s.calculationDetails?.reason,
+                isCurrentUser: s.memberId === selectedMemberId,
+              })
+            )
+            .sort((a, b) => b.amount - a.amount);
+
           const dateObj = matchData?.date;
           let formattedDate = "Không rõ";
-          if (dateObj && typeof dateObj.toDate === "function") {
+          if (dateObj?.toDate) {
             formattedDate = dateObj.toDate().toLocaleDateString("vi-VN");
-          } else if (dateObj) {
-            const parsedDate = new Date(dateObj);
-            if (!isNaN(parsedDate.getTime())) {
-              formattedDate = parsedDate.toLocaleDateString("vi-VN");
-            }
           }
-          const teamRoster = rostersData?.get(share.teamId);
-          const teamMemberCount = teamRoster?.memberIds.length || 1;
-          const teamPercent = matchData?.teamPercents?.[share.teamId] || 0;
-          const teamName = matchData?.teamNames?.[share.teamId] || "";
+
           return {
             id: share.id,
             matchId: share.matchId,
@@ -253,9 +331,11 @@ const Pay = () => {
             matchDate: formattedDate,
             teamId: share.teamId,
             matchTotalAmount: matchData?.totalAmount || 0,
-            teamPercent: teamPercent,
-            teamName: teamName,
-            teamMemberCount: teamMemberCount,
+            teamPercent: matchData?.teamPercents?.[share.teamId] || 0,
+            teamName: matchData?.teamNames?.[share.teamId] || "Đội",
+            teamMemberCount: teamShares.length,
+            teamShares,
+            calculationDetails: share.calculationDetails,
           };
         });
         setUnpaidShares(sharesWithDetails);
@@ -576,39 +656,72 @@ const Pay = () => {
                               </div>
                             </AccordionTrigger>
                             <AccordionContent className="pt-3 sm:pt-4 pb-1 pr-1">
-                              <div className="space-y-2 text-xs sm:text-sm text-muted-foreground p-3 sm:p-4 bg-background rounded-lg border">
-                                <h4 className="font-semibold text-foreground mb-2 flex items-center gap-2 text-sm sm:text-base">
-                                  <Info className="h-4 w-4" />
-                                  Chi tiết cách tính
-                                </h4>
-                                <div className="flex justify-between">
-                                  <span>Tổng tiền sân:</span>
-                                  <span className="font-medium text-foreground">
-                                    {share.matchTotalAmount.toLocaleString()}{" "}
-                                    VND
-                                  </span>
+                              <div className="space-y-3 text-xs sm:text-sm text-muted-foreground p-3 sm:p-4 bg-background rounded-lg border">
+                                {/* Match Summary */}
+                                <div>
+                                  <h4 className="font-semibold text-foreground mb-2 flex items-center gap-2 text-sm sm:text-base">
+                                    <Info className="h-4 w-4" />
+                                    Tóm tắt trận đấu
+                                  </h4>
+                                  <div className="flex justify-between">
+                                    <span>Tổng tiền sân:</span>
+                                    <span className="font-medium text-foreground">
+                                      {share.matchTotalAmount.toLocaleString()}đ
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span>
+                                      Đội {share.teamName} ({share.teamPercent}
+                                      %):
+                                    </span>
+                                    <span className="font-medium text-foreground">
+                                      {(
+                                        (share.matchTotalAmount *
+                                          share.teamPercent) /
+                                        100
+                                      ).toLocaleString()}
+                                      đ
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="flex justify-between">
-                                  <span>
-                                    Đội {share.teamName} ({share.teamPercent}%):
-                                  </span>
-                                  <span className="font-medium text-foreground">
-                                    {(
-                                      (share.matchTotalAmount *
-                                        share.teamPercent) /
-                                      100
-                                    ).toLocaleString()}{" "}
-                                    VND
-                                  </span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span>Chia cho số người:</span>
-                                  <span className="font-medium text-foreground">
-                                    {share.teamMemberCount}
-                                  </span>
-                                </div>
+
+                                {/* Calculation Details */}
+                                {share.calculationDetails && (
+                                  <div>
+                                    <h4 className="font-semibold text-foreground my-2 flex items-center gap-2 text-sm sm:text-base">
+                                      <Users className="h-4 w-4" />
+                                      Chi tiết chia tiền
+                                    </h4>
+                                    {share.calculationDetails.reason && (
+                                      <div className="flex justify-between text-amber-600 italic">
+                                        <span>Lý do set riêng:</span>
+                                        <span className="font-medium">
+                                          {share.calculationDetails.reason}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {share.calculationDetails.memberPercent ? (
+                                      <div className="flex justify-between text-green-600">
+                                        <span>Bạn được set:</span>
+                                        <span className="font-medium">
+                                          {
+                                            share.calculationDetails
+                                              .memberPercent
+                                          }
+                                          %
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div className="flex justify-between">
+                                        <span>Bạn được chia đều</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Final Amount & Team Sheet Button */}
                                 <hr className="my-1 sm:my-2 border-dashed" />
-                                <div className="flex justify-between text-sm sm:text-base">
+                                <div className="flex justify-between items-center text-sm sm:text-base">
                                   <span className="font-semibold">
                                     Số tiền của bạn:
                                   </span>
@@ -616,6 +729,71 @@ const Pay = () => {
                                     {share.amount.toLocaleString()} VND
                                   </span>
                                 </div>
+                                <Dialog
+                                  open={isTeamSheetOpen}
+                                  onOpenChange={setIsTeamSheetOpen}
+                                >
+                                  <DialogTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="w-full mt-2"
+                                      onClick={() =>
+                                        setSelectedTeamForSheet(
+                                          share.teamShares
+                                        )
+                                      }
+                                    >
+                                      <UsersRound className="mr-2 h-4 w-4" />
+                                      Xem đội hình & Công nợ
+                                    </Button>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>
+                                        Công nợ {share.teamName} - Trận{" "}
+                                        {share.matchDate}
+                                      </DialogTitle>
+                                      <DialogDescription>
+                                        Danh sách số tiền phải trả của các thành
+                                        viên trong đội.
+                                      </DialogDescription>
+                                    </DialogHeader>
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>Thành viên</TableHead>
+                                          <TableHead>Lý do</TableHead>
+                                          <TableHead className="text-right">
+                                            Số tiền
+                                          </TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {selectedTeamForSheet.map((s) => (
+                                          <TableRow
+                                            key={s.memberId}
+                                            className={
+                                              s.isCurrentUser
+                                                ? "bg-muted/50"
+                                                : ""
+                                            }
+                                          >
+                                            <TableCell className="font-medium">
+                                              {s.memberName}
+                                            </TableCell>
+                                            <TableCell className="italic text-muted-foreground">
+                                              {s.reason}
+                                            </TableCell>
+                                            <TableCell className="text-right font-semibold">
+                                              {s.amount.toLocaleString()}đ
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  </DialogContent>
+                                </Dialog>
                               </div>
                             </AccordionContent>
                           </AccordionItem>

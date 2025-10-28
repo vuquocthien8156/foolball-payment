@@ -20,6 +20,7 @@ import {
   Loader2,
   Save,
   Search,
+  MessageSquarePlus,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -38,6 +39,8 @@ interface Member {
   name: string;
   nickname?: string;
   isCreditor?: boolean;
+  percent?: number; // Percentage of the team's total
+  reason?: string;
 }
 
 interface Team {
@@ -54,6 +57,14 @@ interface Share {
   amount: number;
   status: "PENDING" | "PAID" | "CANCELLED";
   orderCode: string;
+  calculationDetails?: {
+    memberPercent?: number;
+    reason?: string;
+    teamTotal: number;
+    totalFixedAmount: number;
+    remainingAmount: number;
+    regularMemberCount: number;
+  };
 }
 
 // Helper function to remove Vietnamese diacritics
@@ -135,9 +146,34 @@ const SetupMatch = () => {
           );
           if (!savedTeam) return { ...originalTeam, members: [] };
 
-          const newTeamMembers = savedTeam.memberIds
-            .map((id: string) => membersMap.get(id))
-            .filter(Boolean) as Member[];
+          let newTeamMembers: Member[] = [];
+          if (savedTeam.members) {
+            // New format with member objects
+            newTeamMembers = savedTeam.members
+              .map(
+                (savedMember: {
+                  id: string;
+                  percent?: number;
+                  reason?: string;
+                }) => {
+                  const member = membersMap.get(savedMember.id);
+                  if (member) {
+                    return {
+                      ...member,
+                      percent: savedMember.percent,
+                      reason: savedMember.reason,
+                    };
+                  }
+                  return null;
+                }
+              )
+              .filter(Boolean) as Member[];
+          } else if (savedTeam.memberIds) {
+            // Old format with just member IDs
+            newTeamMembers = savedTeam.memberIds
+              .map((id: string) => membersMap.get(id))
+              .filter(Boolean) as Member[];
+          }
 
           return {
             ...originalTeam,
@@ -263,6 +299,107 @@ const SetupMatch = () => {
     setTeams(teams.map((t) => (t.id === teamId ? { ...t, name: newName } : t)));
   };
 
+  const handleMemberPercentChange = (
+    teamId: string,
+    memberId: string,
+    percent: number
+  ) => {
+    setTeams((prevTeams) =>
+      prevTeams.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              members: team.members.map((member) =>
+                member.id === memberId
+                  ? { ...member, percent: isNaN(percent) ? undefined : percent }
+                  : member
+              ),
+            }
+          : team
+      )
+    );
+  };
+
+  const handleMemberReasonChange = (
+    teamId: string,
+    memberId: string,
+    reason: string
+  ) => {
+    setTeams((prevTeams) =>
+      prevTeams.map((team) =>
+        team.id === teamId
+          ? {
+              ...team,
+              members: team.members.map((member) =>
+                member.id === memberId ? { ...member, reason } : member
+              ),
+            }
+          : team
+      )
+    );
+  };
+
+  const calculatedShares = useMemo(() => {
+    const numericTotalAmount = parseFloat(totalAmount) || 0;
+    if (numericTotalAmount <= 0) return {};
+
+    const memberAmounts: { [key: string]: number } = {};
+
+    activeTeams.forEach((team) => {
+      if (team.members.length === 0) return;
+
+      const teamTotal = numericTotalAmount * (team.percent / 100);
+
+      const fixedPercentMembers = team.members.filter(
+        (m) => m.percent !== undefined && m.percent > 0
+      );
+      const regularMembers = team.members.filter(
+        (m) => m.percent === undefined || m.percent <= 0
+      );
+
+      let totalFixedAmount = 0;
+      fixedPercentMembers.forEach((member) => {
+        const memberAmount = Math.round(
+          teamTotal * ((member.percent || 0) / 100)
+        );
+        memberAmounts[member.id] = memberAmount;
+        totalFixedAmount += memberAmount;
+      });
+
+      const remainingAmount = teamTotal - totalFixedAmount;
+      if (regularMembers.length > 0 && remainingAmount >= 0) {
+        const amountPerRegularMember = Math.floor(
+          remainingAmount / regularMembers.length
+        );
+        let remainder = remainingAmount % regularMembers.length;
+
+        regularMembers.forEach((member) => {
+          const finalAmount = amountPerRegularMember + (remainder > 0 ? 1 : 0);
+          memberAmounts[member.id] = finalAmount;
+          if (remainder > 0) {
+            remainder--;
+          }
+        });
+      }
+    });
+
+    // Adjust rounding errors to match totalAmount
+    const calculatedTotal = Object.values(memberAmounts).reduce(
+      (sum, amount) => sum + amount,
+      0
+    );
+    const diff = numericTotalAmount - calculatedTotal;
+
+    if (diff !== 0 && Object.keys(memberAmounts).length > 0) {
+      const lastMemberId = Object.keys(memberAmounts).pop();
+      if (lastMemberId) {
+        memberAmounts[lastMemberId] += diff;
+      }
+    }
+
+    return memberAmounts;
+  }, [activeTeams, totalAmount]);
+
   const handleSaveConfigToDb = async () => {
     setIsSavingConfig(true);
     try {
@@ -273,7 +410,12 @@ const SetupMatch = () => {
           id: t.id,
           name: t.name,
           percent: t.percent,
-          memberIds: t.members.map((m) => m.id),
+          members: t.members.map((m) => ({
+            id: m.id,
+            // Convert undefined to null for Firestore compatibility
+            percent: m.percent === undefined ? null : m.percent,
+            reason: m.reason || null,
+          })),
         })),
       };
       const configRef = doc(db, "configs", "last_match");
@@ -333,33 +475,95 @@ const SetupMatch = () => {
       const shares: Share[] = [];
       let calculatedTotal = 0;
 
-      activeTeams.forEach((team) => {
-        if (team.members.length === 0) return;
+      for (const team of activeTeams) {
+        if (team.members.length === 0) continue;
 
         const teamTotal = numericTotalAmount * (team.percent / 100);
-        const amountPerMember = Math.floor(teamTotal / team.members.length);
-        let remainder = teamTotal % team.members.length;
 
-        team.members.forEach((member, index) => {
-          const finalAmount = amountPerMember + (remainder > 0 ? 1 : 0);
+        const fixedPercentMembers = team.members.filter(
+          (m) => m.percent !== undefined && m.percent > 0
+        );
+        const regularMembers = team.members.filter(
+          (m) => m.percent === undefined || m.percent <= 0
+        );
+
+        let totalFixedAmount = 0;
+        fixedPercentMembers.forEach((member) => {
+          const memberAmount = Math.round(
+            teamTotal * ((member.percent || 0) / 100)
+          );
           shares.push({
             memberId: member.id,
             teamId: team.id,
-            amount: finalAmount,
+            amount: memberAmount,
             status: member.isCreditor ? "PAID" : "PENDING",
-            orderCode: "", // Will be generated later
+            orderCode: "",
+            calculationDetails: {
+              memberPercent: member.percent || 0,
+              reason: member.reason,
+              teamTotal,
+              totalFixedAmount: 0, // Will be updated later for context
+              remainingAmount: 0, // Will be updated later for context
+              regularMemberCount: regularMembers.length,
+            },
           });
-          calculatedTotal += finalAmount;
-          if (remainder > 0) {
-            remainder--;
-          }
+          totalFixedAmount += memberAmount;
         });
-      });
 
-      // Adjust for rounding errors to match totalAmount
-      const diff = numericTotalAmount - calculatedTotal;
-      if (diff !== 0 && shares.length > 0) {
-        shares[shares.length - 1].amount += diff;
+        const remainingAmount = teamTotal - totalFixedAmount;
+        if (regularMembers.length > 0) {
+          if (remainingAmount < 0) {
+            toast({
+              title: "Lỗi tính toán",
+              description: `Số tiền còn lại của ${team.name} là số âm. Vui lòng kiểm tra lại %`,
+              variant: "destructive",
+            });
+            throw new Error("Negative remaining amount");
+          }
+          const amountPerRegularMember = Math.floor(
+            remainingAmount / regularMembers.length
+          );
+          let remainder = remainingAmount % regularMembers.length;
+
+          regularMembers.forEach((member) => {
+            const finalAmount =
+              amountPerRegularMember + (remainder > 0 ? 1 : 0);
+            shares.push({
+              memberId: member.id,
+              teamId: team.id,
+              amount: finalAmount,
+              status: member.isCreditor ? "PAID" : "PENDING",
+              orderCode: "",
+              calculationDetails: {
+                teamTotal,
+                totalFixedAmount,
+                remainingAmount,
+                regularMemberCount: regularMembers.length,
+              },
+            });
+            if (remainder > 0) {
+              remainder--;
+            }
+          });
+        } else if (Math.abs(remainingAmount) > 0.01) {
+          // If no regular members, adjust the last fixed member's share for rounding diffs
+          const lastFixedMemberShare = shares.find(
+            (s) =>
+              s.memberId ===
+              fixedPercentMembers[fixedPercentMembers.length - 1].id
+          );
+          if (lastFixedMemberShare) {
+            lastFixedMemberShare.amount += remainingAmount;
+          }
+        }
+      }
+
+      // Final adjustment across all shares to ensure total matches exactly
+      calculatedTotal = shares.reduce((sum, s) => sum + s.amount, 0);
+      const finalDiff = numericTotalAmount - calculatedTotal;
+      if (finalDiff !== 0 && shares.length > 0) {
+        shares.sort((a, b) => b.amount - a.amount);
+        shares[0].amount += finalDiff;
       }
 
       // --- Firestore Batch Write ---
@@ -672,13 +876,58 @@ const SetupMatch = () => {
                     key={member.id}
                     draggable
                     onDragStart={(e) => handleDragStart(e, member, team.id)}
-                    className="p-3 rounded-lg border bg-card cursor-move hover:shadow-md transition-all"
+                    className="p-3 rounded-lg border bg-card cursor-move hover:shadow-md transition-all space-y-2"
                   >
-                    <p className="font-medium">{member.name}</p>
-                    {member.nickname && (
-                      <Badge variant="secondary" className="mt-1 text-xs">
-                        {member.nickname}
-                      </Badge>
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="font-medium">{member.name}</p>
+                        {member.nickname && (
+                          <Badge variant="secondary" className="mt-1 text-xs">
+                            {member.nickname}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="font-semibold text-primary">
+                        {calculatedShares[member.id]
+                          ? `${Math.round(
+                              calculatedShares[member.id]
+                            ).toLocaleString()}đ`
+                          : "0đ"}
+                      </div>
+                    </div>
+                    <div className="relative">
+                      <Percent className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                      <Input
+                        type="number"
+                        placeholder="Chia đều"
+                        value={member.percent || ""}
+                        onChange={(e) =>
+                          handleMemberPercentChange(
+                            team.id,
+                            member.id,
+                            parseInt(e.target.value)
+                          )
+                        }
+                        className="pl-7 h-8 text-sm"
+                      />
+                    </div>
+                    {(member.percent || 0) > 0 && (
+                      <div className="relative">
+                        <MessageSquarePlus className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                        <Input
+                          type="text"
+                          placeholder="Lý do (vd: đá ít)"
+                          value={member.reason || ""}
+                          onChange={(e) =>
+                            handleMemberReasonChange(
+                              team.id,
+                              member.id,
+                              e.target.value
+                            )
+                          }
+                          className="pl-7 h-8 text-sm"
+                        />
+                      </div>
                     )}
                   </div>
                 ))}
