@@ -143,10 +143,6 @@ const Pay = () => {
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
   const [isNotificationEnabled, setIsNotificationEnabled] = useState(false);
   const [isUpdatingNotification, setIsUpdatingNotification] = useState(false);
-  const [isTeamSheetOpen, setIsTeamSheetOpen] = useState(false);
-  const [selectedTeamForSheet, setSelectedTeamForSheet] = useState<
-    TeamShareInfo[]
-  >([]);
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -729,20 +725,12 @@ const Pay = () => {
                                     {share.amount.toLocaleString()} VND
                                   </span>
                                 </div>
-                                <Dialog
-                                  open={isTeamSheetOpen}
-                                  onOpenChange={setIsTeamSheetOpen}
-                                >
+                                <Dialog>
                                   <DialogTrigger asChild>
                                     <Button
                                       variant="outline"
                                       size="sm"
                                       className="w-full mt-2"
-                                      onClick={() =>
-                                        setSelectedTeamForSheet(
-                                          share.teamShares
-                                        )
-                                      }
                                     >
                                       <UsersRound className="mr-2 h-4 w-4" />
                                       Xem đội hình & Công nợ
@@ -770,7 +758,7 @@ const Pay = () => {
                                         </TableRow>
                                       </TableHeader>
                                       <TableBody>
-                                        {selectedTeamForSheet.map((s) => (
+                                        {share.teamShares.map((s) => (
                                           <TableRow
                                             key={s.memberId}
                                             className={
