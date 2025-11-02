@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,6 +22,9 @@ import {
   Save,
   Search,
   MessageSquarePlus,
+  CheckCircle2,
+  Link as LinkIcon,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -31,15 +35,19 @@ import {
   serverTimestamp,
   setDoc,
   getDoc,
+  Timestamp,
+  updateDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
+// Interfaces
 interface Member {
   id: string;
   name: string;
   nickname?: string;
   isCreditor?: boolean;
-  percent?: number; // Percentage of the team's total
+  isExemptFromPayment?: boolean;
+  percent?: number;
   reason?: string;
 }
 
@@ -57,17 +65,30 @@ interface Share {
   amount: number;
   status: "PENDING" | "PAID" | "CANCELLED";
   orderCode: string;
-  calculationDetails?: {
-    memberPercent?: number;
-    reason?: string;
-    teamTotal: number;
-    totalFixedAmount: number;
-    remainingAmount: number;
-    regularMemberCount: number;
-  };
+  calculationDetails?: object;
 }
 
-// Helper function to remove Vietnamese diacritics
+interface SavedTeamConfig {
+  id: string;
+  name: string;
+  percent: number;
+  members?: {
+    id: string;
+    percent?: number;
+    reason?: string;
+  }[];
+  memberIds?: string[]; // For backward compatibility
+}
+
+interface MatchConfig {
+  totalAmount: string | number;
+  teamCount: 2 | 3;
+  teamsConfig: SavedTeamConfig[];
+  date?: Timestamp;
+  status?: "PENDING" | "COMPLETED";
+}
+
+// Helper
 const removeDiacritics = (str: string) => {
   return str
     .normalize("NFD")
@@ -77,15 +98,20 @@ const removeDiacritics = (str: string) => {
 };
 
 const SetupMatch = () => {
+  const { matchId } = useParams();
+  const navigate = useNavigate();
+
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [totalAmount, setTotalAmount] = useState("");
   const [teamCount, setTeamCount] = useState<2 | 3>(2);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-
   const [pool, setPool] = useState<Member[]>([]);
+  const [attendance, setAttendance] = useState<Set<string>>(new Set());
   const [teams, setTeams] = useState<Team[]>([
     { id: "A", name: "Đội A", color: "bg-blue-500", members: [], percent: 50 },
     { id: "B", name: "Đội B", color: "bg-red-500", members: [], percent: 50 },
@@ -95,27 +121,51 @@ const SetupMatch = () => {
   const activeTeams = teams.slice(0, teamCount);
   const totalPercent = activeTeams.reduce((sum, t) => sum + t.percent, 0);
 
-  const fetchMembers = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
       const membersCollectionRef = collection(db, "members");
-      const querySnapshot = await getDocs(membersCollectionRef);
-      const membersList = querySnapshot.docs.map(
-        (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          } as Member)
+      const membersSnapshot = await getDocs(membersCollectionRef);
+      const membersList = membersSnapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() } as Member)
       );
+      const membersMap = new Map(membersList.map((m) => [m.id, m]));
 
-      // Load last config from Firestore
-      const configRef = doc(db, "configs", "last_match");
-      const configSnap = await getDoc(configRef);
+      let configSource: MatchConfig | null = null;
 
-      if (configSnap.exists()) {
-        const savedConfig = configSnap.data();
-        const membersMap = new Map(membersList.map((m) => [m.id, m]));
+      if (matchId) {
+        const matchRef = doc(db, "matches", matchId);
+        const matchSnap = await getDoc(matchRef);
+        if (matchSnap.exists()) {
+          configSource = matchSnap.data() as MatchConfig;
+          const attendanceCollectionRef = collection(
+            db,
+            "matches",
+            matchId,
+            "attendance"
+          );
+          const attendanceSnapshot = await getDocs(attendanceCollectionRef);
+          const attendanceSet = new Set<string>();
+          attendanceSnapshot.forEach((doc) => attendanceSet.add(doc.id));
+          setAttendance(attendanceSet);
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Lỗi",
+            description: "Không tìm thấy trận đấu.",
+          });
+          navigate("/admin/setup");
+        }
+      } else {
+        const configRef = doc(db, "configs", "last_match");
+        const configSnap = await getDoc(configRef);
+        if (configSnap.exists()) {
+          configSource = configSnap.data() as MatchConfig;
+        }
+      }
 
+      if (configSource) {
+        const savedConfig = configSource;
         const defaultTeams = [
           {
             id: "A",
@@ -142,36 +192,27 @@ const SetupMatch = () => {
 
         const newTeams = defaultTeams.map((originalTeam) => {
           const savedTeam = savedConfig.teamsConfig.find(
-            (st: { id: string }) => st.id === originalTeam.id
+            (st) => st.id === originalTeam.id
           );
           if (!savedTeam) return { ...originalTeam, members: [] };
 
           let newTeamMembers: Member[] = [];
           if (savedTeam.members) {
-            // New format with member objects
             newTeamMembers = savedTeam.members
-              .map(
-                (savedMember: {
-                  id: string;
-                  percent?: number;
-                  reason?: string;
-                }) => {
-                  const member = membersMap.get(savedMember.id);
-                  if (member) {
-                    return {
+              .map((savedMember) => {
+                const member = membersMap.get(savedMember.id);
+                return member
+                  ? {
                       ...member,
                       percent: savedMember.percent,
                       reason: savedMember.reason,
-                    };
-                  }
-                  return null;
-                }
-              )
+                    }
+                  : null;
+              })
               .filter(Boolean) as Member[];
           } else if (savedTeam.memberIds) {
-            // Old format with just member IDs
             newTeamMembers = savedTeam.memberIds
-              .map((id: string) => membersMap.get(id))
+              .map((id) => membersMap.get(id))
               .filter(Boolean) as Member[];
           }
 
@@ -188,53 +229,30 @@ const SetupMatch = () => {
         );
         const newPool = membersList.filter((m) => !membersInNewTeams.has(m.id));
 
-        setTotalAmount(savedConfig.totalAmount || "");
+        setTotalAmount(
+          savedConfig.totalAmount ? savedConfig.totalAmount.toString() : ""
+        );
         setTeamCount(savedConfig.teamCount || 2);
         setTeams(newTeams);
         setPool(newPool);
       } else {
-        // If no saved config, just load the members into the pool
         setPool(membersList);
-        // And reset teams to default state
-        setTeams([
-          {
-            id: "A",
-            name: "Đội A",
-            color: "bg-blue-500",
-            members: [],
-            percent: 50,
-          },
-          {
-            id: "B",
-            name: "Đội B",
-            color: "bg-red-500",
-            members: [],
-            percent: 50,
-          },
-          {
-            id: "C",
-            name: "Đội C",
-            color: "bg-yellow-500",
-            members: [],
-            percent: 0,
-          },
-        ]);
       }
     } catch (error) {
-      console.error("Error fetching members: ", error);
+      console.error("Error fetching data: ", error);
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Could not fetch members from the database.",
+        description: "Could not fetch data.",
       });
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [matchId, navigate]);
 
   useEffect(() => {
-    fetchMembers();
-  }, [fetchMembers]);
+    fetchData();
+  }, [fetchData]);
 
   const handleDragStart = (
     e: React.DragEvent,
@@ -250,32 +268,23 @@ const SetupMatch = () => {
     const member: Member = JSON.parse(e.dataTransfer.getData("member"));
     const source = e.dataTransfer.getData("source");
 
-    if (targetTeamId !== "pool") {
-      const isAlreadyInATeam = teams.some((team) =>
-        team.members.some((m) => m.id === member.id)
-      );
-      if (isAlreadyInATeam && source === "pool") {
-        toast({
-          title: "Thành viên đã có trong đội",
-          description: `${member.name} đã được phân vào một đội khác.`,
-          variant: "destructive",
-        });
-        return;
-      }
+    if (
+      targetTeamId !== "pool" &&
+      source === "pool" &&
+      teams.some((team) => team.members.some((m) => m.id === member.id))
+    ) {
+      toast({ title: "Thành viên đã có trong đội", variant: "destructive" });
+      return;
     }
 
-    let nextPool = pool;
-    let nextTeams = teams;
-
-    if (source === "pool") {
-      nextPool = pool.filter((m) => m.id !== member.id);
-    } else {
-      nextTeams = teams.map((t) =>
-        t.id === source
-          ? { ...t, members: t.members.filter((m) => m.id !== member.id) }
-          : t
-      );
-    }
+    let nextPool = teams.some((t) => t.id === source)
+      ? pool
+      : pool.filter((m) => m.id !== member.id);
+    let nextTeams = teams.map((t) =>
+      t.id === source
+        ? { ...t, members: t.members.filter((m) => m.id !== member.id) }
+        : t
+    );
 
     if (targetTeamId === "pool") {
       nextPool = [...nextPool, member];
@@ -304,18 +313,18 @@ const SetupMatch = () => {
     memberId: string,
     percent: number
   ) => {
-    setTeams((prevTeams) =>
-      prevTeams.map((team) =>
-        team.id === teamId
+    setTeams((prev) =>
+      prev.map((t) =>
+        t.id === teamId
           ? {
-              ...team,
-              members: team.members.map((member) =>
-                member.id === memberId
-                  ? { ...member, percent: isNaN(percent) ? undefined : percent }
-                  : member
+              ...t,
+              members: t.members.map((m) =>
+                m.id === memberId
+                  ? { ...m, percent: isNaN(percent) ? undefined : percent }
+                  : m
               ),
             }
-          : team
+          : t
       )
     );
   };
@@ -325,16 +334,16 @@ const SetupMatch = () => {
     memberId: string,
     reason: string
   ) => {
-    setTeams((prevTeams) =>
-      prevTeams.map((team) =>
-        team.id === teamId
+    setTeams((prev) =>
+      prev.map((t) =>
+        t.id === teamId
           ? {
-              ...team,
-              members: team.members.map((member) =>
-                member.id === memberId ? { ...member, reason } : member
+              ...t,
+              members: t.members.map((m) =>
+                m.id === memberId ? { ...m, reason } : m
               ),
             }
-          : team
+          : t
       )
     );
   };
@@ -342,22 +351,21 @@ const SetupMatch = () => {
   const calculatedShares = useMemo(() => {
     const numericTotalAmount = parseFloat(totalAmount) || 0;
     if (numericTotalAmount <= 0) return {};
-
     const memberAmounts: { [key: string]: number } = {};
 
     activeTeams.forEach((team) => {
       if (team.members.length === 0) return;
-
       const teamTotal = numericTotalAmount * (team.percent / 100);
-
       const fixedPercentMembers = team.members.filter(
-        (m) => m.percent !== undefined && m.percent > 0
+        (m) =>
+          !m.isExemptFromPayment && m.percent !== undefined && m.percent > 0
       );
       const regularMembers = team.members.filter(
-        (m) => m.percent === undefined || m.percent <= 0
+        (m) =>
+          !m.isExemptFromPayment && (m.percent === undefined || m.percent <= 0)
       );
-
       let totalFixedAmount = 0;
+
       fixedPercentMembers.forEach((member) => {
         const memberAmount = Math.round(
           teamTotal * ((member.percent || 0) / 100)
@@ -368,35 +376,26 @@ const SetupMatch = () => {
 
       const remainingAmount = teamTotal - totalFixedAmount;
       if (regularMembers.length > 0 && remainingAmount >= 0) {
-        const amountPerRegularMember = Math.floor(
+        const amountPerRegular = Math.floor(
           remainingAmount / regularMembers.length
         );
         let remainder = remainingAmount % regularMembers.length;
-
         regularMembers.forEach((member) => {
-          const finalAmount = amountPerRegularMember + (remainder > 0 ? 1 : 0);
-          memberAmounts[member.id] = finalAmount;
-          if (remainder > 0) {
-            remainder--;
-          }
+          memberAmounts[member.id] =
+            amountPerRegular + (remainder-- > 0 ? 1 : 0);
         });
       }
     });
 
-    // Adjust rounding errors to match totalAmount
     const calculatedTotal = Object.values(memberAmounts).reduce(
       (sum, amount) => sum + amount,
       0
     );
     const diff = numericTotalAmount - calculatedTotal;
-
     if (diff !== 0 && Object.keys(memberAmounts).length > 0) {
       const lastMemberId = Object.keys(memberAmounts).pop();
-      if (lastMemberId) {
-        memberAmounts[lastMemberId] += diff;
-      }
+      if (lastMemberId) memberAmounts[lastMemberId] += diff;
     }
-
     return memberAmounts;
   }, [activeTeams, totalAmount]);
 
@@ -412,32 +411,106 @@ const SetupMatch = () => {
           percent: t.percent,
           members: t.members.map((m) => ({
             id: m.id,
-            // Convert undefined to null for Firestore compatibility
             percent: m.percent === undefined ? null : m.percent,
             reason: m.reason || null,
           })),
         })),
       };
-      const configRef = doc(db, "configs", "last_match");
-      await setDoc(configRef, configToSave);
+      await setDoc(doc(db, "configs", "last_match"), configToSave);
       toast({
         title: "Đã lưu!",
         description: "Cấu hình trận đấu đã được lưu.",
       });
     } catch (e) {
-      console.error("Could not save config to Firestore", e);
       toast({
         variant: "destructive",
         title: "Lỗi",
-        description: "Không thể lưu cấu hình vào cơ sở dữ liệu.",
+        description: "Không thể lưu cấu hình.",
       });
     } finally {
       setIsSavingConfig(false);
     }
   };
 
+  const handleUpdateMatchConfig = async () => {
+    if (!matchId) return;
+    setIsUpdatingConfig(true);
+    try {
+      const matchRef = doc(db, "matches", matchId);
+      const matchData = {
+        date: new Date(date),
+        totalAmount: parseFloat(totalAmount) || 0,
+        teamCount,
+        teamsConfig: activeTeams.map((t) => ({
+          id: t.id,
+          name: t.name,
+          percent: t.percent,
+          members: t.members.map((m) => ({
+            id: m.id,
+            percent: m.percent,
+            reason: m.reason,
+          })),
+        })),
+        updatedAt: serverTimestamp(),
+      };
+      await updateDoc(matchRef, matchData);
+      toast({
+        title: "Đã lưu!",
+        description: "Cấu hình và đội hình đã được lưu.",
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể lưu cấu hình.",
+      });
+    } finally {
+      setIsUpdatingConfig(false);
+    }
+  };
+
+  const handleCreateMatchForAttendance = async () => {
+    setIsCreating(true);
+    try {
+      const matchRef = doc(collection(db, "matches"));
+      const matchData = {
+        date: new Date(date),
+        totalAmount: parseFloat(totalAmount) || 0,
+        teamCount,
+        status: "PENDING",
+        createdAt: serverTimestamp(),
+        teamsConfig: activeTeams.map((t) => ({
+          id: t.id,
+          name: t.name,
+          percent: t.percent,
+          members: t.members.map((m) => ({
+            id: m.id,
+            percent: m.percent,
+            reason: m.reason,
+          })),
+        })),
+      };
+      await setDoc(matchRef, matchData);
+      const attendanceLink = `${window.location.origin}/attendance`;
+      navigator.clipboard.writeText(attendanceLink);
+      toast({
+        title: "Tạo thành công!",
+        description:
+          "Đã tạo trận điểm danh. Link điểm danh chung đã được sao chép.",
+      });
+      navigate(`/admin/setup/${matchRef.id}`);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể tạo trận đấu.",
+      });
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   const handleSave = async () => {
-    // Validations
     if (totalPercent !== 100) {
       toast({
         title: "Lỗi phân chia",
@@ -455,39 +528,37 @@ const SetupMatch = () => {
       });
       return;
     }
-    for (const team of activeTeams) {
-      if (team.percent > 0 && team.members.length === 0) {
-        toast({
-          title: "Lỗi đội hình",
-          description: `${team.name} có phần trăm > 0 nhưng chưa có thành viên`,
-          variant: "destructive",
-        });
-        return;
-      }
+    if (activeTeams.some((t) => t.percent > 0 && t.members.length === 0)) {
+      toast({
+        title: "Lỗi đội hình",
+        description: "Đội có phần trăm > 0 phải có thành viên",
+        variant: "destructive",
+      });
+      return;
     }
 
     setIsSaving(true);
     try {
-      // Also save the config to DB when creating a match
       await handleSaveConfigToDb();
-
-      // --- Money Calculation Logic ---
       const shares: Share[] = [];
-      let calculatedTotal = 0;
+      const teamNames = activeTeams.reduce(
+        (acc, t) => ({ ...acc, [t.id]: t.name }),
+        {}
+      );
 
-      for (const team of activeTeams) {
-        if (team.members.length === 0) continue;
-
+      activeTeams.forEach((team) => {
+        if (team.members.length === 0) return;
         const teamTotal = numericTotalAmount * (team.percent / 100);
-
         const fixedPercentMembers = team.members.filter(
           (m) => m.percent !== undefined && m.percent > 0
         );
         const regularMembers = team.members.filter(
-          (m) => m.percent === undefined || m.percent <= 0
+          (m) =>
+            !m.isExemptFromPayment &&
+            (m.percent === undefined || m.percent <= 0)
         );
-
         let totalFixedAmount = 0;
+
         fixedPercentMembers.forEach((member) => {
           const memberAmount = Math.round(
             teamTotal * ((member.percent || 0) / 100)
@@ -496,144 +567,104 @@ const SetupMatch = () => {
             memberId: member.id,
             teamId: team.id,
             amount: memberAmount,
-            status: member.isCreditor ? "PAID" : "PENDING",
-            orderCode: "",
+            status: "PENDING",
+            orderCode: "", // Will be generated by server
             calculationDetails: {
-              memberPercent: member.percent || 0,
+              memberPercent: member.percent,
               reason: member.reason,
               teamTotal,
-              totalFixedAmount: 0, // Will be updated later for context
-              remainingAmount: 0, // Will be updated later for context
-              regularMemberCount: regularMembers.length,
+              teamName: team.name,
             },
           });
           totalFixedAmount += memberAmount;
         });
 
         const remainingAmount = teamTotal - totalFixedAmount;
-        if (regularMembers.length > 0) {
-          if (remainingAmount < 0) {
-            toast({
-              title: "Lỗi tính toán",
-              description: `Số tiền còn lại của ${team.name} là số âm. Vui lòng kiểm tra lại %`,
-              variant: "destructive",
-            });
-            throw new Error("Negative remaining amount");
-          }
-          const amountPerRegularMember = Math.floor(
+        if (regularMembers.length > 0 && remainingAmount >= 0) {
+          const amountPerRegular = Math.floor(
             remainingAmount / regularMembers.length
           );
           let remainder = remainingAmount % regularMembers.length;
-
           regularMembers.forEach((member) => {
-            const finalAmount =
-              amountPerRegularMember + (remainder > 0 ? 1 : 0);
+            const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
             shares.push({
               memberId: member.id,
               teamId: team.id,
-              amount: finalAmount,
-              status: member.isCreditor ? "PAID" : "PENDING",
+              amount: memberAmount,
+              status: "PENDING",
               orderCode: "",
               calculationDetails: {
                 teamTotal,
+                teamName: team.name,
                 totalFixedAmount,
                 remainingAmount,
                 regularMemberCount: regularMembers.length,
               },
             });
-            if (remainder > 0) {
-              remainder--;
-            }
           });
-        } else if (Math.abs(remainingAmount) > 0.01) {
-          // If no regular members, adjust the last fixed member's share for rounding diffs
-          const lastFixedMemberShare = shares.find(
-            (s) =>
-              s.memberId ===
-              fixedPercentMembers[fixedPercentMembers.length - 1].id
-          );
-          if (lastFixedMemberShare) {
-            lastFixedMemberShare.amount += remainingAmount;
-          }
         }
+      });
+
+      // Recalculate total and adjust for rounding errors
+      const calculatedTotal = shares.reduce((sum, s) => sum + s.amount, 0);
+      const diff = numericTotalAmount - calculatedTotal;
+      if (diff !== 0 && shares.length > 0) {
+        shares[shares.length - 1].amount += diff;
       }
 
-      // Final adjustment across all shares to ensure total matches exactly
-      calculatedTotal = shares.reduce((sum, s) => sum + s.amount, 0);
-      const finalDiff = numericTotalAmount - calculatedTotal;
-      if (finalDiff !== 0 && shares.length > 0) {
-        shares.sort((a, b) => b.amount - a.amount);
-        shares[0].amount += finalDiff;
-      }
-
-      // --- Firestore Batch Write ---
+      const matchRef = matchId
+        ? doc(db, "matches", matchId)
+        : doc(collection(db, "matches"));
       const batch = writeBatch(db);
 
-      // 1. Create match document
-      const matchRef = doc(collection(db, "matches"));
-      const teamPercents = activeTeams.reduce((acc, team) => {
-        acc[team.id] = team.percent;
-        return acc;
-      }, {} as { [key: string]: number });
-      const teamNames = activeTeams.reduce((acc, team) => {
-        acc[team.id] = team.name;
-        return acc;
-      }, {} as { [key: string]: string });
-
-      batch.set(matchRef, {
-        date: new Date(date),
-        totalAmount: numericTotalAmount,
-        teamCount: teamCount,
-        teamPercents: teamPercents,
-        teamNames: teamNames,
-        createdAt: serverTimestamp(),
-      });
-
-      // 2. Create roster documents
-      activeTeams.forEach((team) => {
-        const rosterRef = doc(db, "matches", matchRef.id, "rosters", team.id);
-        batch.set(rosterRef, {
-          memberIds: team.members.map((m) => m.id),
-        });
-      });
-
-      // 3. Create share documents
-      shares.forEach((share) => {
-        const shareRef = doc(collection(db, "matches", matchRef.id, "shares"));
-        batch.set(shareRef, {
-          ...share,
-          matchId: matchRef.id,
-          orderCode: `MATCH_${matchRef.id}_MEM_${share.memberId}`,
+      batch.set(
+        matchRef,
+        {
+          date: new Date(date),
+          totalAmount: numericTotalAmount,
+          teamCount,
+          teamsConfig: activeTeams.map((t) => ({
+            id: t.id,
+            name: t.name,
+            percent: t.percent,
+            members: t.members.map((m) => ({
+              id: m.id,
+              percent: m.percent,
+              reason: m.reason,
+            })),
+          })),
+          status: "COMPLETED",
           createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // Delete existing shares if updating a match
+      if (matchId) {
+        const existingSharesQuery = collection(
+          db,
+          "matches",
+          matchId,
+          "shares"
+        );
+        const existingSharesSnapshot = await getDocs(existingSharesQuery);
+        existingSharesSnapshot.forEach((doc) => {
+          batch.delete(doc.ref);
         });
+      }
+
+      shares.forEach((share) => {
+        const shareRef = doc(collection(matchRef, "shares"));
+        batch.set(shareRef, { ...share, createdAt: serverTimestamp() });
       });
 
       await batch.commit();
-
-      // --- Send Notification ---
-      try {
-        const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
-        await fetch(`${API_URL}/send-match-notification`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ matchId: matchRef.id }),
-        });
-      } catch (notificationError) {
-        console.error("Failed to send notification:", notificationError);
-        // Don't block the success toast for this, just log it.
-      }
-
-      toast({
-        title: "Thành công!",
-        description: `Đã tạo trận đấu và ${shares.length} lượt thanh toán.`,
-      });
+      toast({ title: "Thành công!", description: `Đã xử lý trận đấu.` });
     } catch (error) {
-      console.error("Error saving match:", error);
       toast({
         title: "Lỗi!",
-        description: "Không thể lưu trận đấu. Vui lòng thử lại.",
+        description: "Không thể lưu trận đấu.",
         variant: "destructive",
       });
     } finally {
@@ -641,33 +672,65 @@ const SetupMatch = () => {
     }
   };
 
-  const copyLink = () => {
-    navigator.clipboard.writeText(`${window.location.origin}/pay`);
+  const copyLink = (link: string, message: string) => {
+    navigator.clipboard.writeText(link);
+    toast({ title: "Đã sao chép!", description: message });
+  };
+
+  const handleLoadAttendance = () => {
+    const attendingMembers = pool.filter((m) => attendance.has(m.id));
+    if (attendingMembers.length === 0) {
+      toast({ title: "Không có ai điểm danh" });
+      return;
+    }
+    const remainingInPool = pool.filter((m) => !attendance.has(m.id));
+    setTeams((currentTeams) => {
+      const teamA = currentTeams.find((t) => t.id === "A");
+      if (!teamA) return currentTeams;
+      const newMembersForTeamA = attendingMembers.filter(
+        (am) => !teamA.members.some((tm) => tm.id === am.id)
+      );
+      const updatedTeamA = {
+        ...teamA,
+        members: [...teamA.members, ...newMembersForTeamA],
+      };
+      return currentTeams.map((t) => (t.id === "A" ? updatedTeamA : t));
+    });
+    setPool(remainingInPool);
     toast({
-      title: "Đã sao chép!",
-      description: "Link thanh toán chung đã được sao chép.",
+      title: "Tải thành công!",
+      description: `Đã thêm ${attendingMembers.length} thành viên vào Đội A.`,
+    });
+  };
+
+  const handleReset = () => {
+    const membersInTeams = teams.flatMap((t) => t.members);
+    const newPool = [...pool, ...membersInTeams];
+    const resetTeams = teams.map((t) => ({ ...t, members: [] }));
+
+    setPool(newPool);
+    setTeams(resetTeams);
+
+    toast({
+      title: "Đã reset!",
+      description: "Tất cả thành viên đã được đưa về danh sách.",
     });
   };
 
   const filteredPool = useMemo(() => {
-    if (!searchQuery) {
-      return pool;
-    }
+    if (!searchQuery) return pool;
     const lowerCaseQuery = removeDiacritics(searchQuery.toLowerCase());
     return pool.filter(
-      (member) =>
-        removeDiacritics(member.name.toLowerCase()).includes(lowerCaseQuery) ||
-        (member.nickname &&
-          removeDiacritics(member.nickname.toLowerCase()).includes(
-            lowerCaseQuery
-          ))
+      (m) =>
+        removeDiacritics(m.name.toLowerCase()).includes(lowerCaseQuery) ||
+        (m.nickname &&
+          removeDiacritics(m.nickname.toLowerCase()).includes(lowerCaseQuery))
     );
   }, [pool, searchQuery]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
       <div className="container mx-auto px-4 py-8 max-w-7xl">
-        {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
             <div className="p-3 bg-gradient-pitch rounded-xl shadow-card">
@@ -675,16 +738,17 @@ const SetupMatch = () => {
             </div>
             <div>
               <h1 className="text-3xl font-bold text-foreground">
-                Tạo trận đấu mới
+                {matchId ? "Chỉnh sửa trận đấu" : "Tạo trận đấu mới"}
               </h1>
               <p className="text-muted-foreground">
-                Phân chia đội và tính tiền tự động
+                {matchId
+                  ? `ID: ${matchId}`
+                  : "Phân chia đội và tính tiền tự động"}
               </p>
             </div>
           </div>
         </div>
 
-        {/* Match Info */}
         <Card className="mb-6 shadow-card">
           <CardHeader>
             <CardTitle>Thông tin trận đấu</CardTitle>
@@ -703,7 +767,6 @@ const SetupMatch = () => {
                 />
               </div>
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="teamCount">Số đội</Label>
               <div className="flex gap-2">
@@ -723,7 +786,6 @@ const SetupMatch = () => {
                 </Button>
               </div>
             </div>
-
             <div className="space-y-2">
               <Label htmlFor="total">Tổng tiền (VND)</Label>
               <div className="relative">
@@ -738,7 +800,6 @@ const SetupMatch = () => {
                 />
               </div>
             </div>
-
             <div className="space-y-2">
               <Label>Tổng phần trăm</Label>
               <div className="flex items-center gap-2 h-10">
@@ -753,7 +814,6 @@ const SetupMatch = () => {
           </CardContent>
         </Card>
 
-        {/* Team Percentages */}
         <Card className="mb-6 shadow-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -798,9 +858,7 @@ const SetupMatch = () => {
           </CardContent>
         </Card>
 
-        {/* Drag & Drop Board */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
-          {/* Pool */}
           <Card
             className="shadow-card"
             onDragOver={(e) => e.preventDefault()}
@@ -811,6 +869,20 @@ const SetupMatch = () => {
                 <Users className="h-5 w-5" />
                 Danh sách ({filteredPool.length})
               </CardTitle>
+              <CardDescription>
+                Có {attendance.size} thành viên đã điểm danh.
+              </CardDescription>
+              <div className="flex flex-wrap gap-2 mt-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleReset}
+                  className="w-full"
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Reset Đội
+                </Button>
+              </div>
               <div className="relative pt-2">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -834,19 +906,25 @@ const SetupMatch = () => {
                     onDragStart={(e) => handleDragStart(e, member, "pool")}
                     className="p-3 rounded-lg border bg-card cursor-move hover:shadow-md transition-all"
                   >
-                    <p className="font-medium">{member.name}</p>
-                    {member.nickname && (
-                      <Badge variant="secondary" className="mt-1 text-xs">
-                        {member.nickname}
-                      </Badge>
-                    )}
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="font-medium">{member.name}</p>
+                        {member.nickname && (
+                          <Badge variant="secondary" className="mt-1 text-xs">
+                            {member.nickname}
+                          </Badge>
+                        )}
+                      </div>
+                      {attendance.has(member.id) && (
+                        <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
+                      )}
+                    </div>
                   </div>
                 ))
               )}
             </CardContent>
           </Card>
 
-          {/* Teams */}
           {activeTeams.map((team) => (
             <Card
               key={team.id}
@@ -887,6 +965,9 @@ const SetupMatch = () => {
                           </Badge>
                         )}
                       </div>
+                      {attendance.has(member.id) && (
+                        <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
+                      )}
                       <div className="font-semibold text-primary">
                         {calculatedShares[member.id]
                           ? `${Math.round(
@@ -895,39 +976,50 @@ const SetupMatch = () => {
                           : "0đ"}
                       </div>
                     </div>
-                    <div className="relative">
-                      <Percent className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                      <Input
-                        type="number"
-                        placeholder="Chia đều"
-                        value={member.percent || ""}
-                        onChange={(e) =>
-                          handleMemberPercentChange(
-                            team.id,
-                            member.id,
-                            parseInt(e.target.value)
-                          )
-                        }
-                        className="pl-7 h-8 text-sm"
-                      />
-                    </div>
-                    {(member.percent || 0) > 0 && (
-                      <div className="relative">
-                        <MessageSquarePlus className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                        <Input
-                          type="text"
-                          placeholder="Lý do (vd: đá ít)"
-                          value={member.reason || ""}
-                          onChange={(e) =>
-                            handleMemberReasonChange(
-                              team.id,
-                              member.id,
-                              e.target.value
-                            )
-                          }
-                          className="pl-7 h-8 text-sm"
-                        />
-                      </div>
+                    {member.isExemptFromPayment ? (
+                      <Badge
+                        variant="outline"
+                        className="w-full justify-center"
+                      >
+                        Miễn chia tiền
+                      </Badge>
+                    ) : (
+                      <>
+                        <div className="relative">
+                          <Percent className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                          <Input
+                            type="number"
+                            placeholder="Chia đều"
+                            value={member.percent || ""}
+                            onChange={(e) =>
+                              handleMemberPercentChange(
+                                team.id,
+                                member.id,
+                                parseInt(e.target.value)
+                              )
+                            }
+                            className="pl-7 h-8 text-sm"
+                          />
+                        </div>
+                        {(member.percent || 0) > 0 && (
+                          <div className="relative">
+                            <MessageSquarePlus className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                            <Input
+                              type="text"
+                              placeholder="Lý do (vd: đá ít)"
+                              value={member.reason || ""}
+                              onChange={(e) =>
+                                handleMemberReasonChange(
+                                  team.id,
+                                  member.id,
+                                  e.target.value
+                                )
+                              }
+                              className="pl-7 h-8 text-sm"
+                            />
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 ))}
@@ -936,11 +1028,46 @@ const SetupMatch = () => {
           ))}
         </div>
 
-        {/* Actions */}
         <div className="flex flex-col sm:flex-row gap-4 justify-end">
-          <Button variant="outline" onClick={copyLink} disabled={isSaving}>
+          <Button
+            variant="outline"
+            onClick={() =>
+              copyLink(
+                `${window.location.origin}/pay`,
+                "Link thanh toán chung đã được sao chép."
+              )
+            }
+            disabled={isSaving}
+          >
             <Copy className="h-4 w-4 mr-2" />
-            Sao chép link thanh toán
+            Sao chép link thanh toán chung
+          </Button>
+          {matchId && (
+            <Button
+              onClick={handleUpdateMatchConfig}
+              disabled={isUpdatingConfig || isSaving}
+              variant="secondary"
+            >
+              {isUpdatingConfig ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
+              Lưu Đội Hình
+            </Button>
+          )}
+          <Button
+            onClick={handleCreateMatchForAttendance}
+            disabled={isCreating || !!matchId}
+            variant="default"
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            {isCreating ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <LinkIcon className="h-4 w-4 mr-2" />
+            )}
+            Tạo & Lấy Link Điểm Danh
           </Button>
           <Button
             onClick={handleSaveConfigToDb}
@@ -960,6 +1087,8 @@ const SetupMatch = () => {
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Đang lưu...
               </>
+            ) : matchId ? (
+              "Cập nhật & Tính tiền"
             ) : (
               "Tính tiền & Lưu trận"
             )}

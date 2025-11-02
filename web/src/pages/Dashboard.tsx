@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Card,
   CardContent,
@@ -8,6 +8,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -29,6 +34,10 @@ import {
   Loader2,
   Trash2,
   Search,
+  ClipboardList,
+  Calculator,
+  Send,
+  Pencil,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -62,6 +71,7 @@ interface Match {
   id: string;
   date: Timestamp | string;
   totalAmount: number;
+  status: "PENDING" | "COMPLETED" | "PUBLISHED";
   teamNames?: { [key: string]: string };
 }
 
@@ -86,6 +96,7 @@ interface MatchListItemProps {
   isSelected: boolean;
   onSelect: () => void;
   onDelete: () => void;
+  onEdit: () => void;
 }
 
 const MatchListItem = ({
@@ -93,6 +104,7 @@ const MatchListItem = ({
   isSelected,
   onSelect,
   onDelete,
+  onEdit,
 }: MatchListItemProps) => {
   const [stats, setStats] = useState({
     paidAmount: 0,
@@ -126,6 +138,11 @@ const MatchListItem = ({
     typeof match.date === "string" ? match.date : match.date.toDate()
   ).toLocaleDateString("vi-VN");
 
+  const isFullyPaid =
+    !stats.isLoading &&
+    stats.totalShares > 0 &&
+    stats.paidCount === stats.totalShares;
+
   return (
     <div
       className={cn(
@@ -134,7 +151,31 @@ const MatchListItem = ({
       )}
     >
       <button onClick={onSelect} className="flex-grow text-left space-y-1">
-        <p className="font-semibold">Trận ngày {date}</p>
+        <div className="flex items-center justify-between">
+          <p className="font-semibold">Trận ngày {date}</p>
+          {match.status && (
+            <Tooltip>
+              <TooltipTrigger>
+                {match.status === "PUBLISHED" ? (
+                  <Send className="h-5 w-5 text-sky-500" />
+                ) : match.status === "COMPLETED" ? (
+                  <Calculator className="h-5 w-5 text-amber-500" />
+                ) : (
+                  <ClipboardList className="h-5 w-5 text-muted-foreground" />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>
+                  {match.status === "PUBLISHED"
+                    ? "Đã công khai"
+                    : match.status === "COMPLETED"
+                    ? "Đã tính tiền"
+                    : "Đang điểm danh"}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+        </div>
         <p className="text-sm opacity-80">
           Tổng: {match.totalAmount.toLocaleString()} VND
         </p>
@@ -149,24 +190,54 @@ const MatchListItem = ({
           </>
         )}
       </button>
-      <AlertDialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "flex-shrink-0 rounded-full w-8 h-8",
-            isSelected
-              ? "hover:bg-primary-foreground/10 text-primary-foreground"
-              : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </AlertDialogTrigger>
+      <div className="flex items-center flex-shrink-0">
+        {!isFullyPaid && (
+          <>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "rounded-full w-8 h-8",
+                    isSelected
+                      ? "hover:bg-primary-foreground/10 text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit();
+                  }}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      "rounded-full w-8 h-8",
+                      isSelected
+                        ? "hover:bg-primary-foreground/10 text-primary-foreground"
+                        : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete();
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+              </TooltipTrigger>
+            </Tooltip>
+          </>
+        )}
+      </div>
     </div>
   );
 };
@@ -189,6 +260,7 @@ const Dashboard = () => {
     null
   );
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   // Effect to handle navigation from notifications
   useEffect(() => {
@@ -313,8 +385,6 @@ const Dashboard = () => {
             } as Match)
         );
         setMatches(matchesList);
-        // Automatically select the first match if no match is selected yet
-        // AND no specific match is requested via URL params.
         if (
           !selectedMatchId &&
           matchesList.length > 0 &&
@@ -366,22 +436,31 @@ const Dashboard = () => {
     });
 
     return () => unsubscribe();
-  }, [selectedMatchId]);
+  }, [selectedMatchId, matches]);
 
-  const { totalAmount, paidAmount, pendingAmount, paidCount, totalShares } =
-    useMemo(() => {
-      const total = shares.reduce((sum, s) => sum + s.amount, 0);
-      const paid = shares
-        .filter((s) => s.status === "PAID")
-        .reduce((sum, s) => sum + s.amount, 0);
-      return {
-        totalAmount: total,
-        paidAmount: paid,
-        pendingAmount: total - paid,
-        paidCount: shares.filter((s) => s.status === "PAID").length,
-        totalShares: shares.length,
-      };
-    }, [shares]);
+  const {
+    totalAmount,
+    paidAmount,
+    pendingAmount,
+    paidCount,
+    totalShares,
+    isFullyPaid,
+  } = useMemo(() => {
+    const total = shares.reduce((sum, s) => sum + s.amount, 0);
+    const paid = shares
+      .filter((s) => s.status === "PAID")
+      .reduce((sum, s) => sum + s.amount, 0);
+    const paidCountNum = shares.filter((s) => s.status === "PAID").length;
+    const totalSharesNum = shares.length;
+    return {
+      totalAmount: total,
+      paidAmount: paid,
+      pendingAmount: total - paid,
+      paidCount: paidCountNum,
+      totalShares: totalSharesNum,
+      isFullyPaid: totalSharesNum > 0 && paidCountNum === totalSharesNum,
+    };
+  }, [shares]);
 
   const copyLink = () => {
     navigator.clipboard.writeText(`${window.location.origin}/pay`);
@@ -389,6 +468,29 @@ const Dashboard = () => {
       title: "Đã sao chép!",
       description: "Link thanh toán chung đã được sao chép.",
     });
+  };
+
+  const handleUpdateMatchStatus = async (
+    newStatus: "PUBLISHED" | "COMPLETED"
+  ) => {
+    if (!selectedMatchId) return;
+    const matchRef = doc(db, "matches", selectedMatchId);
+    try {
+      await updateDoc(matchRef, { status: newStatus });
+      toast({
+        title: "Thành công",
+        description: `Đã cập nhật trạng thái trận đấu thành ${
+          newStatus === "PUBLISHED" ? "Công khai" : "Đã tính tiền"
+        }.`,
+      });
+    } catch (error) {
+      console.error("Error updating match status:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể cập nhật trạng thái trận đấu.",
+      });
+    }
   };
 
   const handleMarkAsPaid = async (shareId: string) => {
@@ -453,15 +555,18 @@ const Dashboard = () => {
                     }}
                   >
                     <div className="space-y-1 p-2">
-                      {matches.map((match) => (
-                        <MatchListItem
-                          key={match.id}
-                          match={match}
-                          isSelected={selectedMatchId === match.id}
-                          onSelect={() => setSelectedMatchId(match.id)}
-                          onDelete={() => setMatchIdToDelete(match.id)}
-                        />
-                      ))}
+                      {matches.map((match) => {
+                        return (
+                          <MatchListItem
+                            key={match.id}
+                            match={match}
+                            isSelected={selectedMatchId === match.id}
+                            onSelect={() => setSelectedMatchId(match.id)}
+                            onDelete={() => setMatchIdToDelete(match.id)}
+                            onEdit={() => navigate(`/admin/setup/${match.id}`)}
+                          />
+                        );
+                      })}
                     </div>
                     <AlertDialogContent>
                       <AlertDialogHeader>
@@ -540,10 +645,30 @@ const Dashboard = () => {
                         </p>
                       </div>
                     </div>
-                    <Button onClick={copyLink}>
-                      <Copy className="h-4 w-4 mr-2" />
-                      Sao chép link thanh toán
-                    </Button>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {!isFullyPaid && selectedMatch.status === "COMPLETED" && (
+                        <Button
+                          onClick={() => handleUpdateMatchStatus("PUBLISHED")}
+                          className="bg-green-500 hover:bg-green-600"
+                        >
+                          <CheckCircle2 className="h-4 w-4 mr-2" />
+                          Công khai
+                        </Button>
+                      )}
+                      {!isFullyPaid && selectedMatch.status === "PUBLISHED" && (
+                        <Button
+                          onClick={() => handleUpdateMatchStatus("COMPLETED")}
+                          variant="destructive"
+                        >
+                          <XCircle className="h-4 w-4 mr-2" />
+                          Hủy công khai
+                        </Button>
+                      )}
+                      <Button onClick={copyLink} variant="outline">
+                        <Copy className="h-4 w-4 mr-2" />
+                        Sao chép link thanh toán
+                      </Button>
+                    </div>
                   </div>
                 </div>
 

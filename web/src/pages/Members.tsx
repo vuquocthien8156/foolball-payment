@@ -33,6 +33,7 @@ import {
   Loader2,
   DollarSign,
   Star,
+  BadgePercent,
 } from "lucide-react";
 import {
   collection,
@@ -59,6 +60,7 @@ interface Member {
   name: string;
   nickname?: string;
   isCreditor?: boolean;
+  isExemptFromPayment?: boolean;
 }
 
 interface MemberStats {
@@ -380,6 +382,28 @@ const Members = () => {
     }
   };
 
+  const handleToggleExemption = async (
+    memberId: string,
+    currentStatus: boolean
+  ) => {
+    const memberRef = doc(db, "members", memberId);
+    try {
+      await updateDoc(memberRef, { isExemptFromPayment: !currentStatus });
+      toast({
+        title: "Thành công",
+        description: "Đã cập nhật trạng thái miễn trừ thanh toán.",
+      });
+      fetchMembersAndStats(); // Refresh list
+    } catch (error) {
+      console.error("Error toggling payment exemption:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể cập nhật trạng thái. Vui lòng thử lại.",
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -524,6 +548,26 @@ const Members = () => {
                                   member.isCreditor
                                     ? "text-yellow-400 fill-yellow-400"
                                     : "text-muted-foreground hover:text-yellow-400"
+                                }`}
+                              />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleExemption(
+                                  member.id,
+                                  !!member.isExemptFromPayment
+                                );
+                              }}
+                              className="h-8 w-8"
+                            >
+                              <BadgePercent
+                                className={`h-5 w-5 transition-colors ${
+                                  member.isExemptFromPayment
+                                    ? "text-green-500 fill-green-500/20"
+                                    : "text-muted-foreground hover:text-green-500"
                                 }`}
                               />
                             </Button>

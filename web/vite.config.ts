@@ -15,7 +15,12 @@ export default defineConfig(({ mode }) => ({
     mode === "development" && componentTagger(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "robots.txt", "apple-touch-icon.png"],
+      includeAssets: [
+        "favicon.ico",
+        "robots.txt",
+        "pwa-192x192.png",
+        "pwa-512x512.png",
+      ],
       manifest: {
         name: "Chia tiền sân",
         short_name: "Chia tiền",
@@ -25,6 +30,8 @@ export default defineConfig(({ mode }) => ({
         display: "standalone",
         scope: "/",
         start_url: "/pay",
+        id: "/pay",
+        orientation: "portrait-primary",
         icons: [
           {
             src: "pwa-192x192.png",

@@ -35,6 +35,7 @@ import {
   Bell,
   Download,
   UsersRound,
+  BarChart,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -71,6 +72,18 @@ import {
 } from "firebase/firestore";
 import { db, requestNotificationPermission } from "@/lib/firebase";
 import { usePWAInstall } from "@/contexts/PWAInstallContext";
+import {
+  Bar,
+  BarChart as RechartsBarChart,
+  ResponsiveContainer,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
 
 interface Member {
   id: string;
@@ -105,6 +118,11 @@ interface Share {
     regularMemberCount: number;
     reason?: string;
   };
+}
+
+interface TopPayer {
+  name: string;
+  total: number;
 }
 
 // Helper function to remove Vietnamese diacritics
@@ -143,6 +161,77 @@ const Pay = () => {
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
   const [isNotificationEnabled, setIsNotificationEnabled] = useState(false);
   const [isUpdatingNotification, setIsUpdatingNotification] = useState(false);
+  const [topPayers, setTopPayers] = useState<TopPayer[]>([]);
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
+
+  const fetchTopPayers = useCallback(async () => {
+    setIsLoadingStats(true);
+    try {
+      // 1. Get all published matches
+      const publishedMatchesQuery = query(
+        collection(db, "matches"),
+        where("status", "==", "PUBLISHED")
+      );
+      const matchesSnapshot = await getDocs(publishedMatchesQuery);
+      const matchIds = matchesSnapshot.docs.map((doc) => doc.id);
+
+      if (matchIds.length === 0) {
+        setTopPayers([]);
+        return;
+      }
+
+      // 2. Get all paid shares from those matches
+      const paidSharesQuery = query(
+        collectionGroup(db, "shares"),
+        where("matchId", "in", matchIds),
+        where("status", "==", "PAID")
+      );
+      const sharesSnapshot = await getDocs(paidSharesQuery);
+
+      // 3. Aggregate payments by member
+      const paymentsByMember = new Map<string, number>();
+      sharesSnapshot.forEach((doc) => {
+        const share = doc.data();
+        const currentTotal = paymentsByMember.get(share.memberId) || 0;
+        paymentsByMember.set(share.memberId, currentTotal + share.amount);
+      });
+
+      if (paymentsByMember.size === 0) {
+        setTopPayers([]);
+        return;
+      }
+
+      // 4. Get member names
+      const memberIds = Array.from(paymentsByMember.keys());
+      const membersQuery = query(
+        collection(db, "members"),
+        where(documentId(), "in", memberIds)
+      );
+      const membersSnapshot = await getDocs(membersQuery);
+      const membersMap = new Map(
+        membersSnapshot.docs.map((doc) => [doc.id, doc.data().name])
+      );
+
+      // 5. Create, sort, and set top payers
+      const allPayers = Array.from(paymentsByMember.entries())
+        .map(([memberId, total]) => ({
+          name: membersMap.get(memberId) || "Không rõ",
+          total,
+        }))
+        .sort((a, b) => b.total - a.total);
+
+      setTopPayers(allPayers.slice(0, 3));
+    } catch (error) {
+      console.error("Error fetching top payers:", error);
+      toast({
+        title: "Lỗi",
+        description: "Không thể tải dữ liệu thống kê.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingStats(false);
+    }
+  }, []);
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -167,7 +256,8 @@ const Pay = () => {
       }
     };
     fetchMembers();
-  }, []);
+    fetchTopPayers();
+  }, [fetchTopPayers]);
 
   // Effect to load last selected member from localStorage
   useEffect(() => {
@@ -291,7 +381,8 @@ const Pay = () => {
         // Fetch match details
         const matchesQuery = query(
           collection(db, "matches"),
-          where(documentId(), "in", matchIds)
+          where(documentId(), "in", matchIds),
+          where("status", "==", "PUBLISHED")
         );
         const matchesSnapshot = await getDocs(matchesQuery);
         const matchesData = new Map(
@@ -556,7 +647,65 @@ const Pay = () => {
               </Popover>
             </div>
 
-            {selectedMemberId && (
+            {/* Top Payers Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <BarChart className="h-5 w-5" />
+                  Top 3 người trả nhiều nhất
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isLoadingStats ? (
+                  <div className="flex justify-center items-center h-40">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : topPayers.length > 0 ? (
+                  <ChartContainer
+                    config={{
+                      total: {
+                        label: "Tổng tiền",
+                        color: "hsl(var(--chart-1))",
+                      },
+                    }}
+                    className="h-40"
+                  >
+                    <RechartsBarChart
+                      accessibilityLayer
+                      data={topPayers}
+                      layout="vertical"
+                      margin={{ left: 10, right: 10 }}
+                    >
+                      <YAxis
+                        dataKey="name"
+                        type="category"
+                        tickLine={false}
+                        tickMargin={10}
+                        axisLine={false}
+                        className="text-xs"
+                      />
+                      <XAxis dataKey="total" type="number" hide />
+                      <ChartTooltip
+                        cursor={false}
+                        content={<ChartTooltipContent hideLabel />}
+                      />
+                      <Bar
+                        dataKey="total"
+                        fill="var(--color-total)"
+                        radius={5}
+                        barSize={20}
+                      />
+                    </RechartsBarChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="text-center p-4 text-muted-foreground">
+                    Chưa có dữ liệu thống kê.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* {selectedMemberId && (
               <div className="flex items-center justify-between rounded-lg border p-3 sm:p-4 bg-gradient-card">
                 <div className="flex items-center space-x-3">
                   <Bell className="h-5 w-5 text-primary" />
@@ -574,7 +723,7 @@ const Pay = () => {
                   disabled={isUpdatingNotification}
                 />
               </div>
-            )}
+            )} */}
 
             {isLoadingShares && (
               <div className="flex justify-center items-center h-40">

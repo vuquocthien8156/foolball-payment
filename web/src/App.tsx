@@ -12,6 +12,8 @@ import PaymentCancel from "./pages/PaymentCancel";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import Attendance from "./pages/Attendance";
+import PublicPortal from "./pages/PublicPortal";
 
 import { useAuth } from "./contexts/AuthContext";
 import { PWAInstallProvider } from "./contexts/PWAInstallContext";
@@ -29,7 +31,7 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
 const PublicRoute = ({ children }: { children: JSX.Element }) => {
   const { user } = useAuth();
   if (user) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/admin/dashboard" replace />;
   }
   return children;
 };
@@ -58,24 +60,45 @@ const App = () => {
                   </PublicRoute>
                 }
               />
-              <Route path="/pay" element={<Pay />} />
-              <Route path="/payment-success" element={<PaymentSuccess />} />
-              <Route path="/payment-cancel" element={<PaymentCancel />} />
+              {/* Public Routes under /public */}
+              <Route path="/public">
+                <Route index element={<PublicPortal />} />
+                <Route path="pay" element={<Pay />} />
+                <Route path="payment-success" element={<PaymentSuccess />} />
+                <Route path="payment-cancel" element={<PaymentCancel />} />
+                <Route path="attendance" element={<Attendance />} />
+              </Route>
 
               {/* Protected Admin Routes */}
               <Route
-                path="/"
+                path="/admin"
                 element={
                   <ProtectedRoute>
                     <AdminLayout />
                   </ProtectedRoute>
                 }
               >
-                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route
+                  index
+                  element={<Navigate to="/admin/dashboard" replace />}
+                />
                 <Route path="dashboard" element={<Dashboard />} />
                 <Route path="setup" element={<SetupMatch />} />
+                <Route path="setup/:matchId" element={<SetupMatch />} />
                 <Route path="members" element={<Members />} />
               </Route>
+
+              {/* Root path redirect */}
+              <Route
+                path="/"
+                element={
+                  user ? (
+                    <Navigate to="/admin/dashboard" replace />
+                  ) : (
+                    <Navigate to="/public" replace />
+                  )
+                }
+              />
 
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />

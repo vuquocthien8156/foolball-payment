@@ -1,7 +1,15 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Bell, Home, Users, PlusCircle, LogOut, BarChart } from "lucide-react";
+import {
+  Bell,
+  Home,
+  Users,
+  PlusCircle,
+  LogOut,
+  BarChart,
+  Globe,
+} from "lucide-react";
 import {
   Card,
   CardContent,
@@ -72,7 +80,7 @@ const AdminLayout = () => {
       await updateDoc(notifRef, { isRead: true });
     }
     navigate(
-      `/dashboard?matchId=${notification.matchId}&shareId=${notification.shareId}`
+      `/admin/dashboard?matchId=${notification.matchId}&shareId=${notification.shareId}`
     );
   };
 
@@ -111,7 +119,10 @@ const AdminLayout = () => {
       <div className="hidden border-r bg-muted/40 md:block">
         <div className="flex h-full max-h-screen flex-col gap-2">
           <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
-            <NavLink to="/" className="flex items-center gap-2 font-semibold">
+            <NavLink
+              to="/admin"
+              className="flex items-center gap-2 font-semibold"
+            >
               <BarChart className="h-6 w-6" />
               <span className="">Payment App</span>
             </NavLink>
@@ -172,7 +183,7 @@ const AdminLayout = () => {
           <div className="flex-1">
             <nav className="grid items-start px-2 text-sm font-medium lg:px-4">
               <NavLink
-                to="/dashboard"
+                to="/admin/dashboard"
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
                     isActive ? "bg-muted text-primary" : ""
@@ -183,7 +194,7 @@ const AdminLayout = () => {
                 Dashboard
               </NavLink>
               <NavLink
-                to="/setup"
+                to="/admin/setup"
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
                     isActive ? "bg-muted text-primary" : ""
@@ -194,7 +205,7 @@ const AdminLayout = () => {
                 Tạo trận đấu
               </NavLink>
               <NavLink
-                to="/members"
+                to="/admin/members"
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
                     isActive ? "bg-muted text-primary" : ""
@@ -203,6 +214,15 @@ const AdminLayout = () => {
               >
                 <Users className="h-4 w-4" />
                 Thành viên
+              </NavLink>
+              <NavLink
+                to="/public"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
+              >
+                <Globe className="h-4 w-4" />
+                Trang Public
               </NavLink>
             </nav>
           </div>
