@@ -2,6 +2,13 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -18,6 +25,9 @@ import {
   Users,
   Calendar as CalendarIcon,
   ArrowLeft,
+  Pin,
+  PinOff,
+  History,
 } from "lucide-react";
 import {
   collection,
@@ -34,6 +44,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
 import { Badge } from "@/components/ui/badge";
+import useLocalStorage from "@/hooks/useLocalStorage";
 
 // Interfaces
 interface Member {
@@ -67,7 +78,11 @@ const Attendance = () => {
     new Map()
   );
   const [isSubmitting, setIsSubmitting] = useState<Set<string>>(new Set());
-  const [attendanceHistory, setAttendanceHistory] = useState<AttendanceRecord[]>(
+  const [attendanceHistory, setAttendanceHistory] = useState<
+    AttendanceRecord[]
+  >([]);
+  const [pinnedMembers, setPinnedMembers] = useLocalStorage<string[]>(
+    "pinnedMembers",
     []
   );
 
@@ -167,20 +182,32 @@ const Attendance = () => {
       .replace(/Đ/g, "D");
   };
 
-  const filteredMembers = useMemo(
-    () =>
-      members.filter((m) => {
-        const lowerCaseSearch = removeDiacritics(search.toLowerCase());
-        return (
-          removeDiacritics(m.name.toLowerCase()).includes(lowerCaseSearch) ||
-          (m.nickname &&
-            removeDiacritics(m.nickname.toLowerCase()).includes(
-              lowerCaseSearch
-            ))
-        );
-      }),
-    [members, search]
-  );
+  const filteredMembers = useMemo(() => {
+    const lowerCaseSearch = removeDiacritics(search.toLowerCase());
+    const filtered = members.filter(
+      (m) =>
+        removeDiacritics(m.name.toLowerCase()).includes(lowerCaseSearch) ||
+        (m.nickname &&
+          removeDiacritics(m.nickname.toLowerCase()).includes(lowerCaseSearch))
+    );
+
+    // Sort pinned members to the top
+    return filtered.sort((a, b) => {
+      const isAPinned = pinnedMembers.includes(a.id);
+      const isBPinned = pinnedMembers.includes(b.id);
+      if (isAPinned && !isBPinned) return -1;
+      if (!isAPinned && isBPinned) return 1;
+      return 0;
+    });
+  }, [members, search, pinnedMembers]);
+
+  const handlePinToggle = (memberId: string) => {
+    setPinnedMembers((prev) =>
+      prev.includes(memberId)
+        ? prev.filter((id) => id !== memberId)
+        : [...prev, memberId]
+    );
+  };
 
   const handleAttendanceToggle = async (
     memberId: string,
@@ -203,8 +230,9 @@ const Attendance = () => {
             matchId,
             "attendance"
           );
-          const currentAttendanceSnapshot = await transaction.get(
-            query(currentAttendanceQuery)
+
+          const currentAttendanceSnapshot = await getDocs(
+            currentAttendanceQuery
           );
           if (currentAttendanceSnapshot.size < 20) {
             transaction.set(attendanceRef, {
@@ -234,7 +262,7 @@ const Attendance = () => {
         }
         return newAttendance;
       });
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error toggling attendance:", error);
       toast({
         variant: "destructive",
@@ -253,10 +281,7 @@ const Attendance = () => {
     }
   };
 
-  const isAttendanceFull = useMemo(
-    () => attendance.size >= 20,
-    [attendance]
-  );
+  const isAttendanceFull = useMemo(() => attendance.size >= 20, [attendance]);
 
   if (isLoading) {
     return (
@@ -307,6 +332,51 @@ const Attendance = () => {
               Đã đủ số lượng
             </Badge>
           )}
+          <div className="mt-4">
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <History className="h-4 w-4 mr-2" />
+                  Xem lịch sử điểm danh
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>
+                    Lịch sử điểm danh ({attendanceHistory.length})
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="max-h-[60vh] overflow-y-auto">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
+                      <TableRow>
+                        <TableHead className="w-1/3">Thành viên</TableHead>
+                        <TableHead className="w-1/3">Thời gian</TableHead>
+                        <TableHead className="w-1/3">Thiết bị</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {attendanceHistory.map((record, index) => (
+                        <TableRow key={index}>
+                          <TableCell className="font-medium">
+                            {record.memberName}
+                          </TableCell>
+                          <TableCell>
+                            {new Date(
+                              record.timestamp.seconds * 1000
+                            ).toLocaleString("vi-VN")}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {record.userAgent}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
 
         <Card className="mb-6 shadow-card sticky top-4 z-10 bg-background/80 backdrop-blur-sm">
@@ -327,18 +397,32 @@ const Attendance = () => {
           {filteredMembers.map((member) => {
             const isAttending = attendance.has(member.id);
             const isProcessing = isSubmitting.has(member.id);
+            const isPinned = pinnedMembers.includes(member.id);
             return (
               <Card
                 key={member.id}
-                className={`shadow-card transition-all ${
-                  isAttending ? "bg-green-100/20 border-green-500" : "bg-card"
+                className={`shadow-card transition-all relative ${
+                  isAttending
+                    ? "bg-green-100/20 border-green-500"
+                    : isPinned
+                    ? "bg-blue-100/20 border-blue-500"
+                    : "bg-card"
                 }`}
               >
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute top-1 right-1 h-7 w-7"
+                  onClick={() => handlePinToggle(member.id)}
+                >
+                  {isPinned ? (
+                    <PinOff className="h-4 w-4 text-blue-500" />
+                  ) : (
+                    <Pin className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
                 <CardContent className="p-4 flex flex-col items-center text-center h-full">
-                  <div className="flex-grow">
-                    <div className="h-16 w-16 mb-3 rounded-full bg-primary flex items-center justify-center text-white font-bold shadow-card text-2xl">
-                      {member.name.charAt(0).toUpperCase()}
-                    </div>
+                  <div className="flex-grow pt-4">
                     <p className="font-bold text-foreground text-lg leading-tight">
                       {member.name}
                     </p>
@@ -379,46 +463,6 @@ const Attendance = () => {
             <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
             <p>Không tìm thấy thành viên nào.</p>
           </div>
-        )}
-
-        {attendanceHistory.length > 0 && (
-          <Card className="mt-8 shadow-card">
-            <CardHeader>
-              <CardTitle>
-                Lịch sử điểm danh ({attendanceHistory.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="max-h-96 overflow-y-auto">
-                <Table>
-                  <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
-                    <TableRow>
-                      <TableHead className="w-1/3">Thành viên</TableHead>
-                      <TableHead className="w-1/3">Thời gian</TableHead>
-                      <TableHead className="w-1/3">Thiết bị</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {attendanceHistory.map((record, index) => (
-                      <TableRow key={index}>
-                        <TableCell className="font-medium">
-                          {record.memberName}
-                        </TableCell>
-                        <TableCell>
-                          {new Date(
-                            record.timestamp.seconds * 1000
-                          ).toLocaleString("vi-VN")}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {record.userAgent}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
         )}
       </div>
     </div>
