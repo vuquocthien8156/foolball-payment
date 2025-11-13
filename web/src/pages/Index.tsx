@@ -41,9 +41,9 @@ const Index = () => {
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/30 to-background">
       {/* Hero Section */}
       <div className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-pitch opacity-5" />
+        <div className="absolute inset-0 bg-primary opacity-5" />
         <div className="container mx-auto px-4 py-20 text-center relative">
-          <div className="inline-flex items-center justify-center p-4 bg-gradient-pitch rounded-2xl shadow-card mb-6">
+          <div className="inline-flex items-center justify-center p-4 bg-primary rounded-2xl shadow-card mb-6">
             <Trophy className="h-12 w-12 text-white" />
           </div>
           <h1 className="text-5xl md:text-6xl font-bold text-foreground mb-6">
@@ -91,7 +91,7 @@ const Index = () => {
             <Link key={index} to={feature.link}>
               <Card className="h-full shadow-card hover:shadow-card-hover transition-all cursor-pointer group">
                 <CardHeader>
-                  <div className="h-12 w-12 rounded-xl bg-gradient-pitch flex items-center justify-center mb-4 group-hover:scale-110 transition-transform shadow-card">
+                  <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center mb-4 group-hover:scale-110 transition-transform shadow-card">
                     <feature.icon className="h-6 w-6 text-white" />
                   </div>
                   <CardTitle className="text-xl">{feature.title}</CardTitle>
@@ -145,7 +145,7 @@ const Index = () => {
               className="shadow-card hover:shadow-card-hover transition-shadow"
             >
               <CardContent className="flex gap-6 items-start p-6">
-                <div className="flex-shrink-0 h-14 w-14 rounded-xl bg-gradient-pitch flex items-center justify-center shadow-card">
+                <div className="flex-shrink-0 h-14 w-14 rounded-xl bg-primary flex items-center justify-center shadow-card">
                   <span className="text-2xl font-bold text-white">
                     {item.step}
                   </span>

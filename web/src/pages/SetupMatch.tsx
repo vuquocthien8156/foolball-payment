@@ -66,6 +66,7 @@ interface Share {
   status: "PENDING" | "PAID" | "CANCELLED";
   orderCode: string;
   calculationDetails?: object;
+  matchId?: string;
 }
 
 interface SavedTeamConfig {
@@ -235,6 +236,17 @@ const SetupMatch = () => {
         setTeamCount(savedConfig.teamCount || 2);
         setTeams(newTeams);
         setPool(newPool);
+        if (matchId && configSource.date) {
+          const matchDate = (configSource.date as Timestamp).toDate();
+          setDate(
+            `${matchDate.getFullYear()}-${(matchDate.getMonth() + 1)
+              .toString()
+              .padStart(2, "0")}-${matchDate
+              .getDate()
+              .toString()
+              .padStart(2, "0")}`
+          );
+        }
       } else {
         setPool(membersList);
       }
@@ -447,8 +459,8 @@ const SetupMatch = () => {
           percent: t.percent,
           members: t.members.map((m) => ({
             id: m.id,
-            percent: m.percent,
-            reason: m.reason,
+            percent: m.percent === undefined ? null : m.percent,
+            reason: m.reason || null,
           })),
         })),
         updatedAt: serverTimestamp(),
@@ -485,8 +497,8 @@ const SetupMatch = () => {
           percent: t.percent,
           members: t.members.map((m) => ({
             id: m.id,
-            percent: m.percent,
-            reason: m.reason,
+            percent: m.percent === undefined ? null : m.percent,
+            reason: m.reason || null,
           })),
         })),
       };
@@ -528,6 +540,7 @@ const SetupMatch = () => {
       });
       return;
     }
+    await handleSaveConfigToDb();
     if (activeTeams.some((t) => t.percent > 0 && t.members.length === 0)) {
       toast({
         title: "Lỗi đội hình",
@@ -539,7 +552,10 @@ const SetupMatch = () => {
 
     setIsSaving(true);
     try {
-      await handleSaveConfigToDb();
+      const matchRef = matchId
+        ? doc(db, "matches", matchId)
+        : doc(collection(db, "matches"));
+
       const shares: Share[] = [];
       const teamNames = activeTeams.reduce(
         (acc, t) => ({ ...acc, [t.id]: t.name }),
@@ -564,6 +580,7 @@ const SetupMatch = () => {
             teamTotal * ((member.percent || 0) / 100)
           );
           shares.push({
+            matchId: matchRef.id,
             memberId: member.id,
             teamId: team.id,
             amount: memberAmount,
@@ -588,6 +605,7 @@ const SetupMatch = () => {
           regularMembers.forEach((member) => {
             const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
             shares.push({
+              matchId: matchRef.id,
               memberId: member.id,
               teamId: team.id,
               amount: memberAmount,
@@ -612,33 +630,31 @@ const SetupMatch = () => {
         shares[shares.length - 1].amount += diff;
       }
 
-      const matchRef = matchId
-        ? doc(db, "matches", matchId)
-        : doc(collection(db, "matches"));
       const batch = writeBatch(db);
 
-      batch.set(
-        matchRef,
-        {
-          date: new Date(date),
-          totalAmount: numericTotalAmount,
-          teamCount,
-          teamsConfig: activeTeams.map((t) => ({
-            id: t.id,
-            name: t.name,
-            percent: t.percent,
-            members: t.members.map((m) => ({
-              id: m.id,
-              percent: m.percent,
-              reason: m.reason,
-            })),
+      const matchData = {
+        date: new Date(date),
+        totalAmount: numericTotalAmount,
+        teamCount,
+        teamsConfig: activeTeams.map((t) => ({
+          id: t.id,
+          name: t.name,
+          percent: t.percent,
+          members: t.members.map((m) => ({
+            id: m.id,
+            percent: m.percent === undefined ? null : m.percent,
+            reason: m.reason || null,
           })),
-          status: "COMPLETED",
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+        })),
+        status: "COMPLETED",
+        updatedAt: serverTimestamp(),
+      };
+
+      if (matchId) {
+        batch.update(matchRef, matchData);
+      } else {
+        batch.set(matchRef, { ...matchData, createdAt: serverTimestamp() });
+      }
 
       // Delete existing shares if updating a match
       if (matchId) {
@@ -733,7 +749,7 @@ const SetupMatch = () => {
       <div className="container mx-auto px-4 py-8 max-w-7xl">
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
-            <div className="p-3 bg-gradient-pitch rounded-xl shadow-card">
+            <div className="p-3 bg-primary rounded-xl shadow-card">
               <Trophy className="h-6 w-6 text-white" />
             </div>
             <div>
@@ -1042,20 +1058,6 @@ const SetupMatch = () => {
             <Copy className="h-4 w-4 mr-2" />
             Sao chép link thanh toán chung
           </Button>
-          {matchId && (
-            <Button
-              onClick={handleUpdateMatchConfig}
-              disabled={isUpdatingConfig || isSaving}
-              variant="secondary"
-            >
-              {isUpdatingConfig ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4 mr-2" />
-              )}
-              Lưu Đội Hình
-            </Button>
-          )}
           <Button
             onClick={handleCreateMatchForAttendance}
             disabled={isCreating || !!matchId}
@@ -1081,18 +1083,44 @@ const SetupMatch = () => {
             )}
             Lưu Cấu Hình
           </Button>
-          <Button onClick={handleSave} size="lg" disabled={isSaving}>
-            {isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Đang lưu...
-              </>
-            ) : matchId ? (
-              "Cập nhật & Tính tiền"
-            ) : (
-              "Tính tiền & Lưu trận"
-            )}
-          </Button>
+
+          {matchId ? (
+            <>
+              <Button
+                onClick={handleUpdateMatchConfig}
+                disabled={isUpdatingConfig || isSaving}
+                variant="secondary"
+              >
+                {isUpdatingConfig ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Cập nhật
+              </Button>
+              <Button onClick={handleSave} size="lg" disabled={isSaving}>
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Đang xử lý...
+                  </>
+                ) : (
+                  "Tính tiền & Hoàn tất"
+                )}
+              </Button>
+            </>
+          ) : (
+            <Button onClick={handleSave} size="lg" disabled={isSaving}>
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Đang lưu...
+                </>
+              ) : (
+                "Tính tiền & Lưu trận"
+              )}
+            </Button>
+          )}
         </div>
       </div>
     </div>

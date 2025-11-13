@@ -15,6 +15,27 @@ export default defineConfig(({ mode }) => ({
     mode === "development" && componentTagger(),
     VitePWA({
       registerType: "autoUpdate",
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+        // Always try to get the freshest version from the network first.
+        // If the network is unavailable, fall back to the cached version.
+        // This is ideal for apps that are frequently updated.
+        runtimeCaching: [
+          {
+            urlPattern: ({ request }) => request.mode === "navigate",
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "navigation-cache",
+            },
+          },
+        ],
+      },
+      strategies: "injectManifest",
+      srcDir: "public",
+      filename: "sw.js",
+      devOptions: {
+        enabled: true,
+      },
       includeAssets: [
         "favicon.ico",
         "robots.txt",

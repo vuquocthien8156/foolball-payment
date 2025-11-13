@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 
 const PaymentCancel = () => {
   return (
-    <div className="min-h-screen bg-gradient-pitch flex items-center justify-center p-4">
+    <div className="min-h-screen bg-primary flex items-center justify-center p-4">
       <Card className="w-full max-w-md text-center shadow-card-hover">
         <CardHeader>
           <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-red-100 flex items-center justify-center">

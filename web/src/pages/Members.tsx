@@ -34,7 +34,10 @@ import {
   DollarSign,
   Star,
   BadgePercent,
+  Pencil,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   collection,
   getDocs,
@@ -215,11 +218,15 @@ const Members = () => {
   const [search, setSearch] = useState("");
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberNickname, setNewMemberNickname] = useState("");
+  const [newMemberIsExempt, setNewMemberIsExempt] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [memberStats, setMemberStats] = useState<Map<string, MemberStats>>(
     new Map()
   );
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
   const { toast } = useToast();
 
   const fetchMembersAndStats = useCallback(async () => {
@@ -301,6 +308,7 @@ const Members = () => {
       await addDoc(collection(db, "members"), {
         name: newMemberName,
         nickname: newMemberNickname || "",
+        isExemptFromPayment: newMemberIsExempt,
         createdAt: serverTimestamp(),
       });
       toast({
@@ -309,6 +317,7 @@ const Members = () => {
       });
       setNewMemberName("");
       setNewMemberNickname("");
+      setNewMemberIsExempt(false);
       fetchMembersAndStats(); // Refresh the list
     } catch (error) {
       console.error("Error adding member: ", error);
@@ -403,14 +412,49 @@ const Members = () => {
       });
     }
   };
-
+ 
+  const handleUpdateMember = async (
+    id: string,
+    updatedData: Partial<Member>
+  ) => {
+    if (!updatedData.name?.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Tên thành viên không được để trống.",
+      });
+      return;
+    }
+    setIsUpdating(true);
+    try {
+      const memberRef = doc(db, "members", id);
+      await updateDoc(memberRef, updatedData);
+      toast({
+        title: "Thành công",
+        description: "Đã cập nhật thông tin thành viên.",
+      });
+      fetchMembersAndStats(); // Refresh the list
+      setIsEditModalOpen(false); // Close the modal
+      setEditingMember(null);
+    } catch (error) {
+      console.error("Error updating member:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể cập nhật thông tin thành viên.",
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+ 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-2">
-            <div className="p-3 bg-gradient-pitch rounded-xl shadow-card">
+            <div className="p-3 bg-primary rounded-xl shadow-card">
               <Users className="h-6 w-6 text-white" />
             </div>
             <div>
@@ -434,35 +478,52 @@ const Members = () => {
             <CardDescription>Nhập tên và biệt danh (tùy chọn)</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Input
-                placeholder="Tên đầy đủ *"
-                value={newMemberName}
-                onChange={(e) => setNewMemberName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddMember()}
-                className="flex-1"
-                disabled={isAdding}
-              />
-              <Input
-                placeholder="Biệt danh"
-                value={newMemberNickname}
-                onChange={(e) => setNewMemberNickname(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddMember()}
-                className="sm:w-48"
-                disabled={isAdding}
-              />
-              <Button
-                onClick={handleAddMember}
-                className="sm:w-auto"
-                disabled={isAdding}
-              >
-                {isAdding ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4 mr-2" />
-                )}
-                {isAdding ? "Đang thêm..." : "Thêm"}
-              </Button>
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Input
+                  placeholder="Tên đầy đủ *"
+                  value={newMemberName}
+                  onChange={(e) => setNewMemberName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddMember()}
+                  className="flex-1"
+                  disabled={isAdding}
+                />
+                <Input
+                  placeholder="Biệt danh"
+                  value={newMemberNickname}
+                  onChange={(e) => setNewMemberNickname(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddMember()}
+                  className="sm:w-48"
+                  disabled={isAdding}
+                />
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4 justify-between items-center">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="exempt-payment-new"
+                    checked={newMemberIsExempt}
+                    onCheckedChange={setNewMemberIsExempt}
+                  />
+                  <Label
+                    htmlFor="exempt-payment-new"
+                    className="whitespace-nowrap"
+                  >
+                    Miễn chia tiền
+                  </Label>
+                </div>
+                <Button
+                  onClick={handleAddMember}
+                  className="w-full sm:w-auto"
+                  disabled={isAdding}
+                >
+                  {isAdding ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4 mr-2" />
+                  )}
+                  {isAdding ? "Đang thêm..." : "Thêm"}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -503,11 +564,14 @@ const Members = () => {
                 </div>
               ) : (
                 filteredMembers.map((member) => (
-                  <Dialog key={member.id}>
-                    <DialogTrigger asChild>
-                      <div className="flex items-center justify-between p-4 rounded-lg border bg-gradient-card hover:shadow-md transition-all cursor-pointer">
-                        <div className="flex items-center gap-4">
-                          <div className="h-12 w-12 rounded-full bg-gradient-pitch flex items-center justify-center text-white font-semibold shadow-card">
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between p-4 rounded-lg border bg-gradient-card hover:shadow-md transition-all"
+                  >
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <div className="flex items-center gap-4 cursor-pointer flex-grow">
+                          <div className="h-12 w-12 rounded-full bg-primary flex items-center justify-center text-white font-semibold shadow-card">
                             {member.name.charAt(0).toUpperCase()}
                           </div>
                           <div>
@@ -521,90 +585,175 @@ const Members = () => {
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center gap-6">
-                          <div className="text-right">
-                            <p className="text-sm text-muted-foreground">
-                              Tổng đã trả
-                            </p>
-                            <p className="font-semibold text-green-500 flex items-center justify-end gap-1">
-                              <DollarSign className="h-4 w-4" />
-                              {(
-                                memberStats.get(member.id)?.totalPaid || 0
-                              ).toLocaleString()}
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSetCreditor(member.id);
-                              }}
-                              className="h-8 w-8"
-                            >
-                              <Star
-                                className={`h-5 w-5 transition-colors ${
-                                  member.isCreditor
-                                    ? "text-yellow-400 fill-yellow-400"
-                                    : "text-muted-foreground hover:text-yellow-400"
-                                }`}
-                              />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleExemption(
-                                  member.id,
-                                  !!member.isExemptFromPayment
-                                );
-                              }}
-                              className="h-8 w-8"
-                            >
-                              <BadgePercent
-                                className={`h-5 w-5 transition-colors ${
-                                  member.isExemptFromPayment
-                                    ? "text-green-500 fill-green-500/20"
-                                    : "text-muted-foreground hover:text-green-500"
-                                }`}
-                              />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation(); // Prevent dialog from opening
-                                handleDeleteMember(member.id, member.name);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                        </div>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-3xl">
+                        <DialogHeader>
+                          <DialogTitle>
+                            Lịch sử tham gia của {member.name}
+                          </DialogTitle>
+                          <DialogDescription>
+                            Tất cả các trận đấu đã thanh toán của thành viên.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <MemberDetails memberId={member.id} />
+                      </DialogContent>
+                    </Dialog>
+                    <div className="flex items-center gap-6">
+                      <div className="text-right">
+                        <p className="text-sm text-muted-foreground">
+                          Tổng đã trả
+                        </p>
+                        <p className="font-semibold text-green-500 flex items-center justify-end gap-1">
+                          <DollarSign className="h-4 w-4" />
+                          {(
+                            memberStats.get(member.id)?.totalPaid || 0
+                          ).toLocaleString()}
+                        </p>
                       </div>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-3xl">
-                      <DialogHeader>
-                        <DialogTitle>
-                          Lịch sử tham gia của {member.name}
-                        </DialogTitle>
-                        <DialogDescription>
-                          Tất cả các trận đấu đã thanh toán của thành viên.
-                        </DialogDescription>
-                      </DialogHeader>
-                      <MemberDetails memberId={member.id} />
-                    </DialogContent>
-                  </Dialog>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingMember(member);
+                            setIsEditModalOpen(true);
+                          }}
+                          className="h-8 w-8"
+                        >
+                          <Pencil className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSetCreditor(member.id);
+                          }}
+                          className="h-8 w-8"
+                        >
+                          <Star
+                            className={`h-5 w-5 transition-colors ${
+                              member.isCreditor
+                                ? "text-yellow-400 fill-yellow-400"
+                                : "text-muted-foreground hover:text-yellow-400"
+                            }`}
+                          />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleExemption(
+                              member.id,
+                              !!member.isExemptFromPayment
+                            );
+                          }}
+                          className="h-8 w-8"
+                        >
+                          <BadgePercent
+                            className={`h-5 w-5 transition-colors ${
+                              member.isExemptFromPayment
+                                ? "text-green-500 fill-green-500/20"
+                                : "text-muted-foreground hover:text-green-500"
+                            }`}
+                          />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteMember(member.id, member.name);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
                 ))
               )}
             </div>
           </CardContent>
         </Card>
+        {editingMember && (
+          <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Chỉnh sửa thành viên</DialogTitle>
+                <DialogDescription>
+                  Cập nhật thông tin cho {editingMember.name}.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-name">Tên đầy đủ</Label>
+                  <Input
+                    id="edit-name"
+                    defaultValue={editingMember.name}
+                    onChange={(e) =>
+                      setEditingMember({ ...editingMember, name: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-nickname">Biệt danh</Label>
+                  <Input
+                    id="edit-nickname"
+                    defaultValue={editingMember.nickname}
+                    onChange={(e) =>
+                      setEditingMember({
+                        ...editingMember,
+                        nickname: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="edit-exempt"
+                    checked={!!editingMember.isExemptFromPayment}
+                    onCheckedChange={(checked) =>
+                      setEditingMember({
+                        ...editingMember,
+                        isExemptFromPayment: checked,
+                      })
+                    }
+                  />
+                  <Label htmlFor="edit-exempt">Miễn chia tiền</Label>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditModalOpen(false)}
+                >
+                  Hủy
+                </Button>
+                <Button
+                  onClick={() =>
+                    handleUpdateMember(editingMember.id, {
+                      name: editingMember.name,
+                      nickname: editingMember.nickname,
+                      isExemptFromPayment: editingMember.isExemptFromPayment,
+                    })
+                  }
+                  disabled={isUpdating}
+                >
+                  {isUpdating && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  Lưu thay đổi
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
     </div>
   );
 };
-
+ 
 export default Members;

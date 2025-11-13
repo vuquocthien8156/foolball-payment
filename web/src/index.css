@@ -9,24 +9,24 @@ All colors MUST be HSL.
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 142 76% 13%;
+    --foreground: 340 60% 10%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 142 76% 13%;
+    --card: 340 100% 99%;
+    --card-foreground: 340 60% 10%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 142 76% 13%;
+    --popover: 340 100% 99%;
+    --popover-foreground: 340 60% 10%;
 
-    --primary: 142 76% 36%;
+    --primary: 340 82% 62%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 142 40% 96%;
-    --secondary-foreground: 142 76% 13%;
+    --secondary: 340 60% 96%;
+    --secondary-foreground: 340 60% 10%;
 
-    --muted: 142 40% 96%;
-    --muted-foreground: 142 16% 47%;
+    --muted: 340 60% 96%;
+    --muted-foreground: 340 10% 45%;
 
-    --accent: 25 95% 53%;
+    --accent: 340 82% 62%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
@@ -41,58 +41,74 @@ All colors MUST be HSL.
     --pending: 38 92% 50%;
     --pending-foreground: 0 0% 100%;
 
-    --border: 142 30% 90%;
-    --input: 142 30% 90%;
-    --ring: 142 76% 36%;
+    --border: 340 30% 90%;
+    --input: 340 30% 90%;
+    --ring: 340 82% 62%;
 
     --radius: 0.75rem;
 
-    --gradient-pitch: linear-gradient(135deg, hsl(142 76% 36%) 0%, hsl(142 70% 45%) 100%);
-    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(142 40% 99%) 100%);
-    --shadow-card: 0 4px 20px -2px hsl(142 76% 36% / 0.1);
-    --shadow-hover: 0 8px 30px -4px hsl(142 76% 36% / 0.15);
+    --gradient-pitch: linear-gradient(
+      135deg,
+      hsl(340 85% 80%) 0%,
+      hsl(340 90% 88%) 100%
+    );
+    --gradient-card: linear-gradient(
+      180deg,
+      hsl(0 0% 100%) 0%,
+      hsl(340 60% 98%) 100%
+    );
+    --shadow-card: 0 4px 20px -2px hsl(340 82% 62% / 0.1);
+    --shadow-hover: 0 8px 30px -4px hsl(340 82% 62% / 0.15);
   }
 
   .dark {
-    --background: 142 50% 5%;
-    --foreground: 142 40% 95%;
+    --background: 340 50% 5%;
+    --foreground: 340 40% 95%;
 
-    --card: 142 40% 8%;
-    --card-foreground: 142 40% 95%;
+    --card: 340 40% 8%;
+    --card-foreground: 340 40% 95%;
 
-    --popover: 142 40% 8%;
-    --popover-foreground: 142 40% 95%;
+    --popover: 340 40% 8%;
+    --popover-foreground: 340 40% 95%;
 
-    --primary: 142 76% 45%;
-    --primary-foreground: 142 50% 5%;
+    --primary: 340 82% 70%;
+    --primary-foreground: 340 50% 5%;
 
-    --secondary: 142 30% 15%;
-    --secondary-foreground: 142 40% 95%;
+    --secondary: 340 30% 15%;
+    --secondary-foreground: 340 40% 95%;
 
-    --muted: 142 30% 15%;
-    --muted-foreground: 142 20% 60%;
+    --muted: 340 30% 15%;
+    --muted-foreground: 340 20% 60%;
 
-    --accent: 25 95% 60%;
-    --accent-foreground: 142 50% 5%;
+    --accent: 340 82% 70%;
+    --accent-foreground: 340 50% 5%;
 
     --destructive: 0 84% 60%;
-    --destructive-foreground: 142 40% 95%;
+    --destructive-foreground: 340 40% 95%;
 
     --success: 142 76% 45%;
-    --success-foreground: 142 50% 5%;
+    --success-foreground: 340 50% 5%;
 
     --warning: 38 92% 50%;
-    --warning-foreground: 142 50% 5%;
+    --warning-foreground: 340 50% 5%;
 
     --pending: 38 92% 50%;
-    --pending-foreground: 142 50% 5%;
+    --pending-foreground: 340 50% 5%;
 
-    --border: 142 30% 20%;
-    --input: 142 30% 20%;
-    --ring: 142 76% 45%;
+    --border: 340 30% 20%;
+    --input: 340 30% 20%;
+    --ring: 340 82% 70%;
 
-    --gradient-pitch: linear-gradient(135deg, hsl(142 76% 25%) 0%, hsl(142 70% 35%) 100%);
-    --gradient-card: linear-gradient(180deg, hsl(142 40% 8%) 0%, hsl(142 30% 10%) 100%);
+    --gradient-pitch: linear-gradient(
+      135deg,
+      hsl(340 60% 25%) 0%,
+      hsl(340 50% 20%) 100%
+    );
+    --gradient-card: linear-gradient(
+      180deg,
+      hsl(340 40% 8%) 0%,
+      hsl(340 30% 10%) 100%
+    );
     --shadow-card: 0 4px 20px -2px hsl(0 0% 0% / 0.3);
     --shadow-hover: 0 8px 30px -4px hsl(0 0% 0% / 0.4);
   }
@@ -106,4 +122,28 @@ All colors MUST be HSL.
   body {
     @apply bg-background text-foreground;
   }
+}
+
+@keyframes gradient-animation {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animated-gradient {
+  background: linear-gradient(
+    -45deg,
+    hsl(340, 100%, 92%),
+    hsl(330, 100%, 95%),
+    hsl(340, 100%, 92%),
+    hsl(350, 100%, 95%)
+  );
+  background-size: 400% 400%;
+  animation: gradient-animation 15s ease infinite;
 }

@@ -2,7 +2,15 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Check,
   Loader2,
@@ -21,6 +29,7 @@ import {
   orderBy,
   where,
   limit,
+  onSnapshot,
 } from "firebase/firestore";
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
@@ -42,6 +51,7 @@ interface Match {
 interface AttendanceRecord {
   timestamp: Timestamp;
   memberName: string;
+  userAgent: string;
 }
 
 const Attendance = () => {
@@ -57,6 +67,31 @@ const Attendance = () => {
     new Map()
   );
   const [isSubmitting, setIsSubmitting] = useState<Set<string>>(new Set());
+  const [attendanceHistory, setAttendanceHistory] = useState<AttendanceRecord[]>(
+    []
+  );
+
+  useEffect(() => {
+    if (!matchId) {
+      setAttendanceHistory([]); // Clear history if no match
+      return;
+    }
+
+    const attendanceQuery = query(
+      collection(db, "matches", matchId, "attendance"),
+      orderBy("timestamp", "desc")
+    );
+
+    const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
+      const history = snapshot.docs.map(
+        (doc) => doc.data() as AttendanceRecord
+      );
+      setAttendanceHistory(history);
+    });
+
+    // Cleanup listener on component unmount or when matchId changes
+    return () => unsubscribe();
+  }, [matchId]);
 
   const fetchMatchAndMembers = useCallback(async () => {
     setIsLoading(true);
@@ -151,35 +186,46 @@ const Attendance = () => {
     memberId: string,
     memberName: string
   ) => {
-    if (!matchId) return;
+    if (!matchId || attendance.has(memberId) || attendance.size >= 20) return;
+
     setIsSubmitting((prev) => new Set(prev).add(memberId));
     const attendanceRef = doc(db, "matches", matchId, "attendance", memberId);
 
     try {
+      // We only allow adding attendance, not removing.
       await runTransaction(db, async (transaction) => {
         const attendanceDoc = await transaction.get(attendanceRef);
-        if (attendanceDoc.exists()) {
-          transaction.delete(attendanceRef);
-        } else {
-          transaction.set(attendanceRef, {
-            timestamp: Timestamp.now(),
-            memberName: memberName,
-          });
+        if (!attendanceDoc.exists()) {
+          // Check again inside transaction to be safe
+          const currentAttendanceQuery = collection(
+            db,
+            "matches",
+            matchId,
+            "attendance"
+          );
+          const currentAttendanceSnapshot = await transaction.get(
+            query(currentAttendanceQuery)
+          );
+          if (currentAttendanceSnapshot.size < 20) {
+            transaction.set(attendanceRef, {
+              timestamp: Timestamp.now(),
+              memberName: memberName,
+              userAgent: navigator.userAgent,
+            });
+          } else {
+            throw new Error("Attendance is full.");
+          }
         }
       });
 
+      // Optimistic UI update
       setAttendance((prev) => {
         const newAttendance = new Map(prev);
-        if (newAttendance.has(memberId)) {
-          newAttendance.delete(memberId);
-          toast({
-            title: "Huỷ điểm danh",
-            description: `${memberName} đã được huỷ điểm danh.`,
-          });
-        } else {
+        if (!newAttendance.has(memberId)) {
           newAttendance.set(memberId, {
             timestamp: Timestamp.now(),
             memberName,
+            userAgent: navigator.userAgent,
           });
           toast({
             title: "Điểm danh thành công!",
@@ -188,12 +234,15 @@ const Attendance = () => {
         }
         return newAttendance;
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error toggling attendance:", error);
       toast({
         variant: "destructive",
         title: "Lỗi",
-        description: "Không thể cập nhật điểm danh. Vui lòng thử lại.",
+        description:
+          error.message === "Attendance is full."
+            ? "Đã đủ 20 người điểm danh."
+            : "Không thể điểm danh. Vui lòng thử lại.",
       });
     } finally {
       setIsSubmitting((prev) => {
@@ -203,6 +252,11 @@ const Attendance = () => {
       });
     }
   };
+
+  const isAttendanceFull = useMemo(
+    () => attendance.size >= 20,
+    [attendance]
+  );
 
   if (isLoading) {
     return (
@@ -233,7 +287,7 @@ const Attendance = () => {
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="mb-8 text-center">
-          <div className="inline-block p-4 bg-gradient-pitch rounded-2xl shadow-card mb-4">
+          <div className="inline-block p-4 bg-primary rounded-2xl shadow-card mb-4">
             <Users className="h-8 w-8 text-white" />
           </div>
           <h1 className="text-4xl font-bold text-foreground tracking-tight">
@@ -245,6 +299,14 @@ const Attendance = () => {
               {new Date(match.date.seconds * 1000).toLocaleDateString("vi-VN")}
             </span>
           </div>
+          <p className="text-xl font-bold mt-4">
+            Số người đã điểm danh: {attendance.size} / 20
+          </p>
+          {isAttendanceFull && (
+            <Badge className="mt-2" variant="destructive">
+              Đã đủ số lượng
+            </Badge>
+          )}
         </div>
 
         <Card className="mb-6 shadow-card sticky top-4 z-10 bg-background/80 backdrop-blur-sm">
@@ -272,32 +334,36 @@ const Attendance = () => {
                   isAttending ? "bg-green-100/20 border-green-500" : "bg-card"
                 }`}
               >
-                <CardContent className="p-4 flex flex-col items-center text-center">
-                  <div className="h-16 w-16 mb-3 rounded-full bg-gradient-pitch flex items-center justify-center text-white font-bold shadow-card text-2xl">
-                    {member.name.charAt(0).toUpperCase()}
+                <CardContent className="p-4 flex flex-col items-center text-center h-full">
+                  <div className="flex-grow">
+                    <div className="h-16 w-16 mb-3 rounded-full bg-primary flex items-center justify-center text-white font-bold shadow-card text-2xl">
+                      {member.name.charAt(0).toUpperCase()}
+                    </div>
+                    <p className="font-bold text-foreground text-lg leading-tight">
+                      {member.name}
+                    </p>
+                    <div className="h-8 flex items-center justify-center">
+                      {member.nickname && (
+                        <Badge variant="secondary" className="mt-1 mb-3">
+                          {member.nickname}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                  <p className="font-bold text-foreground text-lg leading-tight">
-                    {member.name}
-                  </p>
-                  {member.nickname && (
-                    <Badge variant="secondary" className="mt-1 mb-3">
-                      {member.nickname}
-                    </Badge>
-                  )}
                   <Button
                     variant={isAttending ? "secondary" : "default"}
                     onClick={() =>
                       handleAttendanceToggle(member.id, member.name)
                     }
-                    disabled={isProcessing}
-                    className="w-full mt-4"
+                    disabled={isProcessing || isAttending || isAttendanceFull}
+                    className="w-full mt-auto"
                   >
                     {isProcessing ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : isAttending ? (
                       <>
                         <Check className="h-4 w-4 mr-2" />
-                        Huỷ
+                        Đã điểm danh
                       </>
                     ) : (
                       "Điểm danh"
@@ -313,6 +379,46 @@ const Attendance = () => {
             <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
             <p>Không tìm thấy thành viên nào.</p>
           </div>
+        )}
+
+        {attendanceHistory.length > 0 && (
+          <Card className="mt-8 shadow-card">
+            <CardHeader>
+              <CardTitle>
+                Lịch sử điểm danh ({attendanceHistory.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="max-h-96 overflow-y-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
+                    <TableRow>
+                      <TableHead className="w-1/3">Thành viên</TableHead>
+                      <TableHead className="w-1/3">Thời gian</TableHead>
+                      <TableHead className="w-1/3">Thiết bị</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {attendanceHistory.map((record, index) => (
+                      <TableRow key={index}>
+                        <TableCell className="font-medium">
+                          {record.memberName}
+                        </TableCell>
+                        <TableCell>
+                          {new Date(
+                            record.timestamp.seconds * 1000
+                          ).toLocaleString("vi-VN")}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {record.userAgent}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
     </div>

@@ -63,6 +63,7 @@ import {
   updateDoc,
   writeBatch,
   Timestamp,
+  deleteField,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
@@ -191,7 +192,7 @@ const MatchListItem = ({
         )}
       </button>
       <div className="flex items-center flex-shrink-0">
-        {!isFullyPaid && (
+        {!isFullyPaid && match.status !== "PUBLISHED" && (
           <>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -255,7 +256,6 @@ const Dashboard = () => {
   const [isLoadingShares, setIsLoadingShares] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [matchIdToDelete, setMatchIdToDelete] = useState<string | null>(null);
-
   const [highlightedShareId, setHighlightedShareId] = useState<string | null>(
     null
   );
@@ -515,7 +515,30 @@ const Dashboard = () => {
       });
     }
   };
-
+ 
+  const handleMarkAsUnpaid = async (shareId: string) => {
+    if (!selectedMatchId) return;
+    const shareRef = doc(db, "matches", selectedMatchId, "shares", shareId);
+    try {
+      await updateDoc(shareRef, {
+        status: "PENDING",
+        paidAt: deleteField(),
+        channel: deleteField(),
+      });
+      toast({
+        title: "Thành công",
+        description: "Đã cập nhật trạng thái thành Chưa trả.",
+      });
+    } catch (error) {
+      console.error("Error marking as unpaid:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể cập nhật trạng thái.",
+      });
+    }
+  };
+ 
   const selectedMatch = matches.find((m) => m.id === selectedMatchId);
 
   const filteredShares = useMemo(() => {
@@ -535,7 +558,7 @@ const Dashboard = () => {
       <div className="container mx-auto px-4 py-8 max-w-7xl">
         <div className="grid lg:grid-cols-12 gap-8">
           {/* Left Column: Match List */}
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 lg:sticky lg:top-6 h-fit">
             <Card className="shadow-card">
               <CardHeader>
                 <CardTitle>Danh sách trận đấu</CardTitle>
@@ -628,7 +651,7 @@ const Dashboard = () => {
                 <div className="mb-8">
                   <div className="flex items-center justify-between flex-wrap gap-4">
                     <div className="flex items-center gap-3">
-                      <div className="p-3 bg-gradient-pitch rounded-xl shadow-card">
+                      <div className="p-3 bg-primary rounded-xl shadow-card">
                         <TrendingUp className="h-6 w-6 text-white" />
                       </div>
                       <div>
@@ -814,13 +837,22 @@ const Dashboard = () => {
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-right">
-                                {share.status === "PENDING" && (
+                                {share.status === "PENDING" && !isFullyPaid && (
                                   <Button
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleMarkAsPaid(share.id)}
                                   >
                                     Đánh dấu đã trả
+                                  </Button>
+                                )}
+                                {share.status === "PAID" && (
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => handleMarkAsUnpaid(share.id)}
+                                  >
+                                    Đánh dấu chưa trả
                                   </Button>
                                 )}
                               </TableCell>

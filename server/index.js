@@ -34,22 +34,6 @@ app.use(express.json());
 
 const apiRoutes = express.Router();
 
-apiRoutes.get("/members", async (req, res) => {
-  try {
-    const db = admin.firestore();
-    const membersCollectionRef = db.collection("members");
-    const querySnapshot = await membersCollectionRef.get();
-    const membersList = querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-    res.json(membersList);
-  } catch (error) {
-    console.error("Error fetching members:", error);
-    res.status(500).json({ error: "Failed to fetch members" });
-  }
-});
-
 apiRoutes.post("/create-payment-link", async (req, res) => {
   const { shareIds, memberId } = req.body;
 
@@ -170,12 +154,21 @@ const payosWebhookHandler = async (req, res) => {
             channel: "PAYOS",
             meta: { webhook: webhookData },
           });
-
+ 
           // Create a notification for each paid share
           const notificationRef = db.collection("notifications").doc();
+          // Get matchId directly from the share document
+          const matchId = shareData.matchId;
+          if (!matchId) {
+            console.error(
+              `CRITICAL: matchId is missing in share document ${doc.id} for orderCode ${orderCode}. Skipping notification.`
+            );
+            // Continue to the next iteration without creating a notification
+            return;
+          }
           batch.set(notificationRef, {
             message: `${memberName} đã thanh toán ${shareData.amount.toLocaleString()} VND`,
-            matchId: shareData.matchId,
+            matchId: matchId,
             shareId: doc.id,
             isRead: false,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),

@@ -84,6 +84,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { cn } from "@/lib/utils";
 
 interface Member {
   id: string;
@@ -163,45 +164,49 @@ const Pay = () => {
   const [isUpdatingNotification, setIsUpdatingNotification] = useState(false);
   const [topPayers, setTopPayers] = useState<TopPayer[]>([]);
   const [isLoadingStats, setIsLoadingStats] = useState(true);
+  const [detailedTeamShares, setDetailedTeamShares] = useState<TeamShareInfo[]>(
+    []
+  );
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   const fetchTopPayers = useCallback(async () => {
     setIsLoadingStats(true);
     try {
-      // 1. Get all published matches
-      const publishedMatchesQuery = query(
-        collection(db, "matches"),
-        where("status", "==", "PUBLISHED")
-      );
-      const matchesSnapshot = await getDocs(publishedMatchesQuery);
-      const matchIds = matchesSnapshot.docs.map((doc) => doc.id);
+      // 1. Get all matches
+      const matchesQuery = query(collection(db, "matches"));
+      const matchesSnapshot = await getDocs(matchesQuery);
 
-      if (matchIds.length === 0) {
+      if (matchesSnapshot.empty) {
         setTopPayers([]);
+        setIsLoadingStats(false);
         return;
       }
 
-      // 2. Get all paid shares from those matches
-      const paidSharesQuery = query(
-        collectionGroup(db, "shares"),
-        where("matchId", "in", matchIds),
-        where("status", "==", "PAID")
-      );
-      const sharesSnapshot = await getDocs(paidSharesQuery);
-
-      // 3. Aggregate payments by member
+      // 2. Aggregate payments by member from all matches
       const paymentsByMember = new Map<string, number>();
-      sharesSnapshot.forEach((doc) => {
-        const share = doc.data();
-        const currentTotal = paymentsByMember.get(share.memberId) || 0;
-        paymentsByMember.set(share.memberId, currentTotal + share.amount);
+
+      const shareFetchPromises = matchesSnapshot.docs.map(async (matchDoc) => {
+        const paidSharesQuery = query(
+          collection(matchDoc.ref, "shares"),
+          where("status", "==", "PAID")
+        );
+        const sharesSnapshot = await getDocs(paidSharesQuery);
+        sharesSnapshot.forEach((shareDoc) => {
+          const share = shareDoc.data();
+          const currentTotal = paymentsByMember.get(share.memberId) || 0;
+          paymentsByMember.set(share.memberId, currentTotal + share.amount);
+        });
       });
+
+      await Promise.all(shareFetchPromises);
 
       if (paymentsByMember.size === 0) {
         setTopPayers([]);
+        setIsLoadingStats(false);
         return;
       }
 
-      // 4. Get member names
+      // 3. Get member names
       const memberIds = Array.from(paymentsByMember.keys());
       const membersQuery = query(
         collection(db, "members"),
@@ -212,7 +217,7 @@ const Pay = () => {
         membersSnapshot.docs.map((doc) => [doc.id, doc.data().name])
       );
 
-      // 5. Create, sort, and set top payers
+      // 4. Create, sort, and set top payers
       const allPayers = Array.from(paymentsByMember.entries())
         .map(([memberId, total]) => ({
           name: membersMap.get(memberId) || "Không rõ",
@@ -237,12 +242,15 @@ const Pay = () => {
     const fetchMembers = async () => {
       setIsLoadingMembers(true);
       try {
-        const API_URL = import.meta.env.VITE_API_URL;
-        const response = await fetch(`${API_URL}/members`);
-        if (!response.ok) {
-          throw new Error("Network response was not ok");
-        }
-        const membersList = await response.json();
+        const membersCollectionRef = collection(db, "members");
+        const membersSnapshot = await getDocs(membersCollectionRef);
+        const membersList = membersSnapshot.docs.map(
+          (doc) =>
+            ({
+              id: doc.id,
+              ...doc.data(),
+            } as Member)
+        );
         setMembers(membersList);
       } catch (error) {
         console.error("Error fetching members:", error);
@@ -300,133 +308,69 @@ const Pay = () => {
 
     const fetchUnpaidShares = async () => {
       setIsLoadingShares(true);
+      setUnpaidShares([]); // Clear previous results
       try {
+        // 1. Get all PENDING shares for the selected member
         const sharesQuery = query(
           collectionGroup(db, "shares"),
           where("memberId", "==", selectedMemberId),
           where("status", "==", "PENDING")
         );
         const sharesSnapshot = await getDocs(sharesQuery);
+
         if (sharesSnapshot.empty) {
-          setUnpaidShares([]);
-          return;
-        }
-        const sharesData = sharesSnapshot.docs.map(
-          (doc) =>
-            ({
-              id: doc.id,
-              ...doc.data(),
-            } as {
-              id: string;
-              matchId: string;
-              amount: number;
-              teamId: string;
-              calculationDetails?: {
-                memberPercent?: number;
-                teamTotal: number;
-                totalFixedAmount: number;
-                remainingAmount: number;
-                regularMemberCount: number;
-                reason?: string;
-              };
-            })
-        );
-
-        const matchIds = [...new Set(sharesData.map((s) => s.matchId))];
-        if (matchIds.length === 0) {
-          setUnpaidShares([]);
-          return;
+          return; // Exit early, unpaidShares is already empty
         }
 
-        // Fetch all shares for the relevant matches to build team sheets
-        const allMatchSharesQuery = query(
-          collectionGroup(db, "shares"),
-          where("matchId", "in", matchIds)
-        );
-        const allMatchSharesSnapshot = await getDocs(allMatchSharesQuery);
-        interface RawShare {
-          id: string;
-          matchId: string;
-          memberId: string;
-          teamId: string;
-          amount: number;
-          calculationDetails?: { reason?: string };
-        }
+        // 2. Process each share individually to fetch its match details
+        const sharesPromises = sharesSnapshot.docs.map(async (shareDoc) => {
+          const shareData = shareDoc.data();
+          const matchId = shareData.matchId || shareDoc.ref.parent.parent?.id;
 
-        const allSharesByMatch = new Map<string, RawShare[]>();
-        allMatchSharesSnapshot.forEach((doc) => {
-          const share = { id: doc.id, ...doc.data() } as RawShare;
-          const matchShares = allSharesByMatch.get(share.matchId) || [];
-          matchShares.push(share);
-          allSharesByMatch.set(share.matchId, matchShares);
-        });
+          if (!matchId) return null;
 
-        // Fetch all member names
-        const allMemberIds = [
-          ...new Set(
-            allMatchSharesSnapshot.docs.flatMap(
-              (doc) => doc.data().memberId || []
-            )
-          ),
-        ];
-        const membersQuery = query(
-          collection(db, "members"),
-          where(documentId(), "in", allMemberIds)
-        );
-        const membersSnapshot = await getDocs(membersQuery);
-        const membersMap = new Map(
-          membersSnapshot.docs.map((doc) => [doc.id, doc.data().name])
-        );
+          const matchRef = doc(db, "matches", matchId);
+          const matchSnap = await getDoc(matchRef);
 
-        // Fetch match details
-        const matchesQuery = query(
-          collection(db, "matches"),
-          where(documentId(), "in", matchIds),
-          where("status", "==", "PUBLISHED")
-        );
-        const matchesSnapshot = await getDocs(matchesQuery);
-        const matchesData = new Map(
-          matchesSnapshot.docs.map((doc) => [doc.id, doc.data()])
-        );
-
-        const sharesWithDetails: Share[] = sharesData.map((share) => {
-          const matchData = matchesData.get(share.matchId);
-          const teamSharesRaw = allSharesByMatch.get(share.matchId) || [];
-          const teamShares = teamSharesRaw
-            .filter((s) => s.teamId === share.teamId)
-            .map(
-              (s): TeamShareInfo => ({
-                memberId: s.memberId,
-                memberName: membersMap.get(s.memberId) || "Không rõ",
-                amount: s.amount,
-                reason: s.calculationDetails?.reason,
-                isCurrentUser: s.memberId === selectedMemberId,
-              })
-            )
-            .sort((a, b) => b.amount - a.amount);
-
-          const dateObj = matchData?.date;
-          let formattedDate = "Không rõ";
-          if (dateObj?.toDate) {
-            formattedDate = dateObj.toDate().toLocaleDateString("vi-VN");
+          // Filter out if match doesn't exist or is not published
+          if (!matchSnap.exists() || matchSnap.data().status !== "PUBLISHED") {
+            return null;
           }
 
+          const matchData = matchSnap.data();
+          const teamConfig = matchData.teamsConfig?.find(
+            (t: { id: string }) => t.id === shareData.teamId
+          );
+          const dateObj = matchData.date;
+          const formattedDate = dateObj?.toDate
+            ? dateObj.toDate().toLocaleDateString("vi-VN")
+            : "Không rõ";
+
+          // Return a simplified but complete Share object for the main list
           return {
-            id: share.id,
-            matchId: share.matchId,
-            amount: share.amount,
+            id: shareDoc.id,
+            matchId: matchId,
+            amount: shareData.amount,
             matchDate: formattedDate,
-            teamId: share.teamId,
-            matchTotalAmount: matchData?.totalAmount || 0,
-            teamPercent: matchData?.teamPercents?.[share.teamId] || 0,
-            teamName: matchData?.teamNames?.[share.teamId] || "Đội",
-            teamMemberCount: teamShares.length,
-            teamShares,
-            calculationDetails: share.calculationDetails,
-          };
+            teamId: shareData.teamId,
+            matchTotalAmount: matchData.totalAmount || 0,
+            teamPercent: teamConfig?.percent || 0,
+            teamName: teamConfig?.name || "Đội",
+            teamMemberCount: teamConfig?.members?.length || 0,
+            teamShares: [], // Temporarily disabled for debugging
+            calculationDetails: shareData.calculationDetails,
+          } as Share;
         });
-        setUnpaidShares(sharesWithDetails);
-        setExpandedItems(sharesWithDetails.map((s) => s.id)); // Expand all by default
+
+        const resolvedShares = await Promise.all(sharesPromises);
+        const validShares = resolvedShares.filter(
+          (share): share is Share => share !== null
+        );
+
+        setUnpaidShares(validShares);
+        // Automatically select all unpaid shares by default
+        setSelectedShares(validShares.map((share) => share.id));
+        setExpandedItems([]);
       } catch (error) {
         console.error("Error fetching unpaid shares:", error);
         toast({
@@ -445,6 +389,63 @@ const Pay = () => {
   const handleMemberChange = (memberId: string) => {
     setSelectedMemberId(memberId);
     localStorage.setItem("lastSelectedMemberId", memberId);
+  };
+
+  const handleViewTeamDetails = async (share: Share) => {
+    if (!selectedMemberId) return;
+    setIsLoadingDetails(true);
+    setDetailedTeamShares([]);
+    try {
+      const teamSharesQuery = query(
+        collection(db, "matches", share.matchId, "shares"),
+        where("teamId", "==", share.teamId)
+      );
+      const teamSharesSnapshot = await getDocs(teamSharesQuery);
+      if (teamSharesSnapshot.empty) return;
+
+      const teamSharesData = teamSharesSnapshot.docs.map((doc) => doc.data());
+      const memberIds = teamSharesData.map((s) => s.memberId);
+
+      // Chunk memberIds to handle Firestore 'in' query limit of 30
+      const chunk = (arr: string[], size: number) =>
+        Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+          arr.slice(i * size, i * size + size)
+        );
+      const memberIdChunks = chunk(memberIds, 30);
+      const membersMap = new Map();
+
+      for (const idChunk of memberIdChunks) {
+        const membersQuery = query(
+          collection(db, "members"),
+          where(documentId(), "in", idChunk)
+        );
+        const membersSnapshot = await getDocs(membersQuery);
+        membersSnapshot.forEach((doc) => {
+          membersMap.set(doc.id, doc.data().name);
+        });
+      }
+
+      const formattedTeamShares: TeamShareInfo[] = teamSharesData
+        .map((s) => ({
+          memberId: s.memberId,
+          memberName: membersMap.get(s.memberId) || "Không rõ",
+          amount: s.amount,
+          reason: s.calculationDetails?.reason,
+          isCurrentUser: s.memberId === selectedMemberId,
+        }))
+        .sort((a, b) => b.amount - a.amount);
+
+      setDetailedTeamShares(formattedTeamShares);
+    } catch (error) {
+      console.error("Error fetching team details:", error);
+      toast({
+        title: "Lỗi",
+        description: "Không thể tải chi tiết đội hình.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingDetails(false);
+    }
   };
 
   const totalAmount = useMemo(() => {
@@ -564,11 +565,11 @@ const Pay = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-pitch flex items-center justify-center p-2 sm:p-4">
-      <div className="w-full max-w-2xl">
+    <div className="min-h-screen bg-primary flex justify-center p-2 sm:p-4">
+      <div className="w-full max-w-2xl py-8">
         <Card className="shadow-card-hover">
           <CardHeader className="text-center px-4 pt-6 sm:px-6 sm:pt-8">
-            <div className="mx-auto mb-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-gradient-pitch flex items-center justify-center shadow-card">
+            <div className="mx-auto mb-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-primary flex items-center justify-center shadow-card">
               <Users className="h-7 w-7 sm:h-8 sm:w-8 text-white" />
             </div>
             <CardTitle className="text-2xl sm:text-3xl">
@@ -588,14 +589,72 @@ const Pay = () => {
                 Cài đặt ứng dụng
               </Button>
             )}
-            <div>
+
+            {/* Top Payers Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <BarChart className="h-5 w-5" />
+                  Top 3 người trả nhiều nhất
+                </CardTitle>
+                <CardDescription>
+                  Tổng hợp từ tất cả các trận đấu đã diễn ra.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoadingStats ? (
+                  <div className="flex justify-center items-center p-4 h-24">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : topPayers.length > 0 ? (
+                  <ul className="space-y-4">
+                    {topPayers.map((payer, index) => (
+                      <li
+                        key={payer.name + index}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={cn(
+                              "flex items-center justify-center w-8 h-8 rounded-full font-bold text-card-foreground",
+                              index === 0 && "bg-yellow-400",
+                              index === 1 && "bg-gray-300",
+                              index === 2 && "bg-yellow-600/70"
+                            )}
+                          >
+                            {index + 1}
+                          </span>
+                          <p className="font-medium">{payer.name}</p>
+                        </div>
+                        <p className="font-bold text-lg">
+                          {payer.total.toLocaleString()} VND
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-muted-foreground text-center p-4 h-24 flex items-center justify-center">
+                    Chưa có dữ liệu thanh toán.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="space-y-2">
+              <Label
+                htmlFor="member-selector"
+                className="text-base font-semibold text-foreground"
+              >
+                1. Chọn tên của bạn
+              </Label>
               <Popover open={isComboboxOpen} onOpenChange={setIsComboboxOpen}>
                 <PopoverTrigger asChild>
                   <Button
-                    variant="outline"
+                    id="member-selector"
+                    variant={selectedMemberId ? "secondary" : "outline"}
                     role="combobox"
                     aria-expanded={isComboboxOpen}
-                    className="w-full justify-between h-12"
+                    className="w-full justify-between h-12 text-base"
                     disabled={isLoadingMembers}
                   >
                     {selectedMemberId
@@ -646,64 +705,6 @@ const Pay = () => {
                 </PopoverContent>
               </Popover>
             </div>
-
-            {/* Top Payers Chart */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <BarChart className="h-5 w-5" />
-                  Top 3 người trả nhiều nhất
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {isLoadingStats ? (
-                  <div className="flex justify-center items-center h-40">
-                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                  </div>
-                ) : topPayers.length > 0 ? (
-                  <ChartContainer
-                    config={{
-                      total: {
-                        label: "Tổng tiền",
-                        color: "hsl(var(--chart-1))",
-                      },
-                    }}
-                    className="h-40"
-                  >
-                    <RechartsBarChart
-                      accessibilityLayer
-                      data={topPayers}
-                      layout="vertical"
-                      margin={{ left: 10, right: 10 }}
-                    >
-                      <YAxis
-                        dataKey="name"
-                        type="category"
-                        tickLine={false}
-                        tickMargin={10}
-                        axisLine={false}
-                        className="text-xs"
-                      />
-                      <XAxis dataKey="total" type="number" hide />
-                      <ChartTooltip
-                        cursor={false}
-                        content={<ChartTooltipContent hideLabel />}
-                      />
-                      <Bar
-                        dataKey="total"
-                        fill="var(--color-total)"
-                        radius={5}
-                        barSize={20}
-                      />
-                    </RechartsBarChart>
-                  </ChartContainer>
-                ) : (
-                  <div className="text-center p-4 text-muted-foreground">
-                    Chưa có dữ liệu thống kê.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
 
             {/* {selectedMemberId && (
               <div className="flex items-center justify-between rounded-lg border p-3 sm:p-4 bg-gradient-card">
@@ -760,7 +761,7 @@ const Pay = () => {
                     </Button>
                   </div>
                 </div>
-                <div className="space-y-2 sm:space-y-3 max-h-[40vh] sm:max-h-72 overflow-y-auto p-1">
+                <div className="space-y-2 sm:space-y-3 p-1">
                   <Accordion
                     type="multiple"
                     className="w-full space-y-2 sm:space-y-3"
@@ -880,9 +881,12 @@ const Pay = () => {
                                       variant="outline"
                                       size="sm"
                                       className="w-full mt-2"
+                                      onClick={() =>
+                                        handleViewTeamDetails(share)
+                                      }
                                     >
                                       <UsersRound className="mr-2 h-4 w-4" />
-                                      Xem đội hình & Công nợ
+                                      Xem đội hình
                                     </Button>
                                   </DialogTrigger>
                                   <DialogContent>
@@ -896,39 +900,43 @@ const Pay = () => {
                                         viên trong đội.
                                       </DialogDescription>
                                     </DialogHeader>
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow>
-                                          <TableHead>Thành viên</TableHead>
-                                          <TableHead>Lý do</TableHead>
-                                          <TableHead className="text-right">
-                                            Số tiền
-                                          </TableHead>
-                                        </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {share.teamShares.map((s) => (
-                                          <TableRow
-                                            key={s.memberId}
-                                            className={
-                                              s.isCurrentUser
-                                                ? "bg-muted/50"
-                                                : ""
-                                            }
-                                          >
-                                            <TableCell className="font-medium">
-                                              {s.memberName}
-                                            </TableCell>
-                                            <TableCell className="italic text-muted-foreground">
-                                              {s.reason}
-                                            </TableCell>
-                                            <TableCell className="text-right font-semibold">
-                                              {s.amount.toLocaleString()}đ
-                                            </TableCell>
+                                    {isLoadingDetails ? (
+                                      <div className="flex justify-center items-center h-40">
+                                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                      </div>
+                                    ) : (
+                                      <Table>
+                                        <TableHeader>
+                                          <TableRow>
+                                            <TableHead>Thành viên</TableHead>
+                                            <TableHead>Số tiền</TableHead>
+                                            <TableHead>Lý do</TableHead>
                                           </TableRow>
-                                        ))}
-                                      </TableBody>
-                                    </Table>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {detailedTeamShares.map((s) => (
+                                            <TableRow
+                                              key={s.memberId}
+                                              className={
+                                                s.isCurrentUser
+                                                  ? "bg-muted/50"
+                                                  : ""
+                                              }
+                                            >
+                                              <TableCell className="font-medium">
+                                                {s.memberName}
+                                              </TableCell>
+                                              <TableCell className="font-semibold">
+                                                {s.amount.toLocaleString()}đ
+                                              </TableCell>
+                                              <TableCell className="text-right italic text-muted-foreground">
+                                                {s.reason}
+                                              </TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    )}
                                   </DialogContent>
                                 </Dialog>
                               </div>

@@ -17,7 +17,6 @@ import PublicPortal from "./pages/PublicPortal";
 
 import { useAuth } from "./contexts/AuthContext";
 import { PWAInstallProvider } from "./contexts/PWAInstallContext";
-
 const queryClient = new QueryClient();
 
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {

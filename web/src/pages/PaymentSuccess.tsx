@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 
 const PaymentSuccess = () => {
   return (
-    <div className="min-h-screen bg-gradient-pitch flex items-center justify-center p-4">
+    <div className="min-h-screen bg-primary flex items-center justify-center p-4">
       <Card className="w-full max-w-md text-center shadow-card-hover">
         <CardHeader>
           <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-green-100 flex items-center justify-center">
@@ -19,7 +19,7 @@ const PaymentSuccess = () => {
             nhận.
           </p>
           <Button asChild size="lg" className="w-full">
-            <Link to="/pay">
+            <Link to="/public">
               <Home className="mr-2 h-5 w-5" />
               Về trang chủ
             </Link>
