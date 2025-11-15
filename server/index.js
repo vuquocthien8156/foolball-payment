@@ -35,7 +35,7 @@ app.use(express.json());
 const apiRoutes = express.Router();
 
 apiRoutes.post("/create-payment-link", async (req, res) => {
-  const { shareIds, memberId } = req.body;
+  const { shareIds, memberId, ratings } = req.body;
 
   if (
     !shareIds ||
@@ -91,6 +91,17 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
     const orderCode = Date.now();
     const description = `Thanh toan ${orderCode}`;
 
+    // Create a payment request document to store context
+    const paymentRequestRef = db.collection("paymentRequests").doc(String(orderCode));
+    await paymentRequestRef.set({
+      orderCode,
+      shareIds: fetchedShareIds,
+      memberId,
+      ratings: ratings || null, // Store ratings, can be null
+      status: "PENDING",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
     // Use a batch to update all selected shares with the same orderCode
     const batch = db.batch();
     selectedShareDocs.forEach((doc) => {
@@ -127,58 +138,87 @@ const payosWebhookHandler = async (req, res) => {
     if (webhookData.code === "00") {
       const orderCode = webhookData.orderCode;
       const db = admin.firestore();
-      const sharesQuery = db
-        .collectionGroup("shares")
-        .where("payosOrderCode", "==", orderCode);
-      const snapshot = await sharesQuery.get();
 
-      if (snapshot.empty) {
-        console.error(`Webhook: No shares found for orderCode ${orderCode}`);
-        return res.status(200).json({ warning: "No shares found for order." });
-      }
+      // Start a transaction to ensure atomicity
+      await db.runTransaction(async (transaction) => {
+        // 1. Get the payment request to access ratings and shareIds
+        const paymentRequestRef = db.collection("paymentRequests").doc(String(orderCode));
+        const paymentRequestSnap = await transaction.get(paymentRequestRef);
 
-      const batch = db.batch();
-      // Fetch member details to include in the notification
-      const memberId = snapshot.docs[0].data().memberId;
-      const memberDoc = await db.collection("members").doc(memberId).get();
-      const memberName = memberDoc.exists
-        ? memberDoc.data().name
-        : "Một thành viên";
-
-      snapshot.docs.forEach((doc) => {
-        const shareData = doc.data();
-        if (shareData.status !== "PAID") {
-          batch.update(doc.ref, {
-            status: "PAID",
-            paidAt: new Date().toISOString(),
-            channel: "PAYOS",
-            meta: { webhook: webhookData },
-          });
- 
-          // Create a notification for each paid share
-          const notificationRef = db.collection("notifications").doc();
-          // Get matchId directly from the share document
-          const matchId = shareData.matchId;
-          if (!matchId) {
-            console.error(
-              `CRITICAL: matchId is missing in share document ${doc.id} for orderCode ${orderCode}. Skipping notification.`
-            );
-            // Continue to the next iteration without creating a notification
-            return;
-          }
-          batch.set(notificationRef, {
-            message: `${memberName} đã thanh toán ${shareData.amount.toLocaleString()} VND`,
-            matchId: matchId,
-            shareId: doc.id,
-            isRead: false,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
+        if (!paymentRequestSnap.exists) {
+          console.error(`Webhook: No payment request found for orderCode ${orderCode}`);
+          // Don't throw, just log and exit, as PayOS might retry.
+          return;
         }
+        const paymentRequestData = paymentRequestSnap.data();
+
+        // 2. Get the related share documents
+        const sharesQuery = db
+          .collectionGroup("shares")
+          .where("payosOrderCode", "==", orderCode);
+        const sharesSnapshot = await sharesQuery.get();
+
+        if (sharesSnapshot.empty) {
+          console.error(`Webhook: No shares found for orderCode ${orderCode}`);
+          return;
+        }
+
+        // 3. Process ratings if they exist
+        if (paymentRequestData.ratings && Array.isArray(paymentRequestData.ratings)) {
+          for (const rating of paymentRequestData.ratings) {
+            const { matchId, ratedByMemberId, playerRatings, mvpPlayerId } = rating;
+            if (matchId && ratedByMemberId && playerRatings && mvpPlayerId) {
+              const ratingRef = db.collection("matches").doc(matchId).collection("ratings").doc();
+              transaction.set(ratingRef, {
+                ratedByMemberId,
+                playerRatings,
+                mvpPlayerId,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                orderCode, // Link back to the payment
+              });
+            }
+          }
+        }
+        
+        // 4. Update share statuses and create notifications
+        const memberId = paymentRequestData.memberId;
+        const memberDoc = await db.collection("members").doc(memberId).get();
+        const memberName = memberDoc.exists ? memberDoc.data().name : "Một thành viên";
+
+        sharesSnapshot.docs.forEach((doc) => {
+          const shareData = doc.data();
+          if (shareData.status !== "PAID") {
+            transaction.update(doc.ref, {
+              status: "PAID",
+              paidAt: new Date().toISOString(),
+              channel: "PAYOS",
+              meta: { webhook: webhookData },
+            });
+
+            const notificationRef = db.collection("notifications").doc();
+            const matchId = shareData.matchId;
+            if (!matchId) {
+              console.error(`CRITICAL: matchId is missing in share ${doc.id}`);
+              return;
+            }
+            transaction.set(notificationRef, {
+              message: `${memberName} đã thanh toán ${shareData.amount.toLocaleString()} VND`,
+              matchId: matchId,
+              shareId: doc.id,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        });
+
+        // 5. Update the payment request status
+        transaction.update(paymentRequestRef, {
+          status: "PAID",
+          paidAt: admin.firestore.FieldValue.serverTimestamp()
+        });
       });
-      await batch.commit();
-      console.log(
-        `Successfully updated ${snapshot.size} shares to PAID for orderCode: ${orderCode}`
-      );
+
+      console.log(`Successfully processed payment and ratings for orderCode: ${orderCode}`);
     } else {
       console.log("Webhook received for non-successful payment:", webhookData);
     }

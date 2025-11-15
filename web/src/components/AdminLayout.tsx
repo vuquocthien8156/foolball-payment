@@ -9,6 +9,7 @@ import {
   LogOut,
   BarChart,
   Globe,
+  Trophy,
 } from "lucide-react";
 import {
   Card,
@@ -194,15 +195,15 @@ const AdminLayout = () => {
                 Dashboard
               </NavLink>
               <NavLink
-                to="/admin/setup"
+                to="/admin/matches"
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
                     isActive ? "bg-muted text-primary" : ""
                   }`
                 }
               >
-                <PlusCircle className="h-4 w-4" />
-                Tạo trận đấu
+                <Trophy className="h-4 w-4" />
+                Quản lý Trận đấu
               </NavLink>
               <NavLink
                 to="/admin/members"

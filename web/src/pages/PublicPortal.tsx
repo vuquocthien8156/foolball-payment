@@ -5,7 +5,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CalendarCheck, CreditCard, Trophy } from "lucide-react";
+import {
+  CalendarCheck,
+  CreditCard,
+  Trophy,
+  TrendingUp,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 
 const PublicPortal = () => {
@@ -51,6 +56,21 @@ const PublicPortal = () => {
                   <CardTitle className="text-xl">Thanh toán</CardTitle>
                   <CardDescription>
                     Xem và thanh toán các khoản nợ.
+                  </CardDescription>
+                </div>
+              </CardHeader>
+            </Card>
+          </Link>
+          <Link to="/public/ratings" className="block">
+            <Card className="shadow-card hover:shadow-card-hover transition-all cursor-pointer group">
+              <CardHeader className="flex flex-row items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center group-hover:scale-110 transition-transform shadow-card">
+                  <TrendingUp className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <CardTitle className="text-xl">Xem Đánh Giá</CardTitle>
+                  <CardDescription>
+                    Xem MVP và điểm của các trận đã đấu.
                   </CardDescription>
                 </div>
               </CardHeader>

@@ -36,6 +36,7 @@ import {
   Download,
   UsersRound,
   BarChart,
+  Star,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -85,6 +86,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { cn } from "@/lib/utils";
+import { Rating } from "@/components/Rating";
 
 interface Member {
   id: string;
@@ -168,6 +170,7 @@ const Pay = () => {
     []
   );
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [isRating, setIsRating] = useState(false);
 
   const fetchTopPayers = useCallback(async () => {
     setIsLoadingStats(true);
@@ -470,7 +473,7 @@ const Pay = () => {
     }
   };
 
-  const handlePayment = async () => {
+  const handleProceedToRating = () => {
     if (selectedShares.length === 0) {
       toast({
         title: "Chưa chọn khoản thanh toán",
@@ -479,6 +482,10 @@ const Pay = () => {
       });
       return;
     }
+    setIsRating(true);
+  };
+
+  const handleRatingComplete = async (ratings: any[]) => {
     setIsCreatingPayment(true);
     try {
       const API_URL = import.meta.env.VITE_API_URL;
@@ -490,6 +497,7 @@ const Pay = () => {
         body: JSON.stringify({
           shareIds: selectedShares,
           memberId: selectedMemberId,
+          ratings: ratings,
         }),
       });
 
@@ -514,6 +522,7 @@ const Pay = () => {
       });
     } finally {
       setIsCreatingPayment(false);
+      setIsRating(false); // Go back to selection screen
     }
   };
 
@@ -580,413 +589,422 @@ const Pay = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 sm:space-y-6 px-4 pb-4 sm:px-6 sm:pb-6">
-            {canInstall && (
-              <Button
-                onClick={installPWA}
-                className="w-full bg-indigo-600 hover:bg-indigo-700"
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Cài đặt ứng dụng
-              </Button>
-            )}
-
-            {/* Top Payers Card */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <BarChart className="h-5 w-5" />
-                  Top 3 người trả nhiều nhất
-                </CardTitle>
-                <CardDescription>
-                  Tổng hợp từ tất cả các trận đấu đã diễn ra.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {isLoadingStats ? (
-                  <div className="flex justify-center items-center p-4 h-24">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : topPayers.length > 0 ? (
-                  <ul className="space-y-4">
-                    {topPayers.map((payer, index) => (
-                      <li
-                        key={payer.name + index}
-                        className="flex items-center justify-between"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span
-                            className={cn(
-                              "flex items-center justify-center w-8 h-8 rounded-full font-bold text-card-foreground",
-                              index === 0 && "bg-yellow-400",
-                              index === 1 && "bg-gray-300",
-                              index === 2 && "bg-yellow-600/70"
-                            )}
-                          >
-                            {index + 1}
-                          </span>
-                          <p className="font-medium">{payer.name}</p>
-                        </div>
-                        <p className="font-bold text-lg">
-                          {payer.total.toLocaleString()} VND
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-muted-foreground text-center p-4 h-24 flex items-center justify-center">
-                    Chưa có dữ liệu thanh toán.
-                  </p>
+            {isRating ? (
+              <Rating
+                sharesToRate={unpaidShares.filter((s) =>
+                  selectedShares.includes(s.id)
                 )}
-              </CardContent>
-            </Card>
-
-            <div className="space-y-2">
-              <Label
-                htmlFor="member-selector"
-                className="text-base font-semibold text-foreground"
-              >
-                1. Chọn tên của bạn
-              </Label>
-              <Popover open={isComboboxOpen} onOpenChange={setIsComboboxOpen}>
-                <PopoverTrigger asChild>
+                onRatingComplete={handleRatingComplete}
+                ratedByMemberId={selectedMemberId}
+              />
+            ) : (
+              <>
+                {canInstall && (
                   <Button
-                    id="member-selector"
-                    variant={selectedMemberId ? "secondary" : "outline"}
-                    role="combobox"
-                    aria-expanded={isComboboxOpen}
-                    className="w-full justify-between h-12 text-base"
-                    disabled={isLoadingMembers}
+                    onClick={installPWA}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700"
                   >
-                    {selectedMemberId
-                      ? members.find((member) => member.id === selectedMemberId)
-                          ?.name
-                      : "Chọn tên của bạn..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    <Download className="mr-2 h-4 w-4" />
+                    Cài đặt ứng dụng
                   </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                  <Command
-                    filter={(value, search) => {
-                      const normalizedValue = removeDiacritics(
-                        value.toLowerCase()
-                      );
-                      const normalizedSearch = removeDiacritics(
-                        search.toLowerCase()
-                      );
-                      return normalizedValue.includes(normalizedSearch) ? 1 : 0;
-                    }}
-                  >
-                    <CommandInput placeholder="Tìm tên thành viên..." />
-                    <CommandList>
-                      <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
-                      <CommandGroup>
-                        {members.map((member) => (
-                          <CommandItem
-                            key={member.id}
-                            value={member.name}
-                            onSelect={() => {
-                              handleMemberChange(member.id);
-                              setIsComboboxOpen(false);
-                            }}
+                )}
+
+                {/* Top Payers Card */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <BarChart className="h-5 w-5" />
+                      Top 3 người trả nhiều nhất
+                    </CardTitle>
+                    <CardDescription>
+                      Tổng hợp từ tất cả các trận đấu đã diễn ra.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {isLoadingStats ? (
+                      <div className="flex justify-center items-center p-4 h-24">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : topPayers.length > 0 ? (
+                      <ul className="space-y-4">
+                        {topPayers.map((payer, index) => (
+                          <li
+                            key={payer.name + index}
+                            className="flex items-center justify-between"
                           >
-                            <Check
-                              className={`mr-2 h-4 w-4 ${
-                                selectedMemberId === member.id
-                                  ? "opacity-100"
-                                  : "opacity-0"
-                              }`}
-                            />
-                            {member.name}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* {selectedMemberId && (
-              <div className="flex items-center justify-between rounded-lg border p-3 sm:p-4 bg-gradient-card">
-                <div className="flex items-center space-x-3">
-                  <Bell className="h-5 w-5 text-primary" />
-                  <Label
-                    htmlFor="notification-switch"
-                    className="text-sm sm:text-base font-medium"
-                  >
-                    Nhận thông báo khi có nợ mới
-                  </Label>
-                </div>
-                <Switch
-                  id="notification-switch"
-                  checked={isNotificationEnabled}
-                  onCheckedChange={handleNotificationToggle}
-                  disabled={isUpdatingNotification}
-                />
-              </div>
-            )} */}
-
-            {isLoadingShares && (
-              <div className="flex justify-center items-center h-40">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              </div>
-            )}
-
-            {!isLoadingShares &&
-              selectedMemberId &&
-              unpaidShares.length === 0 && (
-                <div className="text-center p-8 bg-gradient-card rounded-xl border">
-                  <h3 className="text-lg font-semibold">Tuyệt vời!</h3>
-                  <p className="text-muted-foreground">
-                    Bạn không có khoản nợ nào chưa thanh toán.
-                  </p>
-                </div>
-              )}
-
-            {!isLoadingShares && unpaidShares.length > 0 && (
-              <div>
-                <div className="mb-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-base sm:text-lg font-semibold">
-                      Các trận chưa thanh toán
-                    </h3>
-                    <Button
-                      variant="link"
-                      onClick={handleSelectAll}
-                      className="text-sm sm:text-base px-2"
-                    >
-                      {selectedShares.length === unpaidShares.length
-                        ? "Bỏ chọn tất cả"
-                        : "Chọn tất cả"}
-                    </Button>
-                  </div>
-                </div>
-                <div className="space-y-2 sm:space-y-3 p-1">
-                  <Accordion
-                    type="multiple"
-                    className="w-full space-y-2 sm:space-y-3"
-                    value={expandedItems}
-                    onValueChange={setExpandedItems}
-                  >
-                    {unpaidShares.map((share) => (
-                      <Card
-                        key={share.id}
-                        className="overflow-hidden bg-card hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="flex items-center p-3 sm:p-4">
-                          <Checkbox
-                            checked={selectedShares.includes(share.id)}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleShareSelection(share.id);
-                            }}
-                            className="mr-3 sm:mr-4 h-5 w-5"
-                          />
-                          <AccordionItem
-                            value={share.id}
-                            className="border-b-0 flex-1"
-                          >
-                            <AccordionTrigger className="p-0 hover:no-underline">
-                              <div className="flex-1 flex justify-between items-center pr-2 sm:pr-4">
-                                <div>
-                                  <p className="font-medium text-sm sm:text-base text-left">
-                                    Trận ngày {share.matchDate}
-                                  </p>
-                                </div>
-                                <span className="font-semibold text-base sm:text-lg">
-                                  {share.amount.toLocaleString()}{" "}
-                                  <span className="text-xs sm:text-sm font-normal text-muted-foreground">
-                                    VND
-                                  </span>
-                                </span>
-                              </div>
-                            </AccordionTrigger>
-                            <AccordionContent className="pt-3 sm:pt-4 pb-1 pr-1">
-                              <div className="space-y-3 text-xs sm:text-sm text-muted-foreground p-3 sm:p-4 bg-background rounded-lg border">
-                                {/* Match Summary */}
-                                <div>
-                                  <h4 className="font-semibold text-foreground mb-2 flex items-center gap-2 text-sm sm:text-base">
-                                    <Info className="h-4 w-4" />
-                                    Tóm tắt trận đấu
-                                  </h4>
-                                  <div className="flex justify-between">
-                                    <span>Tổng tiền sân:</span>
-                                    <span className="font-medium text-foreground">
-                                      {share.matchTotalAmount.toLocaleString()}đ
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span>
-                                      Đội {share.teamName} ({share.teamPercent}
-                                      %):
-                                    </span>
-                                    <span className="font-medium text-foreground">
-                                      {(
-                                        (share.matchTotalAmount *
-                                          share.teamPercent) /
-                                        100
-                                      ).toLocaleString()}
-                                      đ
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Calculation Details */}
-                                {share.calculationDetails && (
-                                  <div>
-                                    <h4 className="font-semibold text-foreground my-2 flex items-center gap-2 text-sm sm:text-base">
-                                      <Users className="h-4 w-4" />
-                                      Chi tiết chia tiền
-                                    </h4>
-                                    {share.calculationDetails.reason && (
-                                      <div className="flex justify-between text-amber-600 italic">
-                                        <span>Lý do set riêng:</span>
-                                        <span className="font-medium">
-                                          {share.calculationDetails.reason}
-                                        </span>
-                                      </div>
-                                    )}
-                                    {share.calculationDetails.memberPercent ? (
-                                      <div className="flex justify-between text-green-600">
-                                        <span>Bạn được set:</span>
-                                        <span className="font-medium">
-                                          {
-                                            share.calculationDetails
-                                              .memberPercent
-                                          }
-                                          %
-                                        </span>
-                                      </div>
-                                    ) : (
-                                      <div className="flex justify-between">
-                                        <span>Bạn được chia đều</span>
-                                      </div>
-                                    )}
-                                  </div>
+                            <div className="flex items-center gap-3">
+                              <span
+                                className={cn(
+                                  "flex items-center justify-center w-8 h-8 rounded-full font-bold text-card-foreground",
+                                  index === 0 && "bg-yellow-400",
+                                  index === 1 && "bg-gray-300",
+                                  index === 2 && "bg-yellow-600/70"
                                 )}
+                              >
+                                {index + 1}
+                              </span>
+                              <p className="font-medium">{payer.name}</p>
+                            </div>
+                            <p className="font-bold text-lg">
+                              {payer.total.toLocaleString()} VND
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-muted-foreground text-center p-4 h-24 flex items-center justify-center">
+                        Chưa có dữ liệu thanh toán.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
 
-                                {/* Final Amount & Team Sheet Button */}
-                                <hr className="my-1 sm:my-2 border-dashed" />
-                                <div className="flex justify-between items-center text-sm sm:text-base">
-                                  <span className="font-semibold">
-                                    Số tiền của bạn:
-                                  </span>
-                                  <span className="font-bold text-primary">
-                                    {share.amount.toLocaleString()} VND
-                                  </span>
-                                </div>
-                                <Dialog>
-                                  <DialogTrigger asChild>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="w-full mt-2"
-                                      onClick={() =>
-                                        handleViewTeamDetails(share)
-                                      }
-                                    >
-                                      <UsersRound className="mr-2 h-4 w-4" />
-                                      Xem đội hình
-                                    </Button>
-                                  </DialogTrigger>
-                                  <DialogContent>
-                                    <DialogHeader>
-                                      <DialogTitle>
-                                        Công nợ {share.teamName} - Trận{" "}
-                                        {share.matchDate}
-                                      </DialogTitle>
-                                      <DialogDescription>
-                                        Danh sách số tiền phải trả của các thành
-                                        viên trong đội.
-                                      </DialogDescription>
-                                    </DialogHeader>
-                                    {isLoadingDetails ? (
-                                      <div className="flex justify-center items-center h-40">
-                                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                                      </div>
-                                    ) : (
-                                      <Table>
-                                        <TableHeader>
-                                          <TableRow>
-                                            <TableHead>Thành viên</TableHead>
-                                            <TableHead>Số tiền</TableHead>
-                                            <TableHead>Lý do</TableHead>
-                                          </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                          {detailedTeamShares.map((s) => (
-                                            <TableRow
-                                              key={s.memberId}
-                                              className={
-                                                s.isCurrentUser
-                                                  ? "bg-muted/50"
-                                                  : ""
-                                              }
-                                            >
-                                              <TableCell className="font-medium">
-                                                {s.memberName}
-                                              </TableCell>
-                                              <TableCell className="font-semibold">
-                                                {s.amount.toLocaleString()}đ
-                                              </TableCell>
-                                              <TableCell className="text-right italic text-muted-foreground">
-                                                {s.reason}
-                                              </TableCell>
-                                            </TableRow>
-                                          ))}
-                                        </TableBody>
-                                      </Table>
-                                    )}
-                                  </DialogContent>
-                                </Dialog>
-                              </div>
-                            </AccordionContent>
-                          </AccordionItem>
-                        </div>
-                      </Card>
-                    ))}
-                  </Accordion>
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="member-selector"
+                    className="text-base font-semibold text-foreground"
+                  >
+                    1. Chọn tên của bạn
+                  </Label>
+                  <Popover
+                    open={isComboboxOpen}
+                    onOpenChange={setIsComboboxOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="member-selector"
+                        variant={selectedMemberId ? "secondary" : "outline"}
+                        role="combobox"
+                        aria-expanded={isComboboxOpen}
+                        className="w-full justify-between h-12 text-base"
+                        disabled={isLoadingMembers}
+                      >
+                        {selectedMemberId
+                          ? members.find(
+                              (member) => member.id === selectedMemberId
+                            )?.name
+                          : "Chọn tên của bạn..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                      <Command
+                        filter={(value, search) => {
+                          const normalizedValue = removeDiacritics(
+                            value.toLowerCase()
+                          );
+                          const normalizedSearch = removeDiacritics(
+                            search.toLowerCase()
+                          );
+                          return normalizedValue.includes(normalizedSearch)
+                            ? 1
+                            : 0;
+                        }}
+                      >
+                        <CommandInput placeholder="Tìm tên thành viên..." />
+                        <CommandList>
+                          <CommandEmpty>
+                            Không tìm thấy thành viên.
+                          </CommandEmpty>
+                          <CommandGroup>
+                            {members.map((member) => (
+                              <CommandItem
+                                key={member.id}
+                                value={member.name}
+                                onSelect={() => {
+                                  handleMemberChange(member.id);
+                                  setIsComboboxOpen(false);
+                                }}
+                              >
+                                <Check
+                                  className={`mr-2 h-4 w-4 ${
+                                    selectedMemberId === member.id
+                                      ? "opacity-100"
+                                      : "opacity-0"
+                                  }`}
+                                />
+                                {member.name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
 
-                {selectedShares.length > 0 && (
-                  <div className="mt-4 sm:mt-6 space-y-3 sm:space-y-4">
-                    <div className="p-4 sm:p-6 rounded-xl bg-gradient-card border">
+                {isLoadingShares && (
+                  <div className="flex justify-center items-center h-40">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+
+                {!isLoadingShares &&
+                  selectedMemberId &&
+                  unpaidShares.length === 0 && (
+                    <div className="text-center p-8 bg-gradient-card rounded-xl border">
+                      <h3 className="text-lg font-semibold">Tuyệt vời!</h3>
+                      <p className="text-muted-foreground">
+                        Bạn không có khoản nợ nào chưa thanh toán.
+                      </p>
+                    </div>
+                  )}
+
+                {!isLoadingShares && unpaidShares.length > 0 && (
+                  <div>
+                    <div className="mb-4">
                       <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground text-sm sm:text-base">
-                          Tổng cộng
-                        </span>
-                        <div className="flex items-baseline gap-1 sm:gap-2">
-                          <DollarSign className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-                          <span className="text-2xl sm:text-3xl font-bold text-primary">
-                            {totalAmount.toLocaleString()}
-                          </span>
-                          <span className="text-sm sm:text-base text-muted-foreground">
-                            VND
-                          </span>
-                        </div>
+                        <h3 className="text-base sm:text-lg font-semibold">
+                          Các trận chưa thanh toán
+                        </h3>
+                        <Button
+                          variant="link"
+                          onClick={handleSelectAll}
+                          className="text-sm sm:text-base px-2"
+                        >
+                          {selectedShares.length === unpaidShares.length
+                            ? "Bỏ chọn tất cả"
+                            : "Chọn tất cả"}
+                        </Button>
                       </div>
                     </div>
-                    <Button
-                      size="lg"
-                      className="w-full h-12 text-base sm:h-14 sm:text-lg"
-                      onClick={handlePayment}
-                      disabled={totalAmount === 0 || isCreatingPayment}
-                    >
-                      {isCreatingPayment ? (
-                        <>
-                          <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                          Đang xử lý...
-                        </>
-                      ) : (
-                        <>
-                          <CreditCard className="h-5 w-5 mr-2" />
-                          Thanh toán ({selectedShares.length} trận)
-                        </>
-                      )}
-                    </Button>
+                    <div className="space-y-2 sm:space-y-3 p-1">
+                      <Accordion
+                        type="multiple"
+                        className="w-full space-y-2 sm:space-y-3"
+                        value={expandedItems}
+                        onValueChange={setExpandedItems}
+                      >
+                        {unpaidShares.map((share) => (
+                          <Card
+                            key={share.id}
+                            className="overflow-hidden bg-card hover:bg-muted/50 transition-colors"
+                          >
+                            <div className="flex items-center p-3 sm:p-4">
+                              <Checkbox
+                                checked={selectedShares.includes(share.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleShareSelection(share.id);
+                                }}
+                                className="mr-3 sm:mr-4 h-5 w-5"
+                              />
+                              <AccordionItem
+                                value={share.id}
+                                className="border-b-0 flex-1"
+                              >
+                                <AccordionTrigger className="p-0 hover:no-underline">
+                                  <div className="flex-1 flex justify-between items-center pr-2 sm:pr-4">
+                                    <div>
+                                      <p className="font-medium text-sm sm:text-base text-left">
+                                        Trận ngày {share.matchDate}
+                                      </p>
+                                    </div>
+                                    <span className="font-semibold text-base sm:text-lg">
+                                      {share.amount.toLocaleString()}{" "}
+                                      <span className="text-xs sm:text-sm font-normal text-muted-foreground">
+                                        VND
+                                      </span>
+                                    </span>
+                                  </div>
+                                </AccordionTrigger>
+                                <AccordionContent className="pt-3 sm:pt-4 pb-1 pr-1">
+                                  <div className="space-y-3 text-xs sm:text-sm text-muted-foreground p-3 sm:p-4 bg-background rounded-lg border">
+                                    {/* Match Summary */}
+                                    <div>
+                                      <h4 className="font-semibold text-foreground mb-2 flex items-center gap-2 text-sm sm:text-base">
+                                        <Info className="h-4 w-4" />
+                                        Tóm tắt trận đấu
+                                      </h4>
+                                      <div className="flex justify-between">
+                                        <span>Tổng tiền sân:</span>
+                                        <span className="font-medium text-foreground">
+                                          {share.matchTotalAmount.toLocaleString()}
+                                          đ
+                                        </span>
+                                      </div>
+                                      <div className="flex justify-between">
+                                        <span>
+                                          Đội {share.teamName} (
+                                          {share.teamPercent}
+                                          %):
+                                        </span>
+                                        <span className="font-medium text-foreground">
+                                          {(
+                                            (share.matchTotalAmount *
+                                              share.teamPercent) /
+                                            100
+                                          ).toLocaleString()}
+                                          đ
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Calculation Details */}
+                                    {share.calculationDetails && (
+                                      <div>
+                                        <h4 className="font-semibold text-foreground my-2 flex items-center gap-2 text-sm sm:text-base">
+                                          <Users className="h-4 w-4" />
+                                          Chi tiết chia tiền
+                                        </h4>
+                                        {share.calculationDetails.reason && (
+                                          <div className="flex justify-between text-amber-600 italic">
+                                            <span>Lý do set riêng:</span>
+                                            <span className="font-medium">
+                                              {
+                                                share.calculationDetails
+                                                  .reason
+                                              }
+                                            </span>
+                                          </div>
+                                        )}
+                                        {share.calculationDetails
+                                          .memberPercent ? (
+                                          <div className="flex justify-between text-green-600">
+                                            <span>Bạn được set:</span>
+                                            <span className="font-medium">
+                                              {
+                                                share.calculationDetails
+                                                  .memberPercent
+                                              }
+                                              %
+                                            </span>
+                                          </div>
+                                        ) : (
+                                          <div className="flex justify-between">
+                                            <span>Bạn được chia đều</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Final Amount & Team Sheet Button */}
+                                    <hr className="my-1 sm:my-2 border-dashed" />
+                                    <div className="flex justify-between items-center text-sm sm:text-base">
+                                      <span className="font-semibold">
+                                        Số tiền của bạn:
+                                      </span>
+                                      <span className="font-bold text-primary">
+                                        {share.amount.toLocaleString()} VND
+                                      </span>
+                                    </div>
+                                    <Dialog>
+                                      <DialogTrigger asChild>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="w-full mt-2"
+                                          onClick={() =>
+                                            handleViewTeamDetails(share)
+                                          }
+                                        >
+                                          <UsersRound className="mr-2 h-4 w-4" />
+                                          Xem đội hình
+                                        </Button>
+                                      </DialogTrigger>
+                                      <DialogContent>
+                                        <DialogHeader>
+                                          <DialogTitle>
+                                            Công nợ {share.teamName} - Trận{" "}
+                                            {share.matchDate}
+                                          </DialogTitle>
+                                          <DialogDescription>
+                                            Danh sách số tiền phải trả của các
+                                            thành viên trong đội.
+                                          </DialogDescription>
+                                        </DialogHeader>
+                                        {isLoadingDetails ? (
+                                          <div className="flex justify-center items-center h-40">
+                                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                          </div>
+                                        ) : (
+                                          <Table>
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead>
+                                                  Thành viên
+                                                </TableHead>
+                                                <TableHead>Số tiền</TableHead>
+                                                <TableHead>Lý do</TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {detailedTeamShares.map((s) => (
+                                                <TableRow
+                                                  key={s.memberId}
+                                                  className={
+                                                    s.isCurrentUser
+                                                      ? "bg-muted/50"
+                                                      : ""
+                                                  }
+                                                >
+                                                  <TableCell className="font-medium">
+                                                    {s.memberName}
+                                                  </TableCell>
+                                                  <TableCell className="font-semibold">
+                                                    {s.amount.toLocaleString()}đ
+                                                  </TableCell>
+                                                  <TableCell className="text-right italic text-muted-foreground">
+                                                    {s.reason}
+                                                  </TableCell>
+                                                </TableRow>
+                                              ))}
+                                            </TableBody>
+                                          </Table>
+                                        )}
+                                      </DialogContent>
+                                    </Dialog>
+                                  </div>
+                                </AccordionContent>
+                              </AccordionItem>
+                            </div>
+                          </Card>
+                        ))}
+                      </Accordion>
+                    </div>
+
+                    {selectedShares.length > 0 && (
+                      <div className="mt-4 sm:mt-6 space-y-3 sm:space-y-4">
+                        <div className="p-4 sm:p-6 rounded-xl bg-gradient-card border">
+                          <div className="flex items-center justify-between">
+                            <span className="text-muted-foreground text-sm sm:text-base">
+                              Tổng cộng
+                            </span>
+                            <div className="flex items-baseline gap-1 sm:gap-2">
+                              <DollarSign className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                              <span className="text-2xl sm:text-3xl font-bold text-primary">
+                                {totalAmount.toLocaleString()}
+                              </span>
+                              <span className="text-sm sm:text-base text-muted-foreground">
+                                VND
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <Button
+                          size="lg"
+                          className="w-full h-12 text-base sm:h-14 sm:text-lg"
+                          onClick={handleProceedToRating}
+                          disabled={totalAmount === 0 || isCreatingPayment}
+                        >
+                          {isCreatingPayment ? (
+                            <>
+                              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                              Đang xử lý...
+                            </>
+                          ) : (
+                            <>
+                              <Star className="h-5 w-5 mr-2" />
+                              Đánh giá & Thanh toán ({selectedShares.length}{" "}
+                              trận)
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
+              </>
             )}
           </CardContent>
         </Card>
