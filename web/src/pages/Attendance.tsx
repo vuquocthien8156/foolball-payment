@@ -300,7 +300,7 @@ const Attendance = () => {
         <p className="text-muted-foreground mb-8">
           Vui lòng chờ quản trị viên tạo trận đấu mới.
         </p>
-        <Button onClick={() => navigate("/")}>
+        <Button onClick={() => navigate("/public")}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Quay lại
         </Button>

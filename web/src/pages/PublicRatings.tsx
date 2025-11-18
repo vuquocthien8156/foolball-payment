@@ -109,13 +109,37 @@ const PublicRatings = () => {
       where("status", "==", "PUBLISHED"),
       orderBy("date", "desc")
     );
-    const unsubscribe = onSnapshot(matchesQuery, (querySnapshot) => {
-      const matchesList = querySnapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() } as Match)
+
+    const unsubscribe = onSnapshot(matchesQuery, async (querySnapshot) => {
+      const matchesPromises = querySnapshot.docs.map(async (matchDoc) => {
+        const sharesQuery = query(collection(matchDoc.ref, "shares"));
+        const sharesSnapshot = await getDocs(sharesQuery);
+
+        const totalShares = sharesSnapshot.size;
+        if (totalShares === 0) return null;
+
+        let paidCount = 0;
+        sharesSnapshot.forEach((shareDoc) => {
+          if (shareDoc.data().status === "PAID") {
+            paidCount++;
+          }
+        });
+
+        if (paidCount === totalShares) {
+          return { id: matchDoc.id, ...matchDoc.data() } as Match;
+        }
+        return null;
+      });
+
+      const resolvedMatches = await Promise.all(matchesPromises);
+      const validMatches = resolvedMatches.filter(
+        (match): match is Match => match !== null
       );
-      setMatches(matchesList);
+
+      setMatches(validMatches);
       setIsLoading(false);
     });
+
     return () => unsubscribe();
   }, []);
 
@@ -203,6 +227,22 @@ const PublicRatings = () => {
       const allMvpVotes = new Map<string, number>();
 
       for (const matchDoc of matchesSnapshot.docs) {
+        const sharesQuery = query(collection(matchDoc.ref, "shares"));
+        const sharesSnapshot = await getDocs(sharesQuery);
+        const totalShares = sharesSnapshot.size;
+        if (totalShares === 0) continue;
+
+        let paidCount = 0;
+        sharesSnapshot.forEach((shareDoc) => {
+          if (shareDoc.data().status === "PAID") {
+            paidCount++;
+          }
+        });
+
+        if (paidCount !== totalShares) {
+          continue;
+        }
+
         const ratingsQuery = query(collection(matchDoc.ref, "ratings"));
         const ratingsSnapshot = await getDocs(ratingsQuery);
 

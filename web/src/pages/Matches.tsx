@@ -39,9 +39,17 @@ import {
   Pencil,
   Trophy,
   PlusCircle,
+  Star,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -82,6 +90,10 @@ interface Match {
   totalAmount: number;
   status: "PENDING" | "COMPLETED" | "PUBLISHED";
   teamNames?: { [key: string]: string };
+  teamsConfig?: {
+    id: string;
+    name: string;
+  }[];
 }
 
 interface Share {
@@ -288,6 +300,18 @@ const Matches = () => {
   );
   const [mvpData, setMvpData] = useState<MvpData[]>([]);
   const [showAllMvp, setShowAllMvp] = useState(false);
+  const [activeTab, setActiveTab] = useState("payment");
+  const [crossRatings, setCrossRatings] = useState<
+    Map<
+      string,
+      {
+        ratedByName: string;
+        ratingsGiven: { playerRatedId: string; score: number }[];
+      }
+    >
+  >(new Map());
+  const [selectedRaterId, setSelectedRaterId] = useState<string | null>(null);
+  const [isLoadingRatings, setIsLoadingRatings] = useState(false);
 
   useEffect(() => {
     const matchId = searchParams.get("matchId");
@@ -363,7 +387,16 @@ const Matches = () => {
     );
     const unsubscribeShares = onSnapshot(sharesQuery, (querySnapshot) => {
       const currentMatch = matches.find((m) => m.id === selectedMatchId);
-      const teamNames = currentMatch?.teamNames || {};
+      let teamNames: { [key: string]: string } = {};
+      if (currentMatch?.teamsConfig) {
+        teamNames = currentMatch.teamsConfig.reduce((acc, team) => {
+          acc[team.id] = team.name;
+          return acc;
+        }, {} as { [key: string]: string });
+      } else if (currentMatch?.teamNames) {
+        teamNames = currentMatch.teamNames;
+      }
+
       const sharesList = querySnapshot.docs.map(
         (doc) =>
           ({
@@ -432,6 +465,42 @@ const Matches = () => {
 
       setPlayerRatings(ratingsByPlayer);
       setMvpData(sortedMvp);
+
+      // Process cross-ratings
+      setIsLoadingRatings(true);
+      const ratingsByRater = new Map<
+        string,
+        {
+          ratedByName: string;
+          ratingsGiven: { playerRatedId: string; score: number }[];
+        }
+      >();
+
+      ratingsSnapshot.forEach((doc) => {
+        const rating = doc.data();
+        const ratedByMemberId = rating.ratedByMemberId;
+        const ratedByName = members.get(ratedByMemberId) || "Không rõ";
+
+        if (!ratingsByRater.has(ratedByMemberId)) {
+          ratingsByRater.set(ratedByMemberId, {
+            ratedByName: ratedByName,
+            ratingsGiven: [],
+          });
+        }
+
+        rating.playerRatings.forEach(
+          (playerRating: { memberId: string; score: number }) => {
+            ratingsByRater.get(ratedByMemberId)!.ratingsGiven.push({
+              playerRatedId: playerRating.memberId,
+              score: playerRating.score,
+            });
+          }
+        );
+      });
+
+      setCrossRatings(ratingsByRater);
+      setSelectedRaterId(null); // Reset rater selection on match change
+      setIsLoadingRatings(false);
     });
 
     return () => {
@@ -579,11 +648,6 @@ const Matches = () => {
     [selectedMatchId]
   );
 
-  useEffect(() => {
-    if (selectedMatch && isFullyPaid && selectedMatch.status === "COMPLETED") {
-      handleUpdateMatchStatus("PUBLISHED");
-    }
-  }, [isFullyPaid, selectedMatch, handleUpdateMatchStatus]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
@@ -673,24 +737,288 @@ const Matches = () => {
             ) : (
               <div>
                 <div className="flex items-center gap-2 flex-wrap mb-4">
-                  {!isFullyPaid && selectedMatch?.status === "COMPLETED" && (
-                    <Button
-                      onClick={() => handleUpdateMatchStatus("PUBLISHED")}
-                      className="bg-green-500 hover:bg-green-600"
-                    >
-                      <CheckCircle2 className="h-4 w-4 mr-2" />
-                      Công khai
-                    </Button>
+                  {!isFullyPaid && (
+                    <>
+                      {selectedMatch?.status !== "PUBLISHED" ? (
+                        <Button
+                          onClick={() => handleUpdateMatchStatus("PUBLISHED")}
+                        >
+                          <Send className="h-4 w-4 mr-2" />
+                          Công khai
+                        </Button>
+                      ) : (
+                        <Button
+                          onClick={() => handleUpdateMatchStatus("COMPLETED")}
+                          variant="destructive"
+                        >
+                          <XCircle className="h-4 w-4 mr-2" />
+                          Hủy công khai
+                        </Button>
+                      )}
+                    </>
                   )}
-                  {!isFullyPaid && selectedMatch?.status === "PUBLISHED" && (
-                    <Button
-                      onClick={() => handleUpdateMatchStatus("COMPLETED")}
-                      variant="destructive"
-                    >
-                      <XCircle className="h-4 w-4 mr-2" />
-                      Hủy công khai
-                    </Button>
-                  )}
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button variant="outline">
+                        <Star className="mr-2 h-4 w-4" />
+                        Xem đánh giá
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl">
+                      <DialogHeader>
+                        <DialogTitle>
+                          Đánh giá cho trận ngày{" "}
+                          {selectedMatch &&
+                            new Date(
+                              typeof selectedMatch.date === "string"
+                                ? selectedMatch.date
+                                : selectedMatch.date.toDate()
+                            ).toLocaleDateString("vi-VN")}
+                        </DialogTitle>
+                      </DialogHeader>
+                      <div className="max-h-[80vh] overflow-y-auto p-4">
+                        <Tabs defaultValue="ratings" className="w-full">
+                          <TabsList className="grid w-full grid-cols-2">
+                            <TabsTrigger value="ratings">
+                              Xếp hạng & MVP
+                            </TabsTrigger>
+                            <TabsTrigger value="cross-rating">
+                              Đánh giá chéo
+                            </TabsTrigger>
+                          </TabsList>
+                          <TabsContent value="ratings" className="mt-6">
+                            {mvpData.length > 0 && (
+                              <Card className="mb-6">
+                                <CardHeader>
+                                  <CardTitle className="text-lg flex items-center gap-2">
+                                    <Trophy className="w-5 h-5 text-yellow-500" />
+                                    Cầu thủ xuất sắc nhất (MVP)
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="space-y-3">
+                                    {(showAllMvp
+                                      ? mvpData
+                                      : mvpData.slice(0, 3)
+                                    ).map((mvp, index) => (
+                                      <Dialog key={mvp.mvpId}>
+                                        <DialogTrigger asChild>
+                                          <div className="flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md">
+                                            <div className="flex items-center gap-3">
+                                              <span
+                                                className={cn(
+                                                  "font-semibold text-sm",
+                                                  index < 1 && "text-base"
+                                                )}
+                                              >
+                                                {index + 1}. {mvp.mvpName}
+                                              </span>
+                                            </div>
+                                            <Badge
+                                              variant={
+                                                index < 1
+                                                  ? "default"
+                                                  : "secondary"
+                                              }
+                                            >
+                                              {mvp.voteCount} phiếu
+                                            </Badge>
+                                          </div>
+                                        </DialogTrigger>
+                                        <DialogContent>
+                                          <DialogHeader>
+                                            <DialogTitle>
+                                              Danh sách bình chọn cho{" "}
+                                              {mvp.mvpName}
+                                            </DialogTitle>
+                                          </DialogHeader>
+                                          <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
+                                            {mvp.votedBy.map((voter, i) => (
+                                              <li key={i}>{voter}</li>
+                                            ))}
+                                          </ul>
+                                        </DialogContent>
+                                      </Dialog>
+                                    ))}
+                                  </div>
+                                  {mvpData.length > 3 && (
+                                    <div className="mt-4 text-center">
+                                      <Button
+                                        variant="link"
+                                        className="p-0 h-auto"
+                                        onClick={() =>
+                                          setShowAllMvp(!showAllMvp)
+                                        }
+                                      >
+                                        {showAllMvp ? "Thu gọn" : "Xem tất cả"}
+                                      </Button>
+                                    </div>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            )}
+                            {playerRatings.size > 0 ? (
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Hạng</TableHead>
+                                    <TableHead>Thành viên</TableHead>
+                                    <TableHead>Đội</TableHead>
+                                    <TableHead className="text-right">
+                                      Điểm TB
+                                    </TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {Array.from(playerRatings.entries())
+                                    .sort(
+                                      ([, a], [, b]) =>
+                                        b.averageScore - a.averageScore
+                                    )
+                                    .map(([memberId, ratingData], index) => {
+                                      const shareInfo = shares.find(
+                                        (s) => s.memberId === memberId
+                                      );
+                                      const teamName = shareInfo?.teamName || "N/A";
+                                      return (
+                                        <Dialog key={memberId}>
+                                          <DialogTrigger asChild>
+                                            <TableRow className="cursor-pointer">
+                                              <TableCell>{index + 1}</TableCell>
+                                              <TableCell className="font-medium">
+                                                {members.get(memberId) ||
+                                                  "Không rõ"}
+                                              </TableCell>
+                                              <TableCell>{teamName}</TableCell>
+                                              <TableCell className="text-right">
+                                                <Badge variant="outline">
+                                                  {ratingData.averageScore.toFixed(
+                                                    2
+                                                  )}
+                                                </Badge>
+                                              </TableCell>
+                                            </TableRow>
+                                          </DialogTrigger>
+                                        <DialogContent>
+                                          <DialogHeader>
+                                            <DialogTitle>
+                                              Chi tiết điểm của{" "}
+                                              {members.get(memberId) ||
+                                                "Không rõ"}
+                                            </DialogTitle>
+                                          </DialogHeader>
+                                          <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
+                                            {ratingData.details.map((d, i) => (
+                                              <li
+                                                key={i}
+                                                className="flex justify-between"
+                                              >
+                                                <span>{d.ratedBy}</span>
+                                                <strong>{d.score} điểm</strong>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        </DialogContent>
+                                        </Dialog>
+                                      );
+                                    })}
+                                </TableBody>
+                              </Table>
+                            ) : (
+                              <div className="text-center p-8 text-muted-foreground">
+                                Chưa có dữ liệu xếp hạng cho trận này.
+                              </div>
+                            )}
+                          </TabsContent>
+                          <TabsContent value="cross-rating" className="mt-6">
+                            {isLoadingRatings ? (
+                              <div className="text-center p-8">
+                                <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                              </div>
+                            ) : crossRatings.size === 0 ? (
+                              <div className="text-center p-8 text-muted-foreground">
+                                Chưa có dữ liệu đánh giá cho trận này.
+                              </div>
+                            ) : (
+                              <div className="space-y-4">
+                                <div>
+                                  <Select
+                                    onValueChange={setSelectedRaterId}
+                                    value={selectedRaterId || ""}
+                                  >
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Chọn người đánh giá để xem điểm" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {Array.from(crossRatings.entries()).map(
+                                        ([raterId, data]) => (
+                                          <SelectItem
+                                            key={raterId}
+                                            value={raterId}
+                                          >
+                                            {data.ratedByName}
+                                          </SelectItem>
+                                        )
+                                      )}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                {selectedRaterId && (
+                                  <Card>
+                                    <CardHeader>
+                                      <CardTitle>
+                                        Điểm do{" "}
+                                        {
+                                          crossRatings.get(selectedRaterId)
+                                            ?.ratedByName
+                                        }{" "}
+                                        chấm
+                                      </CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                      <Table>
+                                        <TableHeader>
+                                          <TableRow>
+                                            <TableHead>
+                                              Cầu thủ được đánh giá
+                                            </TableHead>
+                                            <TableHead className="text-right">
+                                              Điểm
+                                            </TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {crossRatings
+                                            .get(selectedRaterId)
+                                            ?.ratingsGiven.sort(
+                                              (a, b) => b.score - a.score
+                                            )
+                                            .map(
+                                              ({ playerRatedId, score }) => (
+                                                <TableRow key={playerRatedId}>
+                                                  <TableCell className="font-medium">
+                                                    {members.get(
+                                                      playerRatedId
+                                                    ) || "Không rõ"}
+                                                  </TableCell>
+                                                  <TableCell className="text-right font-semibold">
+                                                    {score}
+                                                  </TableCell>
+                                                </TableRow>
+                                              )
+                                            )}
+                                        </TableBody>
+                                      </Table>
+                                    </CardContent>
+                                  </Card>
+                                )}
+                              </div>
+                            )}
+                          </TabsContent>
+                        </Tabs>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                 </div>
                 <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
                   <Card className="shadow-card">
@@ -783,70 +1111,6 @@ const Matches = () => {
                         </TabsList>
                       </Tabs>
                     </div>
-                    {mvpData.length > 0 && (
-                      <Card className="mb-6">
-                        <CardHeader>
-                          <CardTitle className="text-lg flex items-center gap-2">
-                            <Trophy className="w-5 h-5 text-yellow-500" />
-                            Cầu thủ xuất sắc nhất (MVP)
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-3">
-                            {(showAllMvp ? mvpData : mvpData.slice(0, 3)).map(
-                              (mvp, index) => (
-                                <Dialog key={mvp.mvpId}>
-                                  <DialogTrigger asChild>
-                                    <div className="flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md">
-                                      <div className="flex items-center gap-3">
-                                        <span
-                                          className={cn(
-                                            "font-semibold text-sm",
-                                            index < 1 && "text-base"
-                                          )}
-                                        >
-                                          {index + 1}. {mvp.mvpName}
-                                        </span>
-                                      </div>
-                                      <Badge
-                                        variant={
-                                          index < 1 ? "default" : "secondary"
-                                        }
-                                      >
-                                        {mvp.voteCount} phiếu
-                                      </Badge>
-                                    </div>
-                                  </DialogTrigger>
-                                  <DialogContent>
-                                    <DialogHeader>
-                                      <DialogTitle>
-                                        Danh sách bình chọn cho {mvp.mvpName}
-                                      </DialogTitle>
-                                    </DialogHeader>
-                                    <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
-                                      {mvp.votedBy.map((voter, i) => (
-                                        <li key={i}>{voter}</li>
-                                      ))}
-                                    </ul>
-                                  </DialogContent>
-                                </Dialog>
-                              )
-                            )}
-                          </div>
-                          {mvpData.length > 3 && (
-                            <div className="mt-4 text-center">
-                              <Button
-                                variant="link"
-                                className="p-0 h-auto"
-                                onClick={() => setShowAllMvp(!showAllMvp)}
-                              >
-                                {showAllMvp ? "Thu gọn" : "Xem tất cả"}
-                              </Button>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    )}
                     {isLoadingShares ? (
                       <div className="text-center p-8">
                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
@@ -856,7 +1120,7 @@ const Matches = () => {
                         <TableHeader>
                           <TableRow>
                             <TableHead>Thành viên</TableHead>
-                            <TableHead>Điểm TB</TableHead>
+                            <TableHead>Đội</TableHead>
                             <TableHead>Số tiền</TableHead>
                             <TableHead>Trạng thái</TableHead>
                             <TableHead className="text-right">
@@ -876,48 +1140,7 @@ const Matches = () => {
                               <TableCell className="font-medium">
                                 {members.get(share.memberId) || "Không rõ"}
                               </TableCell>
-                              <TableCell>
-                                {playerRatings.has(share.memberId) ? (
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <Badge
-                                        variant="secondary"
-                                        className="cursor-pointer"
-                                      >
-                                        {playerRatings
-                                          .get(share.memberId)
-                                          ?.averageScore.toFixed(2)}
-                                      </Badge>
-                                    </DialogTrigger>
-                                    <DialogContent>
-                                      <DialogHeader>
-                                        <DialogTitle>
-                                          Chi tiết điểm của{" "}
-                                          {members.get(share.memberId) ||
-                                            "Không rõ"}
-                                        </DialogTitle>
-                                      </DialogHeader>
-                                      <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
-                                        {playerRatings
-                                          .get(share.memberId)
-                                          ?.details.map((d, i) => (
-                                            <li
-                                              key={i}
-                                              className="flex justify-between"
-                                            >
-                                              <span>{d.ratedBy}</span>
-                                              <strong>{d.score} điểm</strong>
-                                            </li>
-                                          ))}
-                                      </ul>
-                                    </DialogContent>
-                                  </Dialog>
-                                ) : (
-                                  <span className="text-muted-foreground text-xs">
-                                    N/A
-                                  </span>
-                                )}
-                              </TableCell>
+                              <TableCell>{share.teamName}</TableCell>
                               <TableCell>
                                 {share.amount.toLocaleString()} VND
                               </TableCell>
@@ -933,23 +1156,31 @@ const Matches = () => {
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-right">
-                                {share.status === "PENDING" && (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => handleMarkAsPaid(share.id)}
-                                  >
-                                    Đã trả
-                                  </Button>
-                                )}
-                                {share.status === "PAID" && (
-                                  <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() => handleMarkAsUnpaid(share.id)}
-                                  >
-                                    Chưa trả
-                                  </Button>
+                                {!isFullyPaid && (
+                                  <>
+                                    {share.status === "PENDING" && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() =>
+                                          handleMarkAsPaid(share.id)
+                                        }
+                                      >
+                                        Đã trả
+                                      </Button>
+                                    )}
+                                    {share.status === "PAID" && (
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() =>
+                                          handleMarkAsUnpaid(share.id)
+                                        }
+                                      >
+                                        Chưa trả
+                                      </Button>
+                                    )}
+                                  </>
                                 )}
                               </TableCell>
                             </TableRow>

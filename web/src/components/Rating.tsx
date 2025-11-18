@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Star, Trophy, ChevronsUpDown, Check, Loader2 } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
 import { Share } from "@/pages/Pay";
 import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
@@ -130,15 +131,38 @@ export const Rating = ({
   };
 
   const handleNext = () => {
+    const allPlayers = teams.flatMap((t) => t.members);
+    const unratedPlayers = allPlayers.filter(
+      (player) =>
+        playerRatings[player.id] === undefined ||
+        playerRatings[player.id].trim() === ""
+    );
+
+    if (unratedPlayers.length > 0) {
+      toast({
+        title: "Chưa hoàn tất đánh giá",
+        description: `Vui lòng chấm điểm cho tất cả cầu thủ.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!mvp) {
+      toast({
+        title: "Chưa chọn MVP",
+        description: "Vui lòng chọn Cầu thủ xuất sắc nhất trận.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const currentRating = {
       matchId: currentShare.matchId,
       ratedByMemberId,
-      playerRatings: Object.entries(playerRatings)
-        .map(([memberId, score]) => ({
-          memberId,
-          score: parseFloat(score), // Convert to number before saving
-        }))
-        .filter(item => !isNaN(item.score)), // Ensure only valid numbers are saved
+      playerRatings: Object.entries(playerRatings).map(([memberId, score]) => ({
+        memberId,
+        score: parseFloat(score),
+      })),
       mvpPlayerId: mvp,
     };
 
@@ -155,7 +179,6 @@ export const Rating = ({
     } else {
       setIsSubmitting(true);
       onRatingComplete(newAllRatings);
-      // isSubmitting will be reset when the parent component un-mounts this component
     }
   };
 
