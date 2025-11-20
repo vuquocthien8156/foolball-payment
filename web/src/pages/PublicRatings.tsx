@@ -86,10 +86,30 @@ const PublicRatings = () => {
   const [showAllMvp, setShowAllMvp] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [overallStats, setOverallStats] = useState<{
-    topRatings: { memberId: string; memberName: string; averageScore: number }[];
+    topRatings: {
+      memberId: string;
+      memberName: string;
+      averageScore: number;
+    }[];
     topMvp: { memberId: string; memberName: string; voteCount: number }[];
     isLoading: boolean;
   }>({ topRatings: [], topMvp: [], isLoading: true });
+  const [previousWeek, setPreviousWeek] = useState<{
+    topRating: {
+      memberId: string;
+      memberName: string;
+      averageScore: number;
+    } | null;
+    topMvp: { memberId: string; memberName: string; voteCount: number } | null;
+    rangeLabel: string;
+    isLoading: boolean;
+  }>({
+    topRating: null,
+    topMvp: null,
+    rangeLabel: "",
+    isLoading: true,
+  });
+  const [latestMatchDateLabel, setLatestMatchDateLabel] = useState<string>("");
   const [openCollapsible, setOpenCollapsible] = useState<string | null>(null);
 
   useEffect(() => {
@@ -136,12 +156,44 @@ const PublicRatings = () => {
         (match): match is Match => match !== null
       );
 
-      setMatches(validMatches);
+      // Chỉ giữ trận mới nhất đã đủ điều kiện
+      const latestMatch = validMatches.sort((a, b) => {
+        const dateA =
+          typeof a.date === "string" ? new Date(a.date) : a.date.toDate();
+        const dateB =
+          typeof b.date === "string" ? new Date(b.date) : b.date.toDate();
+        return dateB.getTime() - dateA.getTime();
+      })[0];
+
+      if (latestMatch) {
+        setMatches([latestMatch]);
+        setSelectedMatchId(latestMatch.id);
+        const latestDate =
+          typeof latestMatch.date === "string"
+            ? new Date(latestMatch.date)
+            : latestMatch.date.toDate();
+        setLatestMatchDateLabel(latestDate.toLocaleDateString("vi-VN"));
+      } else {
+        setMatches([]);
+        setSelectedMatchId(null);
+        setLatestMatchDateLabel("");
+      }
       setIsLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!selectedMatchId && matches.length > 0) {
+      setSelectedMatchId(matches[0].id);
+      const latestDate =
+        typeof matches[0].date === "string"
+          ? new Date(matches[0].date)
+          : matches[0].date.toDate();
+      setLatestMatchDateLabel(latestDate.toLocaleDateString("vi-VN"));
+    }
+  }, [matches, selectedMatchId]);
 
   useEffect(() => {
     if (!selectedMatchId || members.size === 0) return;
@@ -213,6 +265,23 @@ const PublicRatings = () => {
 
     const fetchOverallStats = async () => {
       setOverallStats((prev) => ({ ...prev, isLoading: true }));
+      setPreviousWeek((prev) => ({ ...prev, isLoading: true }));
+
+      const now = new Date();
+      const day = now.getDay(); // 0 (Sun) - 6 (Sat)
+      const daysSinceMonday = (day + 6) % 7;
+      const startOfThisWeek = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() - daysSinceMonday
+      );
+      startOfThisWeek.setHours(0, 0, 0, 0);
+      const startOfPrevWeek = new Date(startOfThisWeek);
+      startOfPrevWeek.setDate(startOfPrevWeek.getDate() - 7);
+      const endOfPrevWeek = new Date(startOfThisWeek.getTime() - 1);
+      const prevWeekLabel = `${startOfPrevWeek.toLocaleDateString(
+        "vi-VN"
+      )} - ${endOfPrevWeek.toLocaleDateString("vi-VN")}`;
 
       const matchesQuery = query(
         collection(db, "matches"),
@@ -225,6 +294,11 @@ const PublicRatings = () => {
         { totalPoints: number; ratingCount: number }
       >();
       const allMvpVotes = new Map<string, number>();
+      const weekPlayerRatings = new Map<
+        string,
+        { totalPoints: number; ratingCount: number }
+      >();
+      const weekMvpVotes = new Map<string, number>();
 
       for (const matchDoc of matchesSnapshot.docs) {
         const sharesQuery = query(collection(matchDoc.ref, "shares"));
@@ -243,6 +317,15 @@ const PublicRatings = () => {
           continue;
         }
 
+        const matchData = matchDoc.data();
+        const dateObj = matchData.date as Timestamp | string | undefined;
+        const matchDate = (dateObj as Timestamp)?.toDate
+          ? (dateObj as Timestamp).toDate()
+          : new Date(dateObj as string);
+        const inPrevWeek =
+          matchDate.getTime() >= startOfPrevWeek.getTime() &&
+          matchDate.getTime() <= endOfPrevWeek.getTime();
+
         const ratingsQuery = query(collection(matchDoc.ref, "ratings"));
         const ratingsSnapshot = await getDocs(ratingsQuery);
 
@@ -258,6 +341,18 @@ const PublicRatings = () => {
               current.totalPoints += playerRating.score;
               current.ratingCount += 1;
               allPlayerRatings.set(playerRating.memberId, current);
+
+              if (inPrevWeek) {
+                const weekCurrent = weekPlayerRatings.get(
+                  playerRating.memberId
+                ) || {
+                  totalPoints: 0,
+                  ratingCount: 0,
+                };
+                weekCurrent.totalPoints += playerRating.score;
+                weekCurrent.ratingCount += 1;
+                weekPlayerRatings.set(playerRating.memberId, weekCurrent);
+              }
             }
           );
 
@@ -266,6 +361,13 @@ const PublicRatings = () => {
               rating.mvpPlayerId,
               (allMvpVotes.get(rating.mvpPlayerId) || 0) + 1
             );
+
+            if (inPrevWeek) {
+              weekMvpVotes.set(
+                rating.mvpPlayerId,
+                (weekMvpVotes.get(rating.mvpPlayerId) || 0) + 1
+              );
+            }
           }
         });
       }
@@ -289,9 +391,32 @@ const PublicRatings = () => {
         .sort((a, b) => b.voteCount - a.voteCount)
         .slice(0, 3);
 
+      const topWeekRatingEntry = Array.from(weekPlayerRatings.entries())
+        .map(([memberId, data]) => ({
+          memberId,
+          memberName: members.get(memberId) || "Không rõ",
+          averageScore:
+            data.ratingCount > 0 ? data.totalPoints / data.ratingCount : 0,
+        }))
+        .sort((a, b) => b.averageScore - a.averageScore)[0];
+
+      const topWeekMvp = Array.from(weekMvpVotes.entries())
+        .map(([memberId, voteCount]) => ({
+          memberId,
+          memberName: members.get(memberId) || "Không rõ",
+          voteCount,
+        }))
+        .sort((a, b) => b.voteCount - a.voteCount)[0];
+
       setOverallStats({
         topRatings: calculatedRatings,
         topMvp: sortedMvp,
+        isLoading: false,
+      });
+      setPreviousWeek({
+        topRating: topWeekRatingEntry || null,
+        topMvp: topWeekMvp || null,
+        rangeLabel: prevWeekLabel,
         isLoading: false,
       });
     };
@@ -313,7 +438,7 @@ const PublicRatings = () => {
             Bảng xếp hạng & MVP
           </h1>
           <p className="text-muted-foreground mt-2">
-            Xem lại đánh giá và cầu thủ xuất sắc nhất từ các trận đã đấu.
+            Trận gần nhất: {latestMatchDateLabel || "Chưa có dữ liệu"}
           </p>
         </div>
 
@@ -324,7 +449,9 @@ const PublicRatings = () => {
                 <TrendingUp className="w-5 h-5 text-blue-500" /> Top 3 Điểm Cao
                 Nhất
               </CardTitle>
-              <CardDescription>Tính trên tất cả các trận đã đấu</CardDescription>
+              <CardDescription>
+                Tính trên tất cả các trận đã đấu
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {overallStats.isLoading ? (
@@ -337,7 +464,10 @@ const PublicRatings = () => {
                       className="flex justify-between items-center"
                     >
                       <span
-                        className={cn("font-semibold", index === 0 && "text-lg")}
+                        className={cn(
+                          "font-semibold",
+                          index === 0 && "text-lg"
+                        )}
                       >
                         {index + 1}. {player.memberName}
                       </span>
@@ -355,7 +485,9 @@ const PublicRatings = () => {
               <CardTitle className="flex items-center gap-2">
                 <Trophy className="w-5 h-5 text-yellow-500" /> Top 3 MVP
               </CardTitle>
-              <CardDescription>Tính trên tất cả các trận đã đấu</CardDescription>
+              <CardDescription>
+                Tính trên tất cả các trận đã đấu
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {overallStats.isLoading ? (
@@ -368,7 +500,10 @@ const PublicRatings = () => {
                       className="flex justify-between items-center"
                     >
                       <span
-                        className={cn("font-semibold", index === 0 && "text-lg")}
+                        className={cn(
+                          "font-semibold",
+                          index === 0 && "text-lg"
+                        )}
                       >
                         {index + 1}. {player.memberName}
                       </span>
@@ -497,44 +632,45 @@ const PublicRatings = () => {
                           </CollapsibleTrigger>
                           <CollapsibleContent className="py-2 px-4">
                             <div className="space-y-3">
-                              {(showAllMvp
-                                ? mvpData
-                                : mvpData.slice(0, 3)
-                              ).map((mvp, index) => (
-                                <Dialog key={mvp.mvpId}>
-                                  <DialogTrigger asChild>
-                                    <div className="flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md">
-                                      <span
-                                        className={cn(
-                                          "font-semibold",
-                                          index === 0 && "text-lg"
-                                        )}
-                                      >
-                                        {index + 1}. {mvp.mvpName}
-                                      </span>
-                                      <Badge
-                                        variant={
-                                          index === 0 ? "default" : "secondary"
-                                        }
-                                      >
-                                        {mvp.voteCount} phiếu
-                                      </Badge>
-                                    </div>
-                                  </DialogTrigger>
-                                  <DialogContent>
-                                    <DialogHeader>
-                                      <DialogTitle>
-                                        Danh sách bình chọn cho {mvp.mvpName}
-                                      </DialogTitle>
-                                    </DialogHeader>
-                                    <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
-                                      {mvp.votedBy.map((voter, i) => (
-                                        <li key={i}>{voter}</li>
-                                      ))}
-                                    </ul>
-                                  </DialogContent>
-                                </Dialog>
-                              ))}
+                              {(showAllMvp ? mvpData : mvpData.slice(0, 3)).map(
+                                (mvp, index) => (
+                                  <Dialog key={mvp.mvpId}>
+                                    <DialogTrigger asChild>
+                                      <div className="flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md">
+                                        <span
+                                          className={cn(
+                                            "font-semibold",
+                                            index === 0 && "text-lg"
+                                          )}
+                                        >
+                                          {index + 1}. {mvp.mvpName}
+                                        </span>
+                                        <Badge
+                                          variant={
+                                            index === 0
+                                              ? "default"
+                                              : "secondary"
+                                          }
+                                        >
+                                          {mvp.voteCount} phiếu
+                                        </Badge>
+                                      </div>
+                                    </DialogTrigger>
+                                    <DialogContent>
+                                      <DialogHeader>
+                                        <DialogTitle>
+                                          Danh sách bình chọn cho {mvp.mvpName}
+                                        </DialogTitle>
+                                      </DialogHeader>
+                                      <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
+                                        {mvp.votedBy.map((voter, i) => (
+                                          <li key={i}>{voter}</li>
+                                        ))}
+                                      </ul>
+                                    </DialogContent>
+                                  </Dialog>
+                                )
+                              )}
                             </div>
                             {mvpData.length > 3 && (
                               <div className="mt-4 text-center">
@@ -597,7 +733,8 @@ const PublicRatings = () => {
                                             {index + 1}
                                           </TableCell>
                                           <TableCell>
-                                            {members.get(memberId) || "Không rõ"}
+                                            {members.get(memberId) ||
+                                              "Không rõ"}
                                           </TableCell>
                                           <TableCell className="text-right">
                                             <Badge
@@ -615,7 +752,8 @@ const PublicRatings = () => {
                                         <DialogHeader>
                                           <DialogTitle>
                                             Chi tiết điểm của{" "}
-                                            {members.get(memberId) || "Không rõ"}
+                                            {members.get(memberId) ||
+                                              "Không rõ"}
                                           </DialogTitle>
                                         </DialogHeader>
                                         <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">

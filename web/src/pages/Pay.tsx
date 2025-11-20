@@ -70,6 +70,8 @@ import {
   doc,
   updateDoc,
   getDoc,
+  addDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db, requestNotificationPermission } from "@/lib/firebase";
 import { usePWAInstall } from "@/contexts/PWAInstallContext";
@@ -87,10 +89,12 @@ import {
 } from "@/components/ui/chart";
 import { cn } from "@/lib/utils";
 import { Rating } from "@/components/Rating";
+import { Badge } from "@/components/ui/badge";
 
 interface Member {
   id: string;
   name: string;
+  isExemptFromPayment?: boolean;
 }
 
 interface TeamShareInfo {
@@ -107,6 +111,10 @@ interface Share {
   matchDate: string;
   amount: number;
   teamId: string;
+  status?: "PENDING" | "PAID";
+  channel?: string;
+  isRatingOnly?: boolean;
+  ratingOnlyReason?: string;
   // Detailed info
   matchTotalAmount: number;
   teamPercent: number;
@@ -171,6 +179,16 @@ const Pay = () => {
   );
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [isRating, setIsRating] = useState(false);
+  const [ratingTargets, setRatingTargets] = useState<Share[]>([]);
+  const [ratedMatchIds, setRatedMatchIds] = useState<Set<string>>(new Set());
+
+  const apiBaseUrl = useMemo(() => {
+    const envUrl = import.meta.env.VITE_API_URL || "";
+    const trimmed = envUrl.endsWith("/") ? envUrl.slice(0, -1) : envUrl;
+    if (!trimmed) return "/api";
+    if (trimmed.endsWith("/api")) return trimmed;
+    return `${trimmed}/api`;
+  }, []);
 
   const fetchTopPayers = useCallback(async () => {
     setIsLoadingStats(true);
@@ -300,12 +318,14 @@ const Pay = () => {
     if (selectedMemberId) {
       checkNotificationStatus();
     }
-  }, [selectedMemberId]);
+  }, [selectedMemberId, members]);
 
   useEffect(() => {
     if (!selectedMemberId) {
       setUnpaidShares([]);
       setSelectedShares([]);
+      setRatingTargets([]);
+      setRatedMatchIds(new Set());
       return;
     }
 
@@ -313,6 +333,19 @@ const Pay = () => {
       setIsLoadingShares(true);
       setUnpaidShares([]); // Clear previous results
       try {
+        // Fetch matches đã đánh giá bởi member này
+        const ratingsQuery = query(
+          collectionGroup(db, "ratings"),
+          where("ratedByMemberId", "==", selectedMemberId)
+        );
+        const ratingsSnapshot = await getDocs(ratingsQuery);
+        const ratedMatchSet = new Set<string>();
+        ratingsSnapshot.forEach((docSnap) => {
+          const matchId = docSnap.ref.parent.parent?.id;
+          if (matchId) ratedMatchSet.add(matchId);
+        });
+        setRatedMatchIds(ratedMatchSet);
+
         // 1. Get all PENDING shares for the selected member
         const sharesQuery = query(
           collectionGroup(db, "shares"),
@@ -321,16 +354,13 @@ const Pay = () => {
         );
         const sharesSnapshot = await getDocs(sharesQuery);
 
-        if (sharesSnapshot.empty) {
-          return; // Exit early, unpaidShares is already empty
-        }
-
         // 2. Process each share individually to fetch its match details
         const sharesPromises = sharesSnapshot.docs.map(async (shareDoc) => {
           const shareData = shareDoc.data();
           const matchId = shareData.matchId || shareDoc.ref.parent.parent?.id;
 
           if (!matchId) return null;
+          if (ratedMatchSet.has(matchId)) return null;
 
           const matchRef = doc(db, "matches", matchId);
           const matchSnap = await getDoc(matchRef);
@@ -356,6 +386,8 @@ const Pay = () => {
             amount: shareData.amount,
             matchDate: formattedDate,
             teamId: shareData.teamId,
+            status: shareData.status || "PENDING",
+            channel: shareData.channel,
             matchTotalAmount: matchData.totalAmount || 0,
             teamPercent: teamConfig?.percent || 0,
             teamName: teamConfig?.name || "Đội",
@@ -365,14 +397,127 @@ const Pay = () => {
           } as Share;
         });
 
-        const resolvedShares = await Promise.all(sharesPromises);
-        const validShares = resolvedShares.filter(
+        const resolvedPendingShares = await Promise.all(sharesPromises);
+        const pendingShares = resolvedPendingShares.filter(
           (share): share is Share => share !== null
         );
 
-        setUnpaidShares(validShares);
-        // Automatically select all unpaid shares by default
-        setSelectedShares(validShares.map((share) => share.id));
+        // Shares already marked paid manually but still need rating
+        const manualPaidQuery = query(
+          collectionGroup(db, "shares"),
+          where("memberId", "==", selectedMemberId),
+          where("status", "==", "PAID"),
+          where("channel", "==", "MANUAL")
+        );
+        const manualPaidSnapshot = await getDocs(manualPaidQuery);
+        const manualPaidShares: Share[] = [];
+        for (const shareDoc of manualPaidSnapshot.docs) {
+          const shareData = shareDoc.data();
+          const matchId = shareData.matchId || shareDoc.ref.parent.parent?.id;
+          if (!matchId) continue;
+          if (ratedMatchSet.has(matchId)) continue;
+
+          const matchRef = doc(db, "matches", matchId);
+          const matchSnap = await getDoc(matchRef);
+          if (!matchSnap.exists() || matchSnap.data().status !== "PUBLISHED") {
+            continue;
+          }
+          const matchData = matchSnap.data();
+          const dateObjManual = matchData.date;
+          const matchDateMs = dateObjManual?.toDate
+            ? dateObjManual.toDate().getTime()
+            : new Date(dateObjManual).getTime();
+          const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+          if (isNaN(matchDateMs) || matchDateMs < threeDaysAgo) continue;
+          const teamConfig = matchData.teamsConfig?.find(
+            (t: { id: string }) => t.id === shareData.teamId
+          );
+          const formattedDate = dateObjManual?.toDate
+            ? dateObjManual.toDate().toLocaleDateString("vi-VN")
+            : "Không rõ";
+
+          manualPaidShares.push({
+            id: shareDoc.id,
+            matchId,
+            amount: shareData.amount,
+            matchDate: formattedDate,
+            teamId: shareData.teamId,
+            status: "PAID",
+            channel: shareData.channel,
+            matchTotalAmount: matchData.totalAmount || 0,
+            teamPercent: teamConfig?.percent || 0,
+            teamName: teamConfig?.name || "Đội",
+            teamMemberCount: teamConfig?.members?.length || 0,
+            teamShares: [],
+            calculationDetails: shareData.calculationDetails,
+          });
+        }
+
+        // Add rating-only entries for exempt members (no payment needed)
+        const ratingOnlyShares: Share[] = [];
+        const selectedMember = members.find((m) => m.id === selectedMemberId);
+        if (selectedMember?.isExemptFromPayment) {
+          const matchesSnapshot = await getDocs(collection(db, "matches"));
+          const existingMatchIds = new Set(
+            [...pendingShares, ...manualPaidShares].map((s) => s.matchId)
+          );
+
+          matchesSnapshot.docs.forEach((matchDoc) => {
+            const matchData = matchDoc.data();
+            if (matchData.status !== "PUBLISHED") return;
+            const teamFound = (matchData.teamsConfig || []).find((team: any) =>
+              (team.members || []).some(
+                (member: any) => member.id === selectedMemberId
+              )
+            );
+            if (!teamFound || existingMatchIds.has(matchDoc.id)) return;
+            if (ratedMatchSet.has(matchDoc.id)) return;
+
+            const dateObj = matchData.date;
+            const formattedDate = dateObj?.toDate
+              ? dateObj.toDate().toLocaleDateString("vi-VN")
+              : "Không rõ";
+            const matchDateMs = dateObj?.toDate
+              ? dateObj.toDate().getTime()
+              : new Date(dateObj).getTime();
+            const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+            if (isNaN(matchDateMs) || matchDateMs < threeDaysAgo) return;
+
+            ratingOnlyShares.push({
+              id: `${matchDoc.id}-rating-${selectedMemberId}`,
+              matchId: matchDoc.id,
+              amount: 0,
+              matchDate: formattedDate,
+              teamId: teamFound.id,
+              status: "PAID",
+              channel: "EXEMPT",
+              isRatingOnly: true,
+              ratingOnlyReason: "Miễn chia tiền",
+              matchTotalAmount: matchData.totalAmount || 0,
+              teamPercent: teamFound.percent || 0,
+              teamName: teamFound.name || "Đội",
+              teamMemberCount: teamFound.members?.length || 0,
+              teamShares: [],
+              calculationDetails: undefined,
+            });
+          });
+        }
+
+        const allShares = [
+          ...pendingShares,
+          ...manualPaidShares,
+          ...ratingOnlyShares,
+        ];
+
+        setUnpaidShares(allShares);
+        // Automatically select payable shares; if không có khoản phải trả, chọn các trận chỉ đánh giá
+        const payableIds = allShares
+          .filter((share) => share.status === "PENDING" && !share.isRatingOnly)
+          .map((share) => share.id);
+        const ratingOnlyIds = allShares
+          .filter((share) => share.isRatingOnly || share.channel === "MANUAL")
+          .map((share) => share.id);
+        setSelectedShares(payableIds.length > 0 ? payableIds : ratingOnlyIds);
         setExpandedItems([]);
       } catch (error) {
         console.error("Error fetching unpaid shares:", error);
@@ -453,8 +598,36 @@ const Pay = () => {
 
   const totalAmount = useMemo(() => {
     return unpaidShares
-      .filter((share) => selectedShares.includes(share.id))
+      .filter(
+        (share) =>
+          selectedShares.includes(share.id) &&
+          share.status === "PENDING" &&
+          !share.isRatingOnly
+      )
       .reduce((total, share) => total + share.amount, 0);
+  }, [selectedShares, unpaidShares]);
+
+  const hasRatingOnlyShares = useMemo(
+    () =>
+      unpaidShares.some(
+        (share) => share.isRatingOnly || share.channel === "MANUAL"
+      ),
+    [unpaidShares]
+  );
+
+  const canProceedToRating = useMemo(() => {
+    const payableSelected = unpaidShares.some(
+      (share) =>
+        selectedShares.includes(share.id) &&
+        share.status === "PENDING" &&
+        !share.isRatingOnly
+    );
+    const ratingOnlyAvailable = unpaidShares.some(
+      (share) =>
+        selectedShares.includes(share.id) &&
+        (share.isRatingOnly || share.channel === "MANUAL")
+    );
+    return payableSelected || ratingOnlyAvailable;
   }, [selectedShares, unpaidShares]);
 
   const handleShareSelection = (shareId: string) => {
@@ -466,62 +639,155 @@ const Pay = () => {
   };
 
   const handleSelectAll = () => {
-    if (selectedShares.length === unpaidShares.length) {
+    const selectableIds = unpaidShares
+      .filter(
+        (share) =>
+          share.status === "PENDING" ||
+          share.isRatingOnly ||
+          share.channel === "MANUAL"
+      )
+      .map((share) => share.id);
+    if (selectedShares.length === selectableIds.length) {
       setSelectedShares([]);
     } else {
-      setSelectedShares(unpaidShares.map((share) => share.id));
+      setSelectedShares(selectableIds);
     }
   };
 
   const handleProceedToRating = () => {
-    if (selectedShares.length === 0) {
+    const payableSelectedShares = unpaidShares.filter(
+      (share) =>
+        selectedShares.includes(share.id) &&
+        share.status === "PENDING" &&
+        !share.isRatingOnly
+    );
+
+    const ratingOnlyShares = unpaidShares.filter(
+      (share) =>
+        selectedShares.includes(share.id) &&
+        (share.isRatingOnly || share.channel === "MANUAL")
+    );
+
+    const combinedTargetsMap = new Map<string, Share>();
+    [...payableSelectedShares, ...ratingOnlyShares].forEach((share) => {
+      combinedTargetsMap.set(share.id, share);
+    });
+
+    const combinedTargets = Array.from(combinedTargetsMap.values());
+
+    if (combinedTargets.length === 0) {
       toast({
-        title: "Chưa chọn khoản thanh toán",
-        description: "Vui lòng chọn ít nhất một trận để thanh toán.",
+        title: "Không có trận để đánh giá",
+        description:
+          "Bạn chưa chọn khoản thanh toán và không có trận nào được đánh dấu đã trả/miễn phí.",
         variant: "destructive",
       });
       return;
     }
+
+    setRatingTargets(combinedTargets);
     setIsRating(true);
   };
 
   const handleRatingComplete = async (ratings: any[]) => {
+    const payableShareIds = selectedShares.filter((id) => {
+      const share = unpaidShares.find((s) => s.id === id);
+      return (
+        share &&
+        share.status === "PENDING" &&
+        !share.isRatingOnly &&
+        share.amount > 0
+      );
+    });
+
     setIsCreatingPayment(true);
     try {
-      const API_URL = import.meta.env.VITE_API_URL;
-      const response = await fetch(`${API_URL}/create-payment-link`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          shareIds: selectedShares,
-          memberId: selectedMemberId,
-          ratings: ratings,
-        }),
-      });
+      const postJson = async (path: string, payload: any) => {
+        const response = await fetch(`${apiBaseUrl}${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Server responded with an error");
-      }
+        const raw = await response.text();
+        let data: any = null;
+        try {
+          data = raw ? JSON.parse(raw) : null;
+        } catch (err) {
+          console.error("Invalid JSON from server:", raw);
+          throw new Error(
+            "Server trả về nội dung không hợp lệ (không phải JSON). Kiểm tra lại VITE_API_URL hoặc cấu hình proxy."
+          );
+        }
 
-      const paymentLinkData = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.error || "Yêu cầu thất bại.");
+        }
+        return data;
+      };
 
-      if (paymentLinkData.checkoutUrl) {
-        window.location.href = paymentLinkData.checkoutUrl;
+      if (payableShareIds.length === 0) {
+        // Gửi đánh giá trực tiếp vào Firestore nếu không có khoản phải trả
+        await Promise.all(
+          ratings.map(async (rating) => {
+            const { matchId, ratedByMemberId, playerRatings, mvpPlayerId } =
+              rating;
+            if (!matchId || !ratedByMemberId || !mvpPlayerId) return;
+            const ratingRef = collection(db, "matches", matchId, "ratings");
+            await addDoc(ratingRef, {
+              ratedByMemberId,
+              playerRatings,
+              mvpPlayerId,
+              createdAt: serverTimestamp(),
+              channel: "DIRECT_CLIENT",
+            });
+          })
+        );
+        // Loại bỏ các trận đã đánh giá khỏi danh sách
+        const ratedIds = new Set(ratings.map((r) => r.matchId));
+        setRatedMatchIds((prev) => {
+          const next = new Set(prev);
+          ratedIds.forEach((id) => id && next.add(id));
+          return next;
+        });
+        setUnpaidShares((prev) =>
+          prev.filter((share) => !ratedIds.has(share.matchId))
+        );
+        setSelectedShares((prev) =>
+          prev.filter((id) => {
+            const share = unpaidShares.find((s) => s.id === id);
+            return share ? !ratedIds.has(share.matchId) : false;
+          })
+        );
+        toast({
+          title: "Đã gửi đánh giá",
+          description: "Cảm ơn bạn đã đánh giá trận đấu.",
+        });
       } else {
-        throw new Error("Không tìm thấy URL thanh toán.");
+        const paymentLinkData = await postJson("/create-payment-link", {
+          shareIds: payableShareIds,
+          memberId: selectedMemberId,
+          ratings,
+        });
+
+        if (paymentLinkData.checkoutUrl) {
+          window.location.href = paymentLinkData.checkoutUrl;
+        } else {
+          throw new Error("Không tìm thấy URL thanh toán.");
+        }
       }
     } catch (error) {
       console.error("Error creating payment link:", error);
       toast({
         title: "Lỗi",
-        description: `Không thể tạo liên kết thanh toán: ${error.message}`,
+        description: `Không thể xử lý yêu cầu: ${
+          error instanceof Error ? error.message : "Không rõ lỗi"
+        }`,
         variant: "destructive",
       });
     } finally {
       setIsCreatingPayment(false);
+      setRatingTargets([]);
       setIsRating(false); // Go back to selection screen
     }
   };
@@ -591,9 +857,7 @@ const Pay = () => {
           <CardContent className="space-y-4 sm:space-y-6 px-4 pb-4 sm:px-6 sm:pb-6">
             {isRating ? (
               <Rating
-                sharesToRate={unpaidShares.filter((s) =>
-                  selectedShares.includes(s.id)
-                )}
+                sharesToRate={ratingTargets}
                 onRatingComplete={handleRatingComplete}
                 ratedByMemberId={selectedMemberId}
               />
@@ -747,6 +1011,17 @@ const Pay = () => {
                       <p className="text-muted-foreground">
                         Bạn không có khoản nợ nào chưa thanh toán.
                       </p>
+                      {hasRatingOnlyShares && (
+                        <Button
+                          className="mt-4"
+                          variant="secondary"
+                          onClick={handleProceedToRating}
+                          disabled={isCreatingPayment}
+                        >
+                          <Star className="mr-2 h-4 w-4" />
+                          Gửi đánh giá trận đã trả/miễn phí
+                        </Button>
+                      )}
                     </div>
                   )}
 
@@ -755,16 +1030,22 @@ const Pay = () => {
                     <div className="mb-4">
                       <div className="flex items-center justify-between">
                         <h3 className="text-base sm:text-lg font-semibold">
-                          Các trận chưa thanh toán
+                          Các trận cần xử lý / đánh giá
                         </h3>
                         <Button
                           variant="link"
                           onClick={handleSelectAll}
                           className="text-sm sm:text-base px-2"
                         >
-                          {selectedShares.length === unpaidShares.length
-                            ? "Bỏ chọn tất cả"
-                            : "Chọn tất cả"}
+                          {selectedShares.length ===
+                            unpaidShares.filter(
+                              (share) =>
+                                share.status === "PENDING" ||
+                                share.isRatingOnly ||
+                                share.channel === "MANUAL"
+                            ).length && selectedShares.length > 0
+                            ? "Bỏ chọn tất cả trận"
+                            : "Chọn tất cả trận"}
                         </Button>
                       </div>
                     </div>
@@ -799,6 +1080,25 @@ const Pay = () => {
                                       <p className="font-medium text-sm sm:text-base text-left">
                                         Trận ngày {share.matchDate}
                                       </p>
+                                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                                        {share.status === "PAID" &&
+                                          share.channel === "MANUAL" && (
+                                            <Badge
+                                              variant="outline"
+                                              className="border-amber-200 bg-amber-50 text-amber-700"
+                                            >
+                                              Đã đánh dấu đã trả · chỉ đánh giá
+                                            </Badge>
+                                          )}
+                                        {share.isRatingOnly && (
+                                          <Badge
+                                            variant="secondary"
+                                            className="bg-emerald-100 text-emerald-700"
+                                          >
+                                            Miễn chia tiền · chỉ đánh giá
+                                          </Badge>
+                                        )}
+                                      </div>
                                     </div>
                                     <span className="font-semibold text-base sm:text-lg">
                                       {share.amount.toLocaleString()}{" "}
@@ -851,10 +1151,7 @@ const Pay = () => {
                                           <div className="flex justify-between text-amber-600 italic">
                                             <span>Lý do set riêng:</span>
                                             <span className="font-medium">
-                                              {
-                                                share.calculationDetails
-                                                  .reason
-                                              }
+                                              {share.calculationDetails.reason}
                                             </span>
                                           </div>
                                         )}
@@ -985,7 +1282,7 @@ const Pay = () => {
                           size="lg"
                           className="w-full h-12 text-base sm:h-14 sm:text-lg"
                           onClick={handleProceedToRating}
-                          disabled={totalAmount === 0 || isCreatingPayment}
+                          disabled={!canProceedToRating || isCreatingPayment}
                         >
                           {isCreatingPayment ? (
                             <>
@@ -995,8 +1292,11 @@ const Pay = () => {
                           ) : (
                             <>
                               <Star className="h-5 w-5 mr-2" />
-                              Đánh giá & Thanh toán ({selectedShares.length}{" "}
-                              trận)
+                              {totalAmount > 0
+                                ? `Đánh giá & Thanh toán (${selectedShares.length} trận)`
+                                : `Chỉ gửi đánh giá (${
+                                    ratingTargets.length || unpaidShares.length
+                                  } trận)`}
                             </>
                           )}
                         </Button>

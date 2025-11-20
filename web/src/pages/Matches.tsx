@@ -624,6 +624,35 @@ const Matches = () => {
 
   const selectedMatch = matches.find((m) => m.id === selectedMatchId);
 
+  const matchDateString = useMemo(() => {
+    if (!selectedMatch?.date) return "";
+    return new Date(
+      typeof selectedMatch.date === "string"
+        ? selectedMatch.date
+        : selectedMatch.date.toDate()
+    ).toLocaleDateString("vi-VN");
+  }, [selectedMatch]);
+
+  const topMvp = useMemo(() => {
+    if (mvpData.length === 0) return null;
+    return mvpData[0];
+  }, [mvpData]);
+
+  const topScorer = useMemo(() => {
+    if (playerRatings.size === 0) return null;
+    const [memberId, ratingData] = Array.from(playerRatings.entries()).sort(
+      ([, a], [, b]) => b.averageScore - a.averageScore
+    )[0];
+    const shareInfo = shares.find((s) => s.memberId === memberId);
+    return {
+      memberId,
+      name: members.get(memberId) || "Không rõ",
+      teamName: shareInfo?.teamName || "N/A",
+      averageScore: ratingData.averageScore,
+      ratingCount: ratingData.ratingCount,
+    };
+  }, [playerRatings, members, shares]);
+
   const handleUpdateMatchStatus = useCallback(
     async (newStatus: "PUBLISHED" | "COMPLETED") => {
       if (!selectedMatchId) return;
@@ -647,7 +676,6 @@ const Matches = () => {
     },
     [selectedMatchId]
   );
-
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
@@ -767,13 +795,7 @@ const Matches = () => {
                     <DialogContent className="max-w-4xl">
                       <DialogHeader>
                         <DialogTitle>
-                          Đánh giá cho trận ngày{" "}
-                          {selectedMatch &&
-                            new Date(
-                              typeof selectedMatch.date === "string"
-                                ? selectedMatch.date
-                                : selectedMatch.date.toDate()
-                            ).toLocaleDateString("vi-VN")}
+                          Đánh giá cho trận ngày {matchDateString}
                         </DialogTitle>
                       </DialogHeader>
                       <div className="max-h-[80vh] overflow-y-auto p-4">
@@ -803,12 +825,23 @@ const Matches = () => {
                                     ).map((mvp, index) => (
                                       <Dialog key={mvp.mvpId}>
                                         <DialogTrigger asChild>
-                                          <div className="flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md">
+                                          <div
+                                            className={cn(
+                                              "flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md",
+                                              index === 0 &&
+                                                "bg-yellow-100 dark:bg-yellow-900/50"
+                                            )}
+                                          >
                                             <div className="flex items-center gap-3">
+                                              {index === 0 && (
+                                                <Trophy className="w-6 h-6 text-yellow-500" />
+                                              )}
                                               <span
                                                 className={cn(
-                                                  "font-semibold text-sm",
-                                                  index < 1 && "text-base"
+                                                  "font-semibold",
+                                                  index === 0
+                                                    ? "text-lg text-yellow-600 dark:text-yellow-400"
+                                                    : "text-sm"
                                                 )}
                                               >
                                                 {index + 1}. {mvp.mvpName}
@@ -816,10 +849,14 @@ const Matches = () => {
                                             </div>
                                             <Badge
                                               variant={
-                                                index < 1
+                                                index === 0
                                                   ? "default"
                                                   : "secondary"
                                               }
+                                              className={cn(
+                                                index === 0 &&
+                                                  "bg-yellow-500 text-white"
+                                              )}
                                             >
                                               {mvp.voteCount} phiếu
                                             </Badge>
@@ -879,19 +916,55 @@ const Matches = () => {
                                       const shareInfo = shares.find(
                                         (s) => s.memberId === memberId
                                       );
-                                      const teamName = shareInfo?.teamName || "N/A";
+                                      const teamName =
+                                        shareInfo?.teamName || "N/A";
+                                      const isTopScorer = index === 0;
                                       return (
                                         <Dialog key={memberId}>
                                           <DialogTrigger asChild>
-                                            <TableRow className="cursor-pointer">
-                                              <TableCell>{index + 1}</TableCell>
-                                              <TableCell className="font-medium">
-                                                {members.get(memberId) ||
-                                                  "Không rõ"}
+                                            <TableRow
+                                              className={cn(
+                                                "cursor-pointer",
+                                                isTopScorer &&
+                                                  "bg-green-100 dark:bg-green-900/50"
+                                              )}
+                                            >
+                                              <TableCell
+                                                className={cn(
+                                                  isTopScorer &&
+                                                    "font-bold text-lg"
+                                                )}
+                                              >
+                                                {index + 1}
+                                              </TableCell>
+                                              <TableCell
+                                                className={cn(
+                                                  "font-medium",
+                                                  isTopScorer &&
+                                                    "text-lg text-green-600 dark:text-green-400"
+                                                )}
+                                              >
+                                                <div className="flex items-center gap-2">
+                                                  {isTopScorer && (
+                                                    <Trophy className="w-5 h-5 text-green-500" />
+                                                  )}
+                                                  {members.get(memberId) ||
+                                                    "Không rõ"}
+                                                </div>
                                               </TableCell>
                                               <TableCell>{teamName}</TableCell>
                                               <TableCell className="text-right">
-                                                <Badge variant="outline">
+                                                <Badge
+                                                  variant={
+                                                    isTopScorer
+                                                      ? "default"
+                                                      : "outline"
+                                                  }
+                                                  className={cn(
+                                                    isTopScorer &&
+                                                      "bg-green-500 text-white text-base px-3 py-1"
+                                                  )}
+                                                >
                                                   {ratingData.averageScore.toFixed(
                                                     2
                                                   )}
@@ -899,26 +972,30 @@ const Matches = () => {
                                               </TableCell>
                                             </TableRow>
                                           </DialogTrigger>
-                                        <DialogContent>
-                                          <DialogHeader>
-                                            <DialogTitle>
-                                              Chi tiết điểm của{" "}
-                                              {members.get(memberId) ||
-                                                "Không rõ"}
-                                            </DialogTitle>
-                                          </DialogHeader>
-                                          <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
-                                            {ratingData.details.map((d, i) => (
-                                              <li
-                                                key={i}
-                                                className="flex justify-between"
-                                              >
-                                                <span>{d.ratedBy}</span>
-                                                <strong>{d.score} điểm</strong>
-                                              </li>
-                                            ))}
-                                          </ul>
-                                        </DialogContent>
+                                          <DialogContent>
+                                            <DialogHeader>
+                                              <DialogTitle>
+                                                Chi tiết điểm của{" "}
+                                                {members.get(memberId) ||
+                                                  "Không rõ"}
+                                              </DialogTitle>
+                                            </DialogHeader>
+                                            <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
+                                              {ratingData.details.map(
+                                                (d, i) => (
+                                                  <li
+                                                    key={i}
+                                                    className="flex justify-between"
+                                                  >
+                                                    <span>{d.ratedBy}</span>
+                                                    <strong>
+                                                      {d.score} điểm
+                                                    </strong>
+                                                  </li>
+                                                )
+                                              )}
+                                            </ul>
+                                          </DialogContent>
                                         </Dialog>
                                       );
                                     })}
@@ -993,20 +1070,17 @@ const Matches = () => {
                                             ?.ratingsGiven.sort(
                                               (a, b) => b.score - a.score
                                             )
-                                            .map(
-                                              ({ playerRatedId, score }) => (
-                                                <TableRow key={playerRatedId}>
-                                                  <TableCell className="font-medium">
-                                                    {members.get(
-                                                      playerRatedId
-                                                    ) || "Không rõ"}
-                                                  </TableCell>
-                                                  <TableCell className="text-right font-semibold">
-                                                    {score}
-                                                  </TableCell>
-                                                </TableRow>
-                                              )
-                                            )}
+                                            .map(({ playerRatedId, score }) => (
+                                              <TableRow key={playerRatedId}>
+                                                <TableCell className="font-medium">
+                                                  {members.get(playerRatedId) ||
+                                                    "Không rõ"}
+                                                </TableCell>
+                                                <TableCell className="text-right font-semibold">
+                                                  {score}
+                                                </TableCell>
+                                              </TableRow>
+                                            ))}
                                         </TableBody>
                                       </Table>
                                     </CardContent>
@@ -1017,6 +1091,103 @@ const Matches = () => {
                           </TabsContent>
                         </Tabs>
                       </div>
+                    </DialogContent>
+                  </Dialog>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" className="border-dashed">
+                        <Trophy className="mr-2 h-4 w-4" />
+                        Vinh danh dạng Poster
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-5xl p-0 overflow-hidden border-0 shadow-2xl">
+                      {!topMvp && !topScorer ? (
+                        <div className="p-8 text-center text-muted-foreground">
+                          Chưa có dữ liệu để tạo poster.
+                        </div>
+                      ) : (
+                        <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+                          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6 p-10 border-b border-white/10">
+                            <div>
+                              <p className="text-xs uppercase tracking-[0.35em] text-white/60">
+                                Match Day
+                              </p>
+                              <h2 className="text-4xl font-black mt-2">
+                                {matchDateString}
+                              </h2>
+                              <p className="text-sm text-white/70 mt-2">
+                                Vinh danh MVP & cầu thủ điểm cao nhất
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-3 text-amber-300">
+                              <Trophy className="w-10 h-10" />
+                              <div className="font-semibold text-lg">
+                                AWARDS NIGHT
+                              </div>
+                            </div>
+                          </div>
+                          <div className="grid gap-6 md:grid-cols-2 p-10">
+                            <div className="relative rounded-3xl bg-white/5 border border-white/10 p-8 shadow-lg overflow-hidden">
+                              <div className="absolute -right-6 -top-8 text-amber-400/20">
+                                <Trophy className="w-52 h-52" />
+                              </div>
+                              {topMvp ? (
+                                <div className="relative space-y-4">
+                                  <div className="inline-flex items-center gap-2 rounded-full bg-amber-400/20 text-amber-200 px-3 py-1 text-xs font-semibold">
+                                    MVP TOP 1
+                                  </div>
+                                  <h3 className="text-3xl font-black">
+                                    {topMvp.mvpName}
+                                  </h3>
+                                  <p className="text-sm text-white/70">
+                                    {topMvp.voteCount} phiếu bình chọn
+                                  </p>
+                                  <div className="mt-6 flex items-center gap-3">
+                                    <div className="bg-amber-500 rounded-full p-4 shadow-inner">
+                                      <Trophy className="w-10 h-10 text-white" />
+                                    </div>
+                                    <div className="text-sm text-white/70">
+                                      Được bình chọn nhiều nhất trong trận
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-sm text-white/60">
+                                  Chưa có dữ liệu MVP.
+                                </p>
+                              )}
+                            </div>
+                            <div className="relative rounded-3xl bg-white/5 border border-white/10 p-8 shadow-lg overflow-hidden">
+                              <div className="absolute -left-10 -bottom-16 text-emerald-300/20">
+                                <Trophy className="w-60 h-60" />
+                              </div>
+                              {topScorer ? (
+                                <div className="relative space-y-4">
+                                  <div className="inline-flex items-center gap-2 rounded-full bg-emerald-400/20 text-emerald-100 px-3 py-1 text-xs font-semibold">
+                                    ĐIỂM TB CAO NHẤT
+                                  </div>
+                                  <h3 className="text-3xl font-black">
+                                    {topScorer.name}
+                                  </h3>
+                                  <p className="text-sm text-white/70">
+                                    {topScorer.teamName}
+                                  </p>
+                                  <div className="text-5xl font-black tracking-tight text-emerald-200">
+                                    {topScorer.averageScore.toFixed(2)}
+                                  </div>
+                                  <p className="text-sm text-white/70">
+                                    {topScorer.ratingCount} lượt đánh giá
+                                  </p>
+                                </div>
+                              ) : (
+                                <p className="text-sm text-white/60">
+                                  Chưa có dữ liệu điểm trung bình.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </DialogContent>
                   </Dialog>
                 </div>

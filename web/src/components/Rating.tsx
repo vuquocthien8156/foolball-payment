@@ -34,26 +34,27 @@ import { toast } from "@/hooks/use-toast";
 import { Share } from "@/pages/Pay";
 import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { Switch } from "@/components/ui/switch";
 
 interface RatingProps {
   sharesToRate: Share[];
   onRatingComplete: (ratings: any[]) => void;
   ratedByMemberId: string;
-  }
-  
-  const removeDiacritics = (str: string) => {
-    if (!str) return "";
-    return str
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/đ/g, "d")
-      .replace(/Đ/g, "D");
-  };
-  
-  interface Player {
-    id: string;
-    name: string;
-  }
+}
+
+const removeDiacritics = (str: string) => {
+  if (!str) return "";
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+};
+
+interface Player {
+  id: string;
+  name: string;
+}
 
 interface Team {
   id: string;
@@ -76,6 +77,7 @@ export const Rating = ({
   const [isLoading, setIsLoading] = useState(true);
   const [isMvpComboboxOpen, setIsMvpComboboxOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [skipRatings, setSkipRatings] = useState(false);
 
   const currentShare = sharesToRate[currentMatchIndex];
 
@@ -125,8 +127,13 @@ export const Rating = ({
 
   const handleRatingChange = (memberId: string, score: string) => {
     // Allow empty string to clear, or validate numeric input
-    if (score === "" || (!isNaN(parseFloat(score)) && parseFloat(score) >= 0 && parseFloat(score) <= 10)) {
-        setPlayerRatings((prev) => ({ ...prev, [memberId]: score }));
+    if (
+      score === "" ||
+      (!isNaN(parseFloat(score)) &&
+        parseFloat(score) >= 0 &&
+        parseFloat(score) <= 10)
+    ) {
+      setPlayerRatings((prev) => ({ ...prev, [memberId]: score }));
     }
   };
 
@@ -138,10 +145,11 @@ export const Rating = ({
         playerRatings[player.id].trim() === ""
     );
 
-    if (unratedPlayers.length > 0) {
+    if (!skipRatings && unratedPlayers.length > 0) {
       toast({
-        title: "Chưa hoàn tất đánh giá",
-        description: `Vui lòng chấm điểm cho tất cả cầu thủ.`,
+        title: "Chưa hoàn tất chấm điểm",
+        description:
+          'Bạn có thể bật "Bỏ qua chấm điểm" hoặc chấm điểm cho tất cả cầu thủ.',
         variant: "destructive",
       });
       return;
@@ -159,10 +167,12 @@ export const Rating = ({
     const currentRating = {
       matchId: currentShare.matchId,
       ratedByMemberId,
-      playerRatings: Object.entries(playerRatings).map(([memberId, score]) => ({
-        memberId,
-        score: parseFloat(score),
-      })),
+      playerRatings: skipRatings
+        ? []
+        : Object.entries(playerRatings).map(([memberId, score]) => ({
+            memberId,
+            score: parseFloat(score),
+          })),
       mvpPlayerId: mvp,
     };
 
@@ -173,6 +183,7 @@ export const Rating = ({
     setPlayerRatings({});
     setMvp("");
     setTeams([]);
+    setSkipRatings(false);
 
     if (currentMatchIndex < sharesToRate.length - 1) {
       setCurrentMatchIndex(currentMatchIndex + 1);
@@ -194,106 +205,130 @@ export const Rating = ({
         <CardTitle>
           Đánh giá trận đấu ({currentMatchIndex + 1}/{sharesToRate.length})
         </CardTitle>
-        <CardDescription>
-          Trận ngày: {currentShare.matchDate}
-        </CardDescription>
+        <CardDescription>Trận ngày: {currentShare.matchDate}</CardDescription>
       </CardHeader>
+
       <CardContent className="space-y-6">
-        {/* Player Ratings */}
-        <div className="space-y-4">
+        {/* MVP Selection */}
+        <div className="space-y-2">
           <h3 className="font-semibold flex items-center">
-            <Star className="w-4 h-4 mr-2" /> Chấm điểm cầu thủ
+            <Trophy className="w-4 h-4 mr-2" /> Cầu thủ xuất sắc nhất trận
           </h3>
-          {teams.map((team) => (
-            <div key={team.id}>
-              <h4 className="font-medium text-sm text-muted-foreground mb-2">
-                {team.name}
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {team.members.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center justify-between"
-                  >
-                    <Label htmlFor={`rating-${member.id}`}>{member.name}</Label>
-                     <Input
+          <Popover open={isMvpComboboxOpen} onOpenChange={setIsMvpComboboxOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                className="w-full justify-between"
+              >
+                {mvp
+                  ? allPlayers.find((player) => player.id === mvp)?.name
+                  : "Chọn MVP..."}
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+              <Command
+                filter={(value, search) => {
+                  const normalizedValue = removeDiacritics(value.toLowerCase());
+                  const normalizedSearch = removeDiacritics(
+                    search.toLowerCase()
+                  );
+                  return normalizedValue.includes(normalizedSearch) ? 1 : 0;
+                }}
+              >
+                <CommandInput placeholder="Tìm cầu thủ..." />
+                <CommandList>
+                  <CommandEmpty>Không tìm thấy cầu thủ.</CommandEmpty>
+                  <CommandGroup>
+                    {allPlayers.map((player) => (
+                      <CommandItem
+                        key={player.id}
+                        value={player.name}
+                        onSelect={() => {
+                          setMvp(player.id);
+                          setIsMvpComboboxOpen(false);
+                        }}
+                      >
+                        <Check
+                          className={`mr-2 h-4 w-4 ${
+                            mvp === player.id ? "opacity-100" : "opacity-0"
+                          }`}
+                        />
+                        {player.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        <div className="flex flex-col gap-3 p-3 rounded-lg bg-muted/50">
+          <div className="text-sm text-muted-foreground">
+            Bạn có thể bỏ qua chấm điểm (điểm không tính). Nếu bật chấm điểm,
+            vui lòng chấm đủ tất cả cầu thủ. MVP vẫn bắt buộc.
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="skip-ratings"
+              checked={skipRatings}
+              onCheckedChange={setSkipRatings}
+            />
+            <Label htmlFor="skip-ratings">Bỏ qua chấm điểm trận này</Label>
+          </div>
+        </div>
+        {/* Player Ratings */}
+        {!skipRatings && (
+          <div className="space-y-4">
+            <h3 className="font-semibold flex items-center">
+              <Star className="w-4 h-4 mr-2" /> Chấm điểm cầu thủ
+            </h3>
+            {teams.map((team) => (
+              <div key={team.id}>
+                <h4 className="font-medium text-sm text-muted-foreground mb-2">
+                  {team.name}
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {team.members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between"
+                    >
+                      <Label htmlFor={`rating-${member.id}`}>
+                        {member.name}
+                      </Label>
+                      <Input
                         id={`rating-${member.id}`}
                         type="number"
                         min="0"
                         max="10"
                         step="0.5"
                         value={playerRatings[member.id] || ""}
-                        onChange={(e) => handleRatingChange(member.id, e.target.value)}
+                        onChange={(e) =>
+                          handleRatingChange(member.id, e.target.value)
+                        }
                         className="w-[80px]"
                         placeholder="Điểm"
-                    />
-                  </div>
-                ))}
+                        disabled={skipRatings}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-
-        {/* MVP Selection */}
-        <div className="space-y-2">
-          <h3 className="font-semibold flex items-center">
-            <Trophy className="w-4 h-4 mr-2" /> Cầu thủ xuất sắc nhất trận
-          </h3>
-            <Popover open={isMvpComboboxOpen} onOpenChange={setIsMvpComboboxOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    className="w-full justify-between"
-                  >
-                    {mvp
-                      ? allPlayers.find((player) => player.id === mvp)?.name
-                      : "Chọn MVP..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
-                  <Command
-                     filter={(value, search) => {
-                      const normalizedValue = removeDiacritics(value.toLowerCase());
-                      const normalizedSearch = removeDiacritics(search.toLowerCase());
-                      return normalizedValue.includes(normalizedSearch) ? 1 : 0;
-                    }}
-                  >
-                    <CommandInput placeholder="Tìm cầu thủ..." />
-                    <CommandList>
-                        <CommandEmpty>Không tìm thấy cầu thủ.</CommandEmpty>
-                        <CommandGroup>
-                        {allPlayers.map((player) => (
-                            <CommandItem
-                            key={player.id}
-                            value={player.name}
-                            onSelect={() => {
-                                setMvp(player.id);
-                                setIsMvpComboboxOpen(false);
-                            }}
-                            >
-                            <Check
-                                className={`mr-2 h-4 w-4 ${
-                                mvp === player.id ? "opacity-100" : "opacity-0"
-                                }`}
-                            />
-                            {player.name}
-                            </CommandItem>
-                        ))}
-                        </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-            </Popover>
-        </div>
+            ))}
+          </div>
+        )}
 
         <Button onClick={handleNext} className="w-full" disabled={isSubmitting}>
           {isSubmitting ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : currentMatchIndex < sharesToRate.length - 1
-            ? "Tiếp tục"
-            : "Hoàn tất đánh giá"}
+          ) : currentMatchIndex < sharesToRate.length - 1 ? (
+            "Tiếp tục"
+          ) : (
+            "Hoàn tất đánh giá"
+          )}
         </Button>
       </CardContent>
     </Card>

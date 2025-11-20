@@ -34,7 +34,7 @@ export default defineConfig(({ mode }) => ({
       srcDir: "public",
       filename: "sw.js",
       devOptions: {
-        enabled: true,
+        enabled: false,
       },
       includeAssets: [
         "favicon.ico",
