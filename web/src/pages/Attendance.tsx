@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -28,6 +34,7 @@ import {
   Pin,
   PinOff,
   History,
+  RotateCcw,
 } from "lucide-react";
 import {
   collection,
@@ -57,12 +64,25 @@ interface Match {
   id: string;
   date: Timestamp;
   totalAmount: number;
+  teamCount?: number;
+  teamsConfig?: {
+    id: string;
+    name: string;
+    members?: { id: string }[];
+    memberIds?: string[];
+  }[];
 }
 
 interface AttendanceRecord {
   timestamp: Timestamp;
   memberName: string;
   userAgent: string;
+}
+
+interface Team {
+  id: string;
+  name: string;
+  members: Member[];
 }
 
 const Attendance = () => {
@@ -84,6 +104,15 @@ const Attendance = () => {
   const [pinnedMembers, setPinnedMembers] = useLocalStorage<string[]>(
     "pinnedMembers",
     []
+  );
+  const [teamPool, setTeamPool] = useState<Member[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [teamSearch, setTeamSearch] = useState("");
+  const [teamBuilderInitialized, setTeamBuilderInitialized] = useState(false);
+
+  const membersMap = useMemo(
+    () => new Map(members.map((m) => [m.id, m])),
+    [members]
   );
 
   useEffect(() => {
@@ -123,6 +152,10 @@ const Attendance = () => {
       if (matchSnapshot.empty) {
         setMatch(null); // No pending match found
         setMatchId(null);
+        setTeams([]);
+        setTeamPool([]);
+        setTeamBuilderInitialized(false);
+        setTeamSearch("");
         return;
       }
 
@@ -133,6 +166,10 @@ const Attendance = () => {
       } as Match;
       setMatch(latestMatch);
       setMatchId(latestMatch.id);
+      setTeams([]);
+      setTeamPool([]);
+      setTeamBuilderInitialized(false);
+      setTeamSearch("");
 
       // Fetch all members
       const membersQuery = query(
@@ -182,6 +219,18 @@ const Attendance = () => {
       .replace(/Đ/g, "D");
   };
 
+  const attendanceMembers = useMemo(() => {
+    return Array.from(attendance.entries()).map(([memberId, record]) => {
+      const knownMember = membersMap.get(memberId);
+      return (
+        knownMember || {
+          id: memberId,
+          name: record?.memberName || "Ẩn danh",
+        }
+      );
+    });
+  }, [attendance, membersMap]);
+
   const filteredMembers = useMemo(() => {
     const lowerCaseSearch = removeDiacritics(search.toLowerCase());
     const filtered = members.filter(
@@ -213,7 +262,7 @@ const Attendance = () => {
     memberId: string,
     memberName: string
   ) => {
-    if (!matchId || attendance.has(memberId) || attendance.size >= 20) return;
+    if (!matchId || attendance.has(memberId)) return;
 
     setIsSubmitting((prev) => new Set(prev).add(memberId));
     const attendanceRef = doc(db, "matches", matchId, "attendance", memberId);
@@ -234,15 +283,11 @@ const Attendance = () => {
           const currentAttendanceSnapshot = await getDocs(
             currentAttendanceQuery
           );
-          if (currentAttendanceSnapshot.size < 20) {
-            transaction.set(attendanceRef, {
-              timestamp: Timestamp.now(),
-              memberName: memberName,
-              userAgent: navigator.userAgent,
-            });
-          } else {
-            throw new Error("Attendance is full.");
-          }
+          transaction.set(attendanceRef, {
+            timestamp: Timestamp.now(),
+            memberName: memberName,
+            userAgent: navigator.userAgent,
+          });
         }
       });
 
@@ -267,10 +312,7 @@ const Attendance = () => {
       toast({
         variant: "destructive",
         title: "Lỗi",
-        description:
-          error.message === "Attendance is full."
-            ? "Đã đủ 20 người điểm danh."
-            : "Không thể điểm danh. Vui lòng thử lại.",
+        description: "Không thể điểm danh. Vui lòng thử lại.",
       });
     } finally {
       setIsSubmitting((prev) => {
@@ -281,7 +323,160 @@ const Attendance = () => {
     }
   };
 
-  const isAttendanceFull = useMemo(() => attendance.size >= 20, [attendance]);
+  const initializeTeamsFromMatch = useCallback(() => {
+    if (!match) return;
+
+    const baseTeamCount =
+      match.teamCount || match.teamsConfig?.length || 2;
+    const fallbackIds = ["A", "B", "C"];
+    const teamIds = fallbackIds.slice(0, baseTeamCount);
+
+    const configTeams = match.teamsConfig || [];
+    const builtTeams = teamIds.map((teamId, index) => {
+      const configTeam =
+        configTeams.find((team) => team.id === teamId) ||
+        configTeams[index];
+      const memberIds =
+        configTeam?.members?.map((m) => m.id) ||
+        configTeam?.memberIds ||
+        [];
+      const memberList = memberIds
+        .map((memberId) => {
+          const memberFromList = membersMap.get(memberId);
+          if (memberFromList) return memberFromList;
+          const attendanceRecord = attendance.get(memberId);
+          if (attendanceRecord) {
+            return { id: memberId, name: attendanceRecord.memberName };
+          }
+          return null;
+        })
+        .filter((m): m is Member => Boolean(m))
+        .filter((m) => attendance.has(m.id));
+
+      return {
+        id: configTeam?.id || teamId,
+        name: configTeam?.name || `Đội ${teamId}`,
+        members: memberList,
+      };
+    });
+
+    const assignedIds = new Set(
+      builtTeams.flatMap((team) => team.members.map((member) => member.id))
+    );
+    const poolMembers = attendanceMembers.filter(
+      (member) => !assignedIds.has(member.id)
+    );
+
+    setTeams(builtTeams);
+    setTeamPool(poolMembers);
+    setTeamBuilderInitialized(true);
+  }, [attendance, attendanceMembers, match, membersMap]);
+
+  useEffect(() => {
+    if (!match || teamBuilderInitialized || isLoading) return;
+    initializeTeamsFromMatch();
+  }, [initializeTeamsFromMatch, isLoading, match, teamBuilderInitialized]);
+
+  useEffect(() => {
+    if (!teamBuilderInitialized) return;
+
+    const assignedIds = new Set(
+      teams.flatMap((team) => team.members.map((member) => member.id))
+    );
+
+    setTeamPool((prevPool) => {
+      const existingPool = prevPool.filter((member) =>
+        attendance.has(member.id)
+      );
+      const poolIds = new Set(existingPool.map((member) => member.id));
+      const newAttendees = attendanceMembers.filter(
+        (member) =>
+          !assignedIds.has(member.id) && !poolIds.has(member.id)
+      );
+      if (
+        newAttendees.length === 0 &&
+        existingPool.length === prevPool.length
+      ) {
+        return prevPool;
+      }
+      return [...existingPool, ...newAttendees];
+    });
+  }, [attendance, attendanceMembers, teamBuilderInitialized, teams]);
+
+  const handleTeamDragStart = (
+    e: DragEvent,
+    member: Member,
+    source: string
+  ) => {
+    e.dataTransfer.setData("member", JSON.stringify(member));
+    e.dataTransfer.setData("source", source);
+  };
+
+  const handleTeamDrop = (
+    e: DragEvent,
+    targetTeamId: string | "pool"
+  ) => {
+    e.preventDefault();
+    const memberData = e.dataTransfer.getData("member");
+    if (!memberData) return;
+
+    const member: Member = JSON.parse(memberData);
+    const source = e.dataTransfer.getData("source");
+
+    setTeams((prevTeams) => {
+      let updatedTeams = prevTeams.map((team) =>
+        team.id === source
+          ? {
+              ...team,
+              members: team.members.filter((m) => m.id !== member.id),
+            }
+          : team
+      );
+
+      if (targetTeamId !== "pool") {
+        updatedTeams = updatedTeams.map((team) =>
+          team.id === targetTeamId
+            ? team.members.some((m) => m.id === member.id)
+              ? team
+              : { ...team, members: [...team.members, member] }
+            : team
+        );
+      }
+
+      return updatedTeams;
+    });
+
+    setTeamPool((prevPool) => {
+      const filteredPool = prevPool.filter((m) => m.id !== member.id);
+      if (targetTeamId === "pool" && attendance.has(member.id)) {
+        return filteredPool.some((m) => m.id === member.id)
+          ? filteredPool
+          : [...filteredPool, member];
+      }
+      return filteredPool;
+    });
+  };
+
+  const handleResetTeams = () => {
+    setTeams((prevTeams) =>
+      prevTeams.map((team) => ({ ...team, members: [] }))
+    );
+    setTeamPool(attendanceMembers);
+  };
+
+  const filteredTeamPool = useMemo(() => {
+    const lowerCaseSearch = removeDiacritics(teamSearch.toLowerCase());
+    return teamPool.filter(
+      (member) =>
+        removeDiacritics(member.name.toLowerCase()).includes(
+          lowerCaseSearch
+        ) ||
+        (member.nickname &&
+          removeDiacritics(member.nickname.toLowerCase()).includes(
+            lowerCaseSearch
+          ))
+    );
+  }, [teamPool, teamSearch]);
 
   if (isLoading) {
     return (
@@ -325,13 +520,8 @@ const Attendance = () => {
             </span>
           </div>
           <p className="text-xl font-bold mt-4">
-            Số người đã điểm danh: {attendance.size} / 20
+            Số người đã điểm danh: {attendance.size}
           </p>
-          {isAttendanceFull && (
-            <Badge className="mt-2" variant="destructive">
-              Đã đủ số lượng
-            </Badge>
-          )}
           <div className="mt-4">
             <Dialog>
               <DialogTrigger asChild>
@@ -435,13 +625,13 @@ const Attendance = () => {
                     </div>
                   </div>
                   <Button
-                    variant={isAttending ? "secondary" : "default"}
-                    onClick={() =>
-                      handleAttendanceToggle(member.id, member.name)
-                    }
-                    disabled={isProcessing || isAttending || isAttendanceFull}
-                    className="w-full mt-auto"
-                  >
+                variant={isAttending ? "secondary" : "default"}
+                onClick={() =>
+                  handleAttendanceToggle(member.id, member.name)
+                }
+                disabled={isProcessing || isAttending}
+                className="w-full mt-auto"
+              >
                     {isProcessing ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : isAttending ? (
@@ -464,6 +654,160 @@ const Attendance = () => {
             <p>Không tìm thấy thành viên nào.</p>
           </div>
         )}
+
+        <Card className="mt-10 shadow-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5" />
+              Chia đội kéo thả
+            </CardTitle>
+            <CardDescription>
+              Kéo người đã điểm danh vào từng đội để tự chia sân nhanh chóng.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Tìm trong danh sách kéo thả..."
+                  value={teamSearch}
+                  onChange={(e) => setTeamSearch(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <div className="flex items-center gap-2 justify-between sm:justify-end">
+                <Badge variant="outline" className="py-2">
+                  {teamPool.length} người chờ
+                </Badge>
+                <Button
+                  variant="ghost"
+                  onClick={handleResetTeams}
+                  className="inline-flex"
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Đưa tất cả về danh sách
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <Card
+                className="shadow-card border-dashed"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => handleTeamDrop(e, "pool")}
+              >
+                <CardHeader>
+                  <CardTitle className="text-lg">
+                    Người đã điểm danh ({filteredTeamPool.length})
+                  </CardTitle>
+                  <CardDescription>
+                    Kéo tên sang các cột đội bên cạnh.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2 min-h-[220px] max-h-[420px] overflow-y-auto">
+                  {filteredTeamPool.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">
+                      Chưa có ai trong danh sách kéo thả.
+                    </div>
+                  ) : (
+                    filteredTeamPool.map((member) => (
+                      <div
+                        key={member.id}
+                        draggable
+                        onDragStart={(e) =>
+                          handleTeamDragStart(e, member, "pool")
+                        }
+                        className="p-3 rounded-lg border bg-card cursor-move hover:shadow-md transition-all"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="font-semibold leading-tight">
+                              {member.name}
+                            </p>
+                            {member.nickname && (
+                              <Badge variant="secondary" className="mt-1 text-xs">
+                                {member.nickname}
+                              </Badge>
+                            )}
+                          </div>
+                          <Badge variant="outline" className="text-[10px]">
+                            Kéo
+                          </Badge>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
+              {teams.length === 0 ? (
+                <Card className="shadow-card lg:col-span-2 xl:col-span-3">
+                  <CardContent className="p-6 text-muted-foreground">
+                    Chưa có cấu hình đội cho trận này. Danh sách sẽ tự tạo khi có
+                    điểm danh.
+                  </CardContent>
+                </Card>
+              ) : (
+                teams.map((team) => (
+                  <Card
+                    key={team.id}
+                    className="shadow-card"
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => handleTeamDrop(e, team.id)}
+                  >
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between text-lg">
+                        <span>{team.name}</span>
+                        <Badge variant="secondary">{team.members.length}</Badge>
+                      </CardTitle>
+                      <CardDescription>
+                        Kéo thành viên vào để hoàn thiện đội hình.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2 min-h-[220px]">
+                      {team.members.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">
+                          Chưa có ai trong đội này.
+                        </div>
+                      ) : (
+                        team.members.map((member) => (
+                          <div
+                            key={member.id}
+                            draggable
+                            onDragStart={(e) =>
+                              handleTeamDragStart(e, member, team.id)
+                            }
+                            className="p-3 rounded-lg border bg-card cursor-move hover:shadow-md transition-all"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <p className="font-medium leading-tight">
+                                  {member.name}
+                                </p>
+                                {member.nickname && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="mt-1 text-xs"
+                                  >
+                                    {member.nickname}
+                                  </Badge>
+                                )}
+                              </div>
+                              <Badge variant="outline" className="text-[10px]">
+                                Giữ & kéo
+                              </Badge>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
