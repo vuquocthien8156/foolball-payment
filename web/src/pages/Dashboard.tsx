@@ -13,20 +13,22 @@ interface StatData {
   topMvps: { name: string; count: number }[];
 }
 
+const MIN_MVP_VOTES = 2;
+
 const Dashboard = () => {
   const [stats, setStats] = useState<StatData>({ topPayers: [], topRated: [], topMvps: [] });
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
 
   useEffect(() => {
-    const fetchStats = async () => {
-      setIsLoading(true);
-      
-      const membersSnapshot = await getDocs(collection(db, "members"));
-      const membersMap = new Map(membersSnapshot.docs.map(doc => [doc.id, doc.data().name as string]));
+      const fetchStats = async () => {
+        setIsLoading(true);
+        
+        const membersSnapshot = await getDocs(collection(db, "members"));
+        const membersMap = new Map(membersSnapshot.docs.map(doc => [doc.id, doc.data().name as string]));
 
-      let matchesQuery = query(collection(db, "matches"));
-      const now = new Date();
+        let matchesQuery = query(collection(db, "matches"));
+        const now = new Date();
       if (timeFilter === "week") {
         const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         matchesQuery = query(matchesQuery, where("date", ">=", Timestamp.fromDate(weekAgo)));
@@ -41,6 +43,7 @@ const Dashboard = () => {
         const mvpVotes = new Map<string, number>();
 
         for (const matchDoc of matchesSnapshot.docs) {
+            if (matchDoc.data().isDeleted) continue;
             const sharesSnapshot = await getDocs(query(collection(db, "matches", matchDoc.id, "shares"), where("status", "==", "PAID")));
             sharesSnapshot.forEach(shareDoc => {
                 const share = shareDoc.data();
@@ -55,6 +58,9 @@ const Dashboard = () => {
                     ratingsByPlayer.set(pr.memberId, { total: current.total + pr.score, count: current.count + 1 });
                 });
                 if (rating.mvpPlayerId) {
+                    if (rating.ratedByMemberId === rating.mvpPlayerId) {
+                      return;
+                    }
                     mvpVotes.set(rating.mvpPlayerId, (mvpVotes.get(rating.mvpPlayerId) || 0) + 1);
                 }
             });
@@ -62,7 +68,11 @@ const Dashboard = () => {
 
         const topPayers = Array.from(paymentsByMember.entries()).map(([id, total]) => ({ name: membersMap.get(id) || "N/A", total })).sort((a,b) => b.total - a.total).slice(0,3);
         const topRated = Array.from(ratingsByPlayer.entries()).map(([id, data]) => ({ name: membersMap.get(id) || "N/A", avg: data.total / data.count })).sort((a,b) => b.avg - a.avg).slice(0,3);
-        const topMvps = Array.from(mvpVotes.entries()).map(([id, count]) => ({ name: membersMap.get(id) || "N/A", count })).sort((a,b) => b.count - a.count).slice(0,3);
+        const topMvps = Array.from(mvpVotes.entries())
+          .filter(([, count]) => count >= MIN_MVP_VOTES)
+          .map(([id, count]) => ({ name: membersMap.get(id) || "N/A", count }))
+          .sort((a,b) => b.count - a.count)
+          .slice(0,3);
 
         setStats({ topPayers, topRated, topMvps });
         setIsLoading(false);
@@ -96,8 +106,8 @@ const Dashboard = () => {
 
         <div className="grid gap-8 md:grid-cols-1 lg:grid-cols-3">
             <LeaderboardCard title="Top 3 Trả Nhiều Nhất" data={stats.topPayers} icon={DollarSign} format={(v) => `${v.toLocaleString()} VND`} valueKey="total" />
-            <LeaderboardCard title="Top 3 Điểm Cao Nhất" data={stats.topRated} icon={Star} format={(v) => v.toFixed(2)} valueKey="avg" />
-            <LeaderboardCard title="Top 3 MVP" data={stats.topMvps} icon={Trophy} format={(v) => `${v} phiếu`} valueKey="count" />
+            <LeaderboardCard title="Top 3 MVP (điểm cao)" data={stats.topRated} icon={Star} format={(v) => v.toFixed(2)} valueKey="avg" />
+            <LeaderboardCard title="Top 3 Ấn tượng (vote)" data={stats.topMvps} icon={Trophy} format={(v) => `${v} phiếu`} valueKey="count" />
         </div>
       </div>
     </div>

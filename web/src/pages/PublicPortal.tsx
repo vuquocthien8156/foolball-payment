@@ -34,6 +34,8 @@ interface TopHighlight {
   matchDateLabel: string;
 }
 
+const MIN_MVP_VOTES = 2;
+
 const PublicPortal = () => {
   const [highlight, setHighlight] = useState<TopHighlight | null>(null);
   const [isLoadingHighlight, setIsLoadingHighlight] = useState(false);
@@ -58,6 +60,7 @@ const PublicPortal = () => {
 
         for (const matchDoc of matchesSnapshot.docs) {
           const matchData = matchDoc.data();
+          if (matchData.isDeleted) continue;
           const dateObj = matchData.date;
           const matchDate =
             dateObj?.toDate?.() || new Date(dateObj as unknown as string);
@@ -88,6 +91,9 @@ const PublicPortal = () => {
             );
 
             if (rating.mvpPlayerId) {
+              if (rating.ratedByMemberId === rating.mvpPlayerId) {
+                return;
+              }
               mvpVotes.set(
                 rating.mvpPlayerId,
                 (mvpVotes.get(rating.mvpPlayerId) || 0) + 1
@@ -101,9 +107,9 @@ const PublicPortal = () => {
               (a[1].totalPoints / a[1].ratingCount || 0)
           )[0];
 
-          const topMvpEntry = Array.from(mvpVotes.entries()).sort(
-            (a, b) => b[1] - a[1]
-          )[0];
+          const topMvpEntry = Array.from(mvpVotes.entries())
+            .filter(([, count]) => count >= MIN_MVP_VOTES)
+            .sort((a, b) => b[1] - a[1])[0];
 
           // Chỉ fetch tên cho hai người cần hiển thị
           const memberIds = [topRatingEntry?.[0], topMvpEntry?.[0]].filter(
@@ -122,7 +128,7 @@ const PublicPortal = () => {
           latest = {
             mvpName: topMvpEntry
               ? nameCache.get(topMvpEntry[0]) || "Không rõ"
-              : "Chưa có",
+              : "Chưa đủ 2 phiếu hợp lệ",
             mvpVotes: topMvpEntry?.[1] || 0,
             topScorerName: topRatingEntry
               ? nameCache.get(topRatingEntry[0]) || "Không rõ"
@@ -164,6 +170,7 @@ const PublicPortal = () => {
 
         for (const matchDoc of matchesSnapshot.docs) {
           const matchData = matchDoc.data();
+          if (matchData.isDeleted) continue;
           if (matchData.status && matchData.status !== "PUBLISHED") {
             continue;
           }
@@ -272,7 +279,7 @@ const PublicPortal = () => {
             <div className="p-4 rounded-xl bg-white/70 backdrop-blur shadow-inner">
               <div className="flex items-center gap-2 text-amber-600">
                 <Trophy className="h-5 w-5" />
-                <span className="font-semibold">MVP</span>
+                <span className="font-semibold">Cầu thủ ấn tượng (vote)</span>
               </div>
               {isLoadingHighlight ? (
                 <p className="text-sm text-muted-foreground mt-2">
@@ -297,7 +304,7 @@ const PublicPortal = () => {
             <div className="p-4 rounded-xl bg-white/70 backdrop-blur shadow-inner">
               <div className="flex items-center gap-2 text-emerald-600">
                 <TrendingUp className="h-5 w-5" />
-                <span className="font-semibold">Điểm cao nhất</span>
+                <span className="font-semibold">MVP (điểm cao nhất)</span>
               </div>
               {isLoadingHighlight ? (
                 <p className="text-sm text-muted-foreground mt-2">
@@ -423,9 +430,9 @@ const PublicPortal = () => {
                   <TrendingUp className="h-6 w-6 text-white" />
                 </div>
                 <div>
-                  <CardTitle className="text-xl">Xem Đánh Giá</CardTitle>
+                  <CardTitle className="text-xl">Xem lịch sử trận</CardTitle>
                   <CardDescription>
-                    Xem MVP và điểm của các trận đã đấu.
+                    Ratings, MVP/ấn tượng và live notes của các trận đã đấu.
                   </CardDescription>
                 </div>
               </CardHeader>

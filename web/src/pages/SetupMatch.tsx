@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import {
   Calendar,
@@ -87,6 +88,7 @@ interface MatchConfig {
   teamsConfig: SavedTeamConfig[];
   date?: Timestamp;
   status?: "PENDING" | "COMPLETED";
+  isTest?: boolean;
 }
 
 // Helper
@@ -111,6 +113,7 @@ const SetupMatch = () => {
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isTestMatch, setIsTestMatch] = useState(false);
   const [pool, setPool] = useState<Member[]>([]);
   const [attendance, setAttendance] = useState<Set<string>>(new Set());
   const [teams, setTeams] = useState<Team[]>([
@@ -234,6 +237,7 @@ const SetupMatch = () => {
           savedConfig.totalAmount ? savedConfig.totalAmount.toString() : ""
         );
         setTeamCount(savedConfig.teamCount || 2);
+        setIsTestMatch(savedConfig.isTest || false);
         setTeams(newTeams);
         setPool(newPool);
         if (matchId && configSource.date) {
@@ -453,6 +457,7 @@ const SetupMatch = () => {
         date: new Date(date),
         totalAmount: parseFloat(totalAmount) || 0,
         teamCount,
+        isTest: isTestMatch,
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
           name: t.name,
@@ -490,6 +495,7 @@ const SetupMatch = () => {
         totalAmount: parseFloat(totalAmount) || 0,
         teamCount,
         status: "PENDING",
+        isTest: isTestMatch,
         createdAt: serverTimestamp(),
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
@@ -636,6 +642,7 @@ const SetupMatch = () => {
         date: new Date(date),
         totalAmount: numericTotalAmount,
         teamCount,
+        isTest: isTestMatch,
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
           name: t.name,
@@ -769,7 +776,7 @@ const SetupMatch = () => {
           <CardHeader>
             <CardTitle>Thông tin trận đấu</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-5">
             <div className="space-y-2">
               <Label htmlFor="date">Ngày đá</Label>
               <div className="relative">
@@ -825,6 +832,19 @@ const SetupMatch = () => {
                 >
                   {totalPercent}%
                 </Badge>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="is-test-match">Trận test</Label>
+              <div className="flex items-center gap-3 h-10">
+                <Switch
+                  id="is-test-match"
+                  checked={isTestMatch}
+                  onCheckedChange={setIsTestMatch}
+                />
+                <span className="text-sm text-muted-foreground">
+                  Luôn hiện nút xóa
+                </span>
               </div>
             </div>
           </CardContent>

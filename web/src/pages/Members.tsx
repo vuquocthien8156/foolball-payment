@@ -39,6 +39,13 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   collection,
   getDocs,
   addDoc,
@@ -53,9 +60,12 @@ import {
   Timestamp,
   writeBatch,
   updateDoc,
+  setDoc,
 } from "firebase/firestore";
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
+import { initializeApp, deleteApp } from "firebase/app";
+import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 
 // Interfaces
 interface Member {
@@ -64,6 +74,11 @@ interface Member {
   nickname?: string;
   isCreditor?: boolean;
   isExemptFromPayment?: boolean;
+  loginEnabled?: boolean;
+  authUid?: string;
+  loginEmail?: string;
+  loginRole?: string;
+  adminTabs?: string[];
 }
 
 interface MemberStats {
@@ -213,6 +228,8 @@ const MemberDetails = ({ memberId }: MemberDetailsProps) => {
 };
 
 // Main Members Component
+const defaultAdminTabs = ["dashboard", "scoring", "live"];
+
 const Members = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [search, setSearch] = useState("");
@@ -227,6 +244,58 @@ const Members = () => {
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [loginPassword, setLoginPassword] = useState("");
+  const [isLoadingUserRole, setIsLoadingUserRole] = useState(false);
+  const availableAdminTabs = useMemo(
+    () => [
+      { key: "dashboard", label: "Dashboard" },
+      { key: "matches", label: "Quản lý Trận đấu", superOnly: true },
+      { key: "members", label: "Thành viên", superOnly: true },
+      { key: "scoring", label: "Chấm điểm" },
+      { key: "live", label: "Ghi chú live" },
+      { key: "public", label: "Trang Public" },
+    ],
+    []
+  );
+
+  useEffect(() => {
+    const fetchUserRoles = async () => {
+      if (!editingMember?.authUid) return;
+      setIsLoadingUserRole(true);
+      try {
+        const snap = await getDoc(doc(db, "userRoles", editingMember.authUid));
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          const tabsFromRole = Array.isArray(data.tabs)
+            ? (data.tabs as string[])
+            : defaultAdminTabs;
+          const roleFromRole = Array.isArray(data.roles)
+            ? (data.roles as string[])[0]
+            : editingMember.loginRole || "admin";
+          setEditingMember((prev) =>
+            prev && prev.id === editingMember.id
+              ? {
+                  ...prev,
+                  adminTabs: prev.adminTabs || tabsFromRole,
+                  loginRole: prev.loginRole || roleFromRole,
+                }
+              : prev
+          );
+        } else if (!editingMember.adminTabs) {
+          setEditingMember((prev) =>
+            prev && prev.id === editingMember.id
+              ? { ...prev, adminTabs: defaultAdminTabs }
+              : prev
+          );
+        }
+      } catch (err) {
+        console.error("Failed to fetch userRoles for member", err);
+      } finally {
+        setIsLoadingUserRole(false);
+      }
+    };
+    fetchUserRoles();
+  }, [editingMember?.authUid]);
   const { toast } = useToast();
 
   const fetchMembersAndStats = useCallback(async () => {
@@ -277,6 +346,16 @@ const Members = () => {
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/đ/g, "d")
       .replace(/Đ/g, "D");
+  };
+
+  const generateLoginEmail = (name: string, memberId: string) => {
+    const slug =
+      removeDiacritics(name)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "")
+        .slice(0, 12) || "user";
+    const suffix = memberId.slice(0, 4);
+    return `${slug}.${suffix}@member.local`;
   };
 
   const filteredMembers = useMemo(
@@ -412,11 +491,16 @@ const Members = () => {
       });
     }
   };
- 
+
   const handleUpdateMember = async (
     id: string,
     updatedData: Partial<Member>
   ) => {
+  const stripUndefined = (data: Partial<Member>) =>
+      Object.fromEntries(
+        Object.entries(data).filter(([, value]) => value !== undefined)
+      );
+
     if (!updatedData.name?.trim()) {
       toast({
         variant: "destructive",
@@ -428,7 +512,90 @@ const Members = () => {
     setIsUpdating(true);
     try {
       const memberRef = doc(db, "members", id);
-      await updateDoc(memberRef, updatedData);
+
+      let authUid = updatedData.authUid;
+      let loginEmail = updatedData.loginEmail;
+      let loginRole = updatedData.loginRole;
+      let existingRoles: string[] = [];
+      if (updatedData.loginEnabled) {
+        if (!authUid && !loginPassword) {
+          toast({
+            variant: "destructive",
+            title: "Thiếu mật khẩu",
+            description: "Nhập mật khẩu để tạo tài khoản đăng nhập.",
+          });
+          setIsUpdating(false);
+          return;
+        }
+
+        // Nếu chưa có UID/email -> tự tạo tài khoản với email auto
+        if (!authUid) {
+          const generatedEmail = generateLoginEmail(
+            updatedData.name || "user",
+            id
+          );
+          const secondaryApp = initializeApp(
+            (await import("@/lib/firebase")).app.options,
+            `secondary-${Date.now()}`
+          );
+          try {
+            const secondaryAuth = getAuth(secondaryApp);
+            const cred = await createUserWithEmailAndPassword(
+              secondaryAuth,
+              generatedEmail,
+              loginPassword
+            );
+            authUid = cred.user.uid;
+            loginEmail = generatedEmail;
+          } catch (err) {
+            console.error("Error creating auth user:", err);
+            toast({
+              variant: "destructive",
+              title: "Không tạo được tài khoản",
+              description:
+                "Kiểm tra lại mật khẩu hoặc thử lại. Có thể email bị trùng.",
+            });
+            throw err;
+          } finally {
+            await deleteApp(secondaryApp);
+          }
+        }
+
+        // Nếu chưa chọn role, dùng role hiện có (nếu có) hoặc mặc định admin
+        if (!loginRole && authUid) {
+          const roleSnap = await getDoc(doc(db, "userRoles", authUid));
+          const data = roleSnap.data();
+          if (Array.isArray(data?.roles)) {
+            existingRoles = data.roles;
+          }
+        }
+        const finalRole = loginRole || existingRoles[0] || "admin";
+
+        // Lưu role vào userRoles
+        await setDoc(
+          doc(db, "userRoles", authUid),
+          {
+            roles: [finalRole],
+            tabs:
+              updatedData.adminTabs && updatedData.adminTabs.length > 0
+                ? updatedData.adminTabs
+                : defaultAdminTabs,
+          },
+          { merge: true }
+        );
+
+        updatedData.authUid = authUid;
+        updatedData.loginEmail = loginEmail;
+        updatedData.loginRole = finalRole;
+        updatedData.adminTabs =
+          updatedData.adminTabs && updatedData.adminTabs.length > 0
+            ? updatedData.adminTabs
+            : defaultAdminTabs;
+      }
+
+      await updateDoc(memberRef, stripUndefined(updatedData));
+
+      setLoginPassword("");
       toast({
         title: "Thành công",
         description: "Đã cập nhật thông tin thành viên.",
@@ -447,7 +614,7 @@ const Members = () => {
       setIsUpdating(false);
     }
   };
- 
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -574,7 +741,7 @@ const Members = () => {
                           <div className="h-12 w-12 rounded-full bg-primary flex items-center justify-center text-white font-semibold shadow-card">
                             {member.name.charAt(0).toUpperCase()}
                           </div>
-                          <div>
+                          <div className="space-y-1">
                             <p className="font-semibold text-foreground">
                               {member.name}
                             </p>
@@ -582,6 +749,16 @@ const Members = () => {
                               <Badge variant="secondary" className="mt-1">
                                 {member.nickname}
                               </Badge>
+                            )}
+                            {member.loginEnabled && (
+                              <div className="flex flex-wrap gap-2">
+                                <Badge variant="outline">Login bật</Badge>
+                                {member.loginEmail && (
+                                  <Badge variant="secondary">
+                                    {member.loginEmail}
+                                  </Badge>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>
@@ -694,7 +871,10 @@ const Members = () => {
                     id="edit-name"
                     defaultValue={editingMember.name}
                     onChange={(e) =>
-                      setEditingMember({ ...editingMember, name: e.target.value })
+                      setEditingMember({
+                        ...editingMember,
+                        name: e.target.value,
+                      })
                     }
                   />
                 </div>
@@ -724,6 +904,132 @@ const Members = () => {
                   />
                   <Label htmlFor="edit-exempt">Miễn chia tiền</Label>
                 </div>
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="edit-login-enabled"
+                      checked={!!editingMember.loginEnabled}
+                      onCheckedChange={(checked) =>
+                        setEditingMember({
+                          ...editingMember,
+                          loginEnabled: checked,
+                        })
+                      }
+                    />
+                    <Label htmlFor="edit-login-enabled">
+                      Bật đăng nhập cho member này
+                    </Label>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Role đăng nhập</Label>
+                    <Select
+                      value={editingMember.loginRole || "admin"}
+                      onValueChange={(val) =>
+                        setEditingMember({ ...editingMember, loginRole: val })
+                      }
+                      disabled={!editingMember.loginEnabled}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Chọn role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="superadmin">Superadmin</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {editingMember.loginRole === "admin" && (
+                    <div className="space-y-2">
+                    <Label>
+                      Tab được phép hiển thị cho admin này{" "}
+                      {isLoadingUserRole && (
+                        <span className="text-xs text-muted-foreground">
+                          (Đang tải...)
+                        </span>
+                      )}
+                    </Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {availableAdminTabs.map((tab) => {
+                          const currentTabs = editingMember.adminTabs || [];
+                          const checked =
+                            currentTabs.length === 0 ||
+                            currentTabs.includes(tab.key);
+                          return (
+                            <label
+                              key={tab.key}
+                              className="flex items-center gap-2 text-sm"
+                            >
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={checked}
+                                onChange={(e) => {
+                                  const newTabs = new Set(
+                                    currentTabs.length === 0
+                                      ? availableAdminTabs.map((t) => t.key)
+                                      : currentTabs
+                                  );
+                                  if (e.target.checked) {
+                                    newTabs.add(tab.key);
+                                  } else {
+                                    newTabs.delete(tab.key);
+                                  }
+                                  setEditingMember({
+                                    ...editingMember,
+                                    adminTabs: Array.from(newTabs),
+                                  });
+                                }}
+                              />
+                              {tab.label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Nếu bỏ chọn hết, hệ thống mặc định: Dashboard, Chấm
+                        điểm, Ghi chú live.
+                      </p>
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label>Email đăng nhập (tự tạo)</Label>
+                    <Input
+                      value={editingMember.loginEmail || "Sẽ tạo tự động"}
+                      readOnly
+                      disabled
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Hệ thống sẽ sinh email từ tên + id. Bạn không cần nhập.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Auth UID</Label>
+                    <Input
+                      value={
+                        editingMember.authUid || "Sẽ tạo tự động sau khi lưu"
+                      }
+                      readOnly
+                      disabled
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-login-password">
+                      Mật khẩu (tạo tài khoản mới)
+                    </Label>
+                    <Input
+                      id="edit-login-password"
+                      type="password"
+                      placeholder="Nhập mật khẩu để tạo tài khoản mới"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      disabled={!editingMember.loginEnabled}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Nếu đã có Auth UID/Email sẵn, có thể bỏ trống mật khẩu và
+                      chỉ dán UID + Email.
+                    </p>
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end gap-2">
                 <Button
@@ -738,6 +1044,9 @@ const Members = () => {
                       name: editingMember.name,
                       nickname: editingMember.nickname,
                       isExemptFromPayment: editingMember.isExemptFromPayment,
+                      loginEnabled: editingMember.loginEnabled,
+                      authUid: editingMember.authUid,
+                      loginEmail: editingMember.loginEmail,
                     })
                   }
                   disabled={isUpdating}
@@ -755,5 +1064,5 @@ const Members = () => {
     </div>
   );
 };
- 
+
 export default Members;

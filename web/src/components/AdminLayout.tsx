@@ -10,6 +10,9 @@ import {
   BarChart,
   Globe,
   Trophy,
+  ClipboardCheck,
+  Activity,
+  Menu,
 } from "lucide-react";
 import {
   Card,
@@ -38,13 +41,23 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { getAuth, signOut } from "firebase/auth";
 import { toast } from "@/hooks/use-toast";
+import { useUserRoles } from "@/hooks/useUserRoles";
 
 const AdminLayout = () => {
   const { user } = useAuth();
+  const { roles, tabs, loading: rolesLoading } = useUserRoles(user?.uid);
+  const isSuperAdmin = roles.includes("superadmin");
+  const allowedTabs = new Set(
+    isSuperAdmin
+      ? ["dashboard", "matches", "members", "scoring", "live", "public"]
+      : tabs
+  );
   const navigate = useNavigate();
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const toggleSidebar = () => setIsSidebarOpen((prev) => !prev);
 
   interface Notification {
     id: string;
@@ -116,8 +129,27 @@ const AdminLayout = () => {
   };
 
   return (
-    <div className="grid h-screen w-full overflow-hidden md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
-      <div className="hidden border-r bg-muted/40 md:block">
+    <div
+      className={cn(
+        "grid h-screen w-full overflow-hidden",
+        isSidebarOpen
+          ? "md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]"
+          : "md:grid-cols-[0px_1fr]"
+      )}
+    >
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+      <div
+        className={cn(
+          "border-r bg-background z-40 transform transition-transform duration-200",
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full",
+          "fixed inset-y-0 left-0 w-64 md:static md:w-64 lg:w-72 shadow-lg md:shadow-none"
+        )}
+      >
         <div className="flex h-full flex-col gap-2">
           <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
             <NavLink
@@ -125,8 +157,18 @@ const AdminLayout = () => {
               className="flex items-center gap-2 font-semibold"
             >
               <BarChart className="h-6 w-6" />
-              <span className="">Payment App</span>
+              <span className="hidden md:inline">Football Tools</span>
             </NavLink>
+            <div className="md:hidden ml-auto">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsSidebarOpen(false)}
+                aria-label="Đóng menu"
+              >
+                ✕
+              </Button>
+            </div>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
@@ -185,6 +227,7 @@ const AdminLayout = () => {
             <nav className="grid items-start px-2 text-sm font-medium lg:px-4">
               <NavLink
                 to="/admin/dashboard"
+                onClick={() => setIsSidebarOpen(false)}
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
                     isActive ? "bg-muted text-primary" : ""
@@ -194,46 +237,91 @@ const AdminLayout = () => {
                 <Home className="h-4 w-4" />
                 Dashboard
               </NavLink>
-              <NavLink
-                to="/admin/matches"
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                    isActive ? "bg-muted text-primary" : ""
-                  }`
-                }
-              >
-                <Trophy className="h-4 w-4" />
-                Quản lý Trận đấu
-              </NavLink>
-              <NavLink
-                to="/admin/members"
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                    isActive ? "bg-muted text-primary" : ""
-                  }`
-                }
-              >
-                <Users className="h-4 w-4" />
-                Thành viên
-              </NavLink>
-              <NavLink
-                to="/public"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
-              >
-                <Globe className="h-4 w-4" />
-                Trang Public
-              </NavLink>
+              {(isSuperAdmin || allowedTabs.has("matches")) && (
+                <>
+                  <NavLink
+                    to="/admin/matches"
+                    onClick={() => setIsSidebarOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
+                        isActive ? "bg-muted text-primary" : ""
+                      }`
+                    }
+                  >
+                    <Trophy className="h-4 w-4" />
+                    Quản lý Trận đấu
+                  </NavLink>
+                </>
+              )}
+              {isSuperAdmin || allowedTabs.has("members") ? (
+                <NavLink
+                  to="/admin/members"
+                  onClick={() => setIsSidebarOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
+                      isActive ? "bg-muted text-primary" : ""
+                    }`
+                  }
+                >
+                  <Users className="h-4 w-4" />
+                  Thành viên
+                </NavLink>
+              ) : null}
+              {isSuperAdmin || allowedTabs.has("scoring") ? (
+                <NavLink
+                  to="/admin/scoring"
+                  onClick={() => setIsSidebarOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
+                      isActive ? "bg-muted text-primary" : ""
+                    }`
+                  }
+                >
+                  <ClipboardCheck className="h-4 w-4" />
+                  Chấm điểm
+                </NavLink>
+              ) : null}
+              {isSuperAdmin || allowedTabs.has("live") ? (
+                <NavLink
+                  to="/admin/live"
+                  onClick={() => setIsSidebarOpen(false)}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
+                      isActive ? "bg-muted text-primary" : ""
+                    }`
+                  }
+                >
+                  <Activity className="h-4 w-4" />
+                  Ghi chú live
+                </NavLink>
+              ) : null}
+              {isSuperAdmin || allowedTabs.has("public") ? (
+                <NavLink
+                  to="/public"
+                  onClick={() => setIsSidebarOpen(false)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
+                >
+                  <Globe className="h-4 w-4" />
+                  Trang Public
+                </NavLink>
+              ) : null}
             </nav>
           </div>
           <div className="mt-auto p-4">
             <Card>
               <CardHeader className="p-2 pt-0 md:p-4">
                 <CardTitle className="break-words">{user?.email}</CardTitle>
-                <CardDescription>
-                  Bạn đã đăng nhập với tư cách quản trị viên.
-                </CardDescription>
+                {/* <CardDescription>
+                  {rolesLoading
+                    ? "Đang tải vai trò..."
+                    : `Role: ${isSuperAdmin ? "Superadmin" : "Admin"}${
+                        !isSuperAdmin && tabs.length > 0
+                          ? ` • Tabs: ${tabs.join(", ")}`
+                          : ""
+                      }`}
+                </CardDescription> */}
               </CardHeader>
               <CardContent className="p-2 pt-0 md:p-4 md:pt-0">
                 <Button size="sm" className="w-full" onClick={handleSignOut}>
@@ -245,8 +333,24 @@ const AdminLayout = () => {
           </div>
         </div>
       </div>
-      <div className="overflow-y-auto">
-        <main className="p-4 lg:p-6">
+      <div className="flex flex-col h-screen overflow-hidden">
+        <header className="sticky top-0 z-20 bg-background border-b">
+          <div className="flex items-center justify-between p-4 lg:p-6">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsSidebarOpen((prev) => !prev)}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <div className="text-sm text-muted-foreground">
+              {rolesLoading
+                ? "Đang tải vai trò..."
+                : `Role: ${isSuperAdmin ? "Superadmin" : "Admin"}`}
+            </div>
+          </div>
+        </header>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           <Outlet />
         </main>
       </div>

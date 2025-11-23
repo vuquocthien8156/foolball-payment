@@ -64,6 +64,7 @@ interface Match {
   id: string;
   date: Timestamp;
   totalAmount: number;
+  isDeleted?: boolean;
   teamCount?: number;
   teamsConfig?: {
     id: string;
@@ -149,7 +150,11 @@ const Attendance = () => {
       );
       const matchSnapshot = await getDocs(matchesQuery);
 
-      if (matchSnapshot.empty) {
+      const activeMatchDoc = matchSnapshot.docs.find(
+        (doc) => !doc.data().isDeleted
+      );
+
+      if (!activeMatchDoc) {
         setMatch(null); // No pending match found
         setMatchId(null);
         setTeams([]);
@@ -159,7 +164,7 @@ const Attendance = () => {
         return;
       }
 
-      const latestMatchDoc = matchSnapshot.docs[0];
+      const latestMatchDoc = activeMatchDoc;
       const latestMatch = {
         id: latestMatchDoc.id,
         ...latestMatchDoc.data(),
@@ -326,20 +331,16 @@ const Attendance = () => {
   const initializeTeamsFromMatch = useCallback(() => {
     if (!match) return;
 
-    const baseTeamCount =
-      match.teamCount || match.teamsConfig?.length || 2;
+    const baseTeamCount = match.teamCount || match.teamsConfig?.length || 2;
     const fallbackIds = ["A", "B", "C"];
     const teamIds = fallbackIds.slice(0, baseTeamCount);
 
     const configTeams = match.teamsConfig || [];
     const builtTeams = teamIds.map((teamId, index) => {
       const configTeam =
-        configTeams.find((team) => team.id === teamId) ||
-        configTeams[index];
+        configTeams.find((team) => team.id === teamId) || configTeams[index];
       const memberIds =
-        configTeam?.members?.map((m) => m.id) ||
-        configTeam?.memberIds ||
-        [];
+        configTeam?.members?.map((m) => m.id) || configTeam?.memberIds || [];
       const memberList = memberIds
         .map((memberId) => {
           const memberFromList = membersMap.get(memberId);
@@ -390,8 +391,7 @@ const Attendance = () => {
       );
       const poolIds = new Set(existingPool.map((member) => member.id));
       const newAttendees = attendanceMembers.filter(
-        (member) =>
-          !assignedIds.has(member.id) && !poolIds.has(member.id)
+        (member) => !assignedIds.has(member.id) && !poolIds.has(member.id)
       );
       if (
         newAttendees.length === 0 &&
@@ -412,10 +412,7 @@ const Attendance = () => {
     e.dataTransfer.setData("source", source);
   };
 
-  const handleTeamDrop = (
-    e: DragEvent,
-    targetTeamId: string | "pool"
-  ) => {
+  const handleTeamDrop = (e: DragEvent, targetTeamId: string | "pool") => {
     e.preventDefault();
     const memberData = e.dataTransfer.getData("member");
     if (!memberData) return;
@@ -468,9 +465,7 @@ const Attendance = () => {
     const lowerCaseSearch = removeDiacritics(teamSearch.toLowerCase());
     return teamPool.filter(
       (member) =>
-        removeDiacritics(member.name.toLowerCase()).includes(
-          lowerCaseSearch
-        ) ||
+        removeDiacritics(member.name.toLowerCase()).includes(lowerCaseSearch) ||
         (member.nickname &&
           removeDiacritics(member.nickname.toLowerCase()).includes(
             lowerCaseSearch
@@ -625,13 +620,13 @@ const Attendance = () => {
                     </div>
                   </div>
                   <Button
-                variant={isAttending ? "secondary" : "default"}
-                onClick={() =>
-                  handleAttendanceToggle(member.id, member.name)
-                }
-                disabled={isProcessing || isAttending}
-                className="w-full mt-auto"
-              >
+                    variant={isAttending ? "secondary" : "default"}
+                    onClick={() =>
+                      handleAttendanceToggle(member.id, member.name)
+                    }
+                    disabled={isProcessing || isAttending}
+                    className="w-full mt-auto"
+                  >
                     {isProcessing ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : isAttending ? (
@@ -726,7 +721,10 @@ const Attendance = () => {
                               {member.name}
                             </p>
                             {member.nickname && (
-                              <Badge variant="secondary" className="mt-1 text-xs">
+                              <Badge
+                                variant="secondary"
+                                className="mt-1 text-xs"
+                              >
                                 {member.nickname}
                               </Badge>
                             )}
@@ -744,8 +742,8 @@ const Attendance = () => {
               {teams.length === 0 ? (
                 <Card className="shadow-card lg:col-span-2 xl:col-span-3">
                   <CardContent className="p-6 text-muted-foreground">
-                    Chưa có cấu hình đội cho trận này. Danh sách sẽ tự tạo khi có
-                    điểm danh.
+                    Chưa có cấu hình đội cho trận này. Danh sách sẽ tự tạo khi
+                    có điểm danh.
                   </CardContent>
                 </Card>
               ) : (
@@ -794,9 +792,6 @@ const Attendance = () => {
                                   </Badge>
                                 )}
                               </div>
-                              <Badge variant="outline" className="text-[10px]">
-                                Giữ & kéo
-                              </Badge>
                             </div>
                           </div>
                         ))

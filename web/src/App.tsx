@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./contexts/AuthContext";
 import { PWAInstallProvider } from "./contexts/PWAInstallContext";
+import { useUserRoles } from "./hooks/useUserRoles";
 
 // Lazy load components
 const AdminLayout = React.lazy(() => import("./components/AdminLayout"));
@@ -21,35 +22,76 @@ const Matches = React.lazy(() => import("./pages/Matches"));
 const Attendance = React.lazy(() => import("./pages/Attendance"));
 const PublicPortal = React.lazy(() => import("./pages/PublicPortal"));
 const PublicRatings = React.lazy(() => import("./pages/PublicRatings"));
+const ScoringMatches = React.lazy(() => import("./pages/ScoringMatches"));
+const LiveNotes = React.lazy(() => import("./pages/LiveNotes"));
 
 const queryClient = new QueryClient();
 
-const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
+const LoadingSplash = () => (
+  <div className="fixed inset-0 flex items-center justify-center bg-background">
+    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+  </div>
+);
+
+const AdminProtectedRoute = ({ children }: { children: JSX.Element }) => {
   const { user } = useAuth();
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
+  const { roles, loading } = useUserRoles(user?.uid);
+
+  if (!user) return <Navigate to="/login" replace />;
+  if (loading) return <LoadingSplash />;
+
+  const canAccess = roles.includes("admin") || roles.includes("superadmin");
+  if (!canAccess) return <Navigate to="/public" replace />;
   return children;
+};
+
+const TabGuard = ({
+  tabKey,
+  children,
+}: {
+  tabKey: string;
+  children: JSX.Element;
+}) => {
+  const { user } = useAuth();
+  const { roles, tabs, loading } = useUserRoles(user?.uid);
+  if (loading) return <LoadingSplash />;
+  const isSuper = roles.includes("superadmin");
+  const allowed = isSuper || tabs.includes(tabKey);
+  return allowed ? children : <Navigate to="/admin/dashboard" replace />;
+};
+
+const AdminHomeRedirect = () => {
+  const { user } = useAuth();
+  const { roles, tabs, loading } = useUserRoles(user?.uid);
+  if (loading) return <LoadingSplash />;
+  const isSuper = roles.includes("superadmin");
+  if (isSuper) return <Navigate to="/admin/dashboard" replace />;
+  const order = ["dashboard", "scoring", "live", "matches", "members"];
+  const target = order.find((t) => tabs.includes(t));
+  return target ? (
+    <Navigate
+      to={`/admin/${target === "dashboard" ? "dashboard" : target}`}
+      replace
+    />
+  ) : (
+    <Navigate to="/public" replace />
+  );
 };
 
 const PublicRoute = ({ children }: { children: JSX.Element }) => {
   const { user } = useAuth();
-  if (user) {
-    return <Navigate to="/admin/dashboard" replace />;
-  }
+  const { roles, loading } = useUserRoles(user?.uid);
+  if (loading) return <LoadingSplash />;
+  const isAdmin = roles.includes("admin") || roles.includes("superadmin");
+  if (user && isAdmin) return <Navigate to="/admin" replace />;
   return children;
 };
 
 const App = () => {
   const { user, loading } = useAuth();
+  const { roles, loading: rolesLoading } = useUserRoles(user?.uid);
 
-  if (loading) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  if (loading || rolesLoading) return <LoadingSplash />;
 
   return (
     <PWAInstallProvider>
@@ -58,13 +100,7 @@ const App = () => {
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <Suspense
-              fallback={
-                <div className="fixed inset-0 flex items-center justify-center bg-background">
-                  <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-                </div>
-              }
-            >
+            <Suspense fallback={<LoadingSplash />}>
               <Routes>
                 <Route
                   path="/login"
@@ -88,20 +124,68 @@ const App = () => {
                 <Route
                   path="/admin"
                   element={
-                    <ProtectedRoute>
+                    <AdminProtectedRoute>
                       <AdminLayout />
-                    </ProtectedRoute>
+                    </AdminProtectedRoute>
                   }
                 >
+                  <Route index element={<AdminHomeRedirect />} />
                   <Route
-                    index
-                    element={<Navigate to="/admin/dashboard" replace />}
+                    path="dashboard"
+                    element={
+                      <TabGuard tabKey="dashboard">
+                        <Dashboard />
+                      </TabGuard>
+                    }
                   />
-                  <Route path="dashboard" element={<Dashboard />} />
-                  <Route path="setup" element={<SetupMatch />} />
-                  <Route path="setup/:matchId" element={<SetupMatch />} />
-                  <Route path="members" element={<Members />} />
-                  <Route path="matches" element={<Matches />} />
+                  <Route
+                    path="setup"
+                    element={
+                      <TabGuard tabKey="matches">
+                        <SetupMatch />
+                      </TabGuard>
+                    }
+                  />
+                  <Route
+                    path="setup/:matchId"
+                    element={
+                      <TabGuard tabKey="matches">
+                        <SetupMatch />
+                      </TabGuard>
+                    }
+                  />
+                  <Route
+                    path="members"
+                    element={
+                      <TabGuard tabKey="members">
+                        <Members />
+                      </TabGuard>
+                    }
+                  />
+                  <Route
+                    path="matches"
+                    element={
+                      <TabGuard tabKey="matches">
+                        <Matches />
+                      </TabGuard>
+                    }
+                  />
+                  <Route
+                    path="scoring"
+                    element={
+                      <TabGuard tabKey="scoring">
+                        <ScoringMatches />
+                      </TabGuard>
+                    }
+                  />
+                  <Route
+                    path="live"
+                    element={
+                      <TabGuard tabKey="live">
+                        <LiveNotes />
+                      </TabGuard>
+                    }
+                  />
                 </Route>
 
                 {/* Root path redirect */}
@@ -109,7 +193,7 @@ const App = () => {
                   path="/"
                   element={
                     user ? (
-                      <Navigate to="/admin/dashboard" replace />
+                      <Navigate to="/admin" replace />
                     ) : (
                       <Navigate to="/public" replace />
                     )

@@ -197,7 +197,11 @@ const Pay = () => {
       const matchesQuery = query(collection(db, "matches"));
       const matchesSnapshot = await getDocs(matchesQuery);
 
-      if (matchesSnapshot.empty) {
+      const activeMatchDocs = matchesSnapshot.docs.filter(
+        (doc) => !doc.data().isDeleted
+      );
+
+      if (activeMatchDocs.length === 0) {
         setTopPayers([]);
         setIsLoadingStats(false);
         return;
@@ -206,7 +210,7 @@ const Pay = () => {
       // 2. Aggregate payments by member from all matches
       const paymentsByMember = new Map<string, number>();
 
-      const shareFetchPromises = matchesSnapshot.docs.map(async (matchDoc) => {
+      const shareFetchPromises = activeMatchDocs.map(async (matchDoc) => {
         const paidSharesQuery = query(
           collection(matchDoc.ref, "shares"),
           where("status", "==", "PAID")
@@ -365,8 +369,12 @@ const Pay = () => {
           const matchRef = doc(db, "matches", matchId);
           const matchSnap = await getDoc(matchRef);
 
-          // Filter out if match doesn't exist or is not published
-          if (!matchSnap.exists() || matchSnap.data().status !== "PUBLISHED") {
+          // Filter out if match doesn't exist, deleted, or not published
+          if (
+            !matchSnap.exists() ||
+            matchSnap.data().isDeleted ||
+            matchSnap.data().status !== "PUBLISHED"
+          ) {
             return null;
           }
 
@@ -419,7 +427,11 @@ const Pay = () => {
 
           const matchRef = doc(db, "matches", matchId);
           const matchSnap = await getDoc(matchRef);
-          if (!matchSnap.exists() || matchSnap.data().status !== "PUBLISHED") {
+          if (
+            !matchSnap.exists() ||
+            matchSnap.data().isDeleted ||
+            matchSnap.data().status !== "PUBLISHED"
+          ) {
             continue;
           }
           const matchData = matchSnap.data();
@@ -464,7 +476,8 @@ const Pay = () => {
 
           matchesSnapshot.docs.forEach((matchDoc) => {
             const matchData = matchDoc.data();
-            if (matchData.status !== "PUBLISHED") return;
+            if (matchData.isDeleted || matchData.status !== "PUBLISHED")
+              return;
             const teamFound = (matchData.teamsConfig || []).find((team: any) =>
               (team.members || []).some(
                 (member: any) => member.id === selectedMemberId

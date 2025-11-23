@@ -83,12 +83,16 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
+import { aggregateLiveStats, AggregatedStat } from "@/lib/liveStats";
+import { useActionConfigs } from "@/hooks/useActionConfigs";
 
 interface Match {
   id: string;
   date: Timestamp | string;
   totalAmount: number;
   status: "PENDING" | "COMPLETED" | "PUBLISHED";
+  isDeleted?: boolean;
+  isTest?: boolean;
   teamNames?: { [key: string]: string };
   teamsConfig?: {
     id: string;
@@ -190,14 +194,16 @@ const MatchListItem = ({
           <p className="font-semibold">Trận ngày {date}</p>
           {match.status && (
             <Tooltip>
-              <TooltipTrigger>
-                {match.status === "PUBLISHED" ? (
-                  <Send className="h-5 w-5 text-sky-500" />
-                ) : match.status === "COMPLETED" ? (
-                  <Calculator className="h-5 w-5 text-amber-500" />
-                ) : (
-                  <ClipboardList className="h-5 w-5 text-muted-foreground" />
-                )}
+              <TooltipTrigger asChild>
+                <span>
+                  {match.status === "PUBLISHED" ? (
+                    <Send className="h-5 w-5 text-sky-500" />
+                  ) : match.status === "COMPLETED" ? (
+                    <Calculator className="h-5 w-5 text-amber-500" />
+                  ) : (
+                    <ClipboardList className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </span>
               </TooltipTrigger>
               <TooltipContent>
                 <p>
@@ -227,9 +233,31 @@ const MatchListItem = ({
       </button>
       <div className="flex items-center flex-shrink-0">
         {!isFullyPaid && match.status !== "PUBLISHED" && (
-          <>
-            <Tooltip>
-              <TooltipTrigger asChild>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "rounded-full w-8 h-8",
+                  isSelected
+                    ? "hover:bg-primary-foreground/10 text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit();
+                }}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+          </Tooltip>
+        )}
+        {(match.isTest || (!isFullyPaid && match.status !== "PUBLISHED")) && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <AlertDialogTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -237,40 +265,19 @@ const MatchListItem = ({
                     "rounded-full w-8 h-8",
                     isSelected
                       ? "hover:bg-primary-foreground/10 text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground"
+                      : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   )}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onEdit();
+                    onDelete();
                   }}
                 >
-                  <Pencil className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4" />
                 </Button>
-              </TooltipTrigger>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      "rounded-full w-8 h-8",
-                      isSelected
-                        ? "hover:bg-primary-foreground/10 text-primary-foreground"
-                        : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    )}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDelete();
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </AlertDialogTrigger>
-              </TooltipTrigger>
-            </Tooltip>
-          </>
+              </AlertDialogTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Xóa trận (bao gồm trận test)</TooltipContent>
+          </Tooltip>
         )}
       </div>
     </div>
@@ -312,6 +319,29 @@ const Matches = () => {
   >(new Map());
   const [selectedRaterId, setSelectedRaterId] = useState<string | null>(null);
   const [isLoadingRatings, setIsLoadingRatings] = useState(false);
+  const [liveStatsMap, setLiveStatsMap] = useState<
+    Map<string, AggregatedStat>
+  >(new Map());
+  const [isLoadingLiveStats, setIsLoadingLiveStats] = useState(false);
+  const [isLiveStatsDialogOpen, setIsLiveStatsDialogOpen] = useState(false);
+  const { labelMap, weights } = useActionConfigs();
+  const labelFor = useCallback(
+    (key: string) =>
+      labelMap.get(key) ||
+      {
+        goal: "Bàn thắng",
+        assist: "Kiến tạo",
+        save_gk: "Cản phá GK",
+        tackle: "Tackle/Chặn",
+        dribble: "Qua người",
+        yellow: "Thẻ vàng",
+        red: "Thẻ đỏ",
+        foul: "Phạm lỗi",
+        note: "Ghi chú",
+      }[key] ||
+      key,
+    [labelMap]
+  );
 
   useEffect(() => {
     const matchId = searchParams.get("matchId");
@@ -352,9 +382,9 @@ const Matches = () => {
     const unsubscribe = onSnapshot(
       matchesQuery,
       (querySnapshot) => {
-        const matchesList = querySnapshot.docs.map(
-          (doc) => ({ id: doc.id, ...doc.data() } as Match)
-        );
+        const matchesList = querySnapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() } as Match))
+          .filter((m) => !m.isDeleted);
         setMatches(matchesList);
         if (
           !selectedMatchId &&
@@ -509,6 +539,35 @@ const Matches = () => {
     };
   }, [selectedMatchId, matches, members]);
 
+  useEffect(() => {
+    if (!selectedMatchId) {
+      setLiveStatsMap(new Map());
+      setIsLoadingLiveStats(false);
+      return;
+    }
+    setIsLoadingLiveStats(true);
+    const liveEventsQuery = query(
+      collection(db, "matches", selectedMatchId, "liveEvents"),
+      orderBy("createdAt", "desc")
+    );
+    const unsubscribeLive = onSnapshot(
+      liveEventsQuery,
+      (snapshot) => {
+        const events = snapshot.docs.map((doc) => ({
+          ...(doc.data() as { memberId?: string; type: any }),
+        }));
+        setLiveStatsMap(aggregateLiveStats(events, weights));
+        setIsLoadingLiveStats(false);
+      },
+      (err) => {
+        console.error("[Matches] live events load error", err);
+        setLiveStatsMap(new Map());
+        setIsLoadingLiveStats(false);
+      }
+    );
+    return () => unsubscribeLive();
+  }, [selectedMatchId, weights]);
+
   const handleDeleteMatch = async () => {
     if (!matchIdToDelete) return;
     setIsDeleting(true);
@@ -653,6 +712,67 @@ const Matches = () => {
     };
   }, [playerRatings, members, shares]);
 
+  const liveStatsList = useMemo(() => {
+    return Array.from(liveStatsMap.values())
+      .filter(
+        (s) =>
+          s.total > 0 || s.foul > 0 || s.yellow > 0 || s.red > 0 || s.note > 0
+      )
+      .sort((a, b) => {
+        if (b.primaryScore !== a.primaryScore)
+          return b.primaryScore - a.primaryScore;
+        return b.total - a.total;
+      });
+  }, [liveStatsMap]);
+
+  const memberTeamMap = useMemo(() => {
+    const map = new Map<string, string>();
+    shares.forEach((s) => map.set(s.memberId, s.teamId));
+    const matchCfg = matches.find((m) => m.id === selectedMatchId);
+    if (matchCfg?.teamsConfig) {
+      matchCfg.teamsConfig.forEach((team) => {
+        (team.members || []).forEach((m) => map.set(m.id, team.id));
+      });
+    }
+    return map;
+  }, [shares, matches, selectedMatchId]);
+
+  const currentTeamNames = useMemo(() => {
+    const found = matches.find((m) => m.id === selectedMatchId);
+    if (!found) return {};
+    if (found.teamsConfig) {
+      return found.teamsConfig.reduce((acc, t) => {
+        acc[t.id] = t.name;
+        return acc;
+      }, {} as Record<string, string>);
+    }
+    return found.teamNames || {};
+  }, [matches, selectedMatchId]);
+
+  const teamScore = useMemo(() => {
+    const map = new Map<string, number>();
+    liveStatsMap.forEach((stat, memberId) => {
+      const teamId = memberTeamMap.get(memberId) || "others";
+      map.set(teamId, (map.get(teamId) || 0) + stat.goal);
+    });
+    return map;
+  }, [liveStatsMap, memberTeamMap]);
+
+  const topMedalScores = useMemo(() => {
+    const unique = Array.from(new Set(liveStatsList.map((s) => s.primaryScore)));
+    return unique.slice(0, 3);
+  }, [liveStatsList]);
+
+  const medalClassForScore = (score: number) => {
+    if (topMedalScores[0] !== undefined && score === topMedalScores[0])
+      return "gold";
+    if (topMedalScores[1] !== undefined && score === topMedalScores[1])
+      return "silver";
+    if (topMedalScores[2] !== undefined && score === topMedalScores[2])
+      return "bronze";
+    return "";
+  };
+
   const handleUpdateMatchStatus = useCallback(
     async (newStatus: "PUBLISHED" | "COMPLETED") => {
       if (!selectedMatchId) return;
@@ -750,7 +870,7 @@ const Matches = () => {
             </Card>
           </div>
           <div className="lg:col-span-9">
-            {!selectedMatchId ? (
+            {!selectedMatchId || !selectedMatch ? (
               <Card className="shadow-card">
                 <CardContent className="p-12 text-center">
                   <Calendar className="h-12 w-12 mx-auto text-muted-foreground opacity-50" />
@@ -802,7 +922,7 @@ const Matches = () => {
                         <Tabs defaultValue="ratings" className="w-full">
                           <TabsList className="grid w-full grid-cols-2">
                             <TabsTrigger value="ratings">
-                              Xếp hạng & MVP
+                              Xếp hạng & Ấn tượng
                             </TabsTrigger>
                             <TabsTrigger value="cross-rating">
                               Đánh giá chéo
@@ -814,7 +934,7 @@ const Matches = () => {
                                 <CardHeader>
                                   <CardTitle className="text-lg flex items-center gap-2">
                                     <Trophy className="w-5 h-5 text-yellow-500" />
-                                    Cầu thủ xuất sắc nhất (MVP)
+                                    Cầu thủ ấn tượng (vote)
                                   </CardTitle>
                                 </CardHeader>
                                 <CardContent>
@@ -1093,6 +1213,141 @@ const Matches = () => {
                       </div>
                     </DialogContent>
                   </Dialog>
+                  <Dialog
+                    open={isLiveStatsDialogOpen}
+                    onOpenChange={setIsLiveStatsDialogOpen}
+                  >
+                    <DialogTrigger asChild>
+                      <Button variant="secondary">
+                        <TrendingUp className="mr-2 h-4 w-4" />
+                        Thống kê nhanh
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-4xl">
+                      <DialogHeader>
+                        <DialogTitle>
+                          Thống kê nhanh (Live notes) - {matchDateString}
+                        </DialogTitle>
+                      </DialogHeader>
+                      <div className="max-h-[70vh] overflow-y-auto">
+                        {isLoadingLiveStats ? (
+                          <div className="text-center py-6">
+                            <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                            <p className="text-sm text-muted-foreground mt-2">
+                              Đang tải live notes...
+                            </p>
+                          </div>
+                        ) : liveStatsList.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">
+                            Chưa có dữ liệu live notes cho trận này.
+                          </p>
+                        ) : (
+                          <>
+                            {Object.keys(currentTeamNames).length > 0 && (
+                              <div className="grid grid-cols-2 gap-2 mb-3">
+                                {Object.entries(currentTeamNames)
+                                  .slice(0, 2)
+                                  .map(([teamId, teamName]) => (
+                                    <Card key={teamId} className="p-3 border-dashed">
+                                      <div className="text-sm font-semibold truncate">
+                                        {teamName}
+                                      </div>
+                                      <div className="text-2xl font-black">
+                                        {teamScore.get(teamId) || 0}
+                                      </div>
+                                    </Card>
+                                  ))}
+                              </div>
+                            )}
+                          <div className="flex flex-wrap gap-2">
+                            {liveStatsList.map((stats) => {
+                              const medal = medalClassForScore(stats.primaryScore);
+                              const medalIcon =
+                                medal === "gold"
+                                  ? "🥇"
+                                  : medal === "silver"
+                                  ? "🥈"
+                                  : medal === "bronze"
+                                  ? "🥉"
+                                  : null;
+                              const medalClass =
+                                medal === "gold"
+                                  ? "border-emerald-400 bg-emerald-50"
+                                  : medal === "silver"
+                                  ? "border-blue-400 bg-blue-50"
+                                  : medal === "bronze"
+                                  ? "border-amber-400 bg-amber-50"
+                                  : "";
+                              return (
+                                <div
+                                  key={stats.memberId}
+                                  className={cn(
+                                    "rounded border p-2 bg-muted/30 text-xs space-y-1 w-[48%] sm:w-[31%] lg:w-[23%]",
+                                    medalClass
+                                  )}
+                                >
+                                  <div className="font-semibold truncate flex items-center gap-1">
+                                    {medalIcon && <span>{medalIcon}</span>}
+                                    <span className="truncate">
+                                      {members.get(stats.memberId) || "Không rõ"}
+                                    </span>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {stats.goal > 0 && (
+                                      <Badge className="bg-emerald-100 text-emerald-700 cursor-default">
+                                        {labelFor("goal")} {stats.goal}
+                                      </Badge>
+                                    )}
+                                    {stats.assist > 0 && (
+                                      <Badge className="bg-blue-100 text-blue-700 cursor-default">
+                                        {labelFor("assist")} {stats.assist}
+                                      </Badge>
+                                    )}
+                                    {stats.save_gk > 0 && (
+                                      <Badge className="bg-cyan-100 text-cyan-700 cursor-default">
+                                        {labelFor("save_gk")} {stats.save_gk}
+                                      </Badge>
+                                    )}
+                                    {stats.tackle > 0 && (
+                                      <Badge className="bg-indigo-100 text-indigo-700 cursor-default">
+                                        {labelFor("tackle")} {stats.tackle}
+                                      </Badge>
+                                    )}
+                                    {stats.dribble > 0 && (
+                                      <Badge className="bg-purple-100 text-purple-700 cursor-default">
+                                        {labelFor("dribble")} {stats.dribble}
+                                      </Badge>
+                                    )}
+                                    {stats.yellow > 0 && (
+                                      <Badge className="bg-amber-100 text-amber-800 cursor-default">
+                                        {labelFor("yellow")} {stats.yellow}
+                                      </Badge>
+                                    )}
+                                    {stats.red > 0 && (
+                                      <Badge className="bg-red-100 text-red-700 cursor-default">
+                                        {labelFor("red")} {stats.red}
+                                      </Badge>
+                                    )}
+                                    {stats.foul > 0 && (
+                                      <Badge variant="outline" className="cursor-default">
+                                        {labelFor("foul")} {stats.foul}
+                                      </Badge>
+                                    )}
+                                    {stats.note > 0 && (
+                                      <Badge variant="outline" className="cursor-default">
+                                        {labelFor("note")} {stats.note}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                          </>
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                   <Dialog>
                     <DialogTrigger asChild>
                       <Button variant="outline" className="border-dashed">
@@ -1116,7 +1371,7 @@ const Matches = () => {
                                 {matchDateString}
                               </h2>
                               <p className="text-sm text-white/70 mt-2">
-                                Vinh danh MVP & cầu thủ điểm cao nhất
+                                Vinh danh cầu thủ ấn tượng (vote) & MVP (điểm cao nhất)
                               </p>
                             </div>
                             <div className="flex items-center gap-3 text-amber-300">
@@ -1134,7 +1389,7 @@ const Matches = () => {
                               {topMvp ? (
                                 <div className="relative space-y-4">
                                   <div className="inline-flex items-center gap-2 rounded-full bg-amber-400/20 text-amber-200 px-3 py-1 text-xs font-semibold">
-                                    MVP TOP 1
+                                    ẤN TƯỢNG NHẤT (VOTE)
                                   </div>
                                   <h3 className="text-3xl font-black">
                                     {topMvp.mvpName}
@@ -1153,7 +1408,7 @@ const Matches = () => {
                                 </div>
                               ) : (
                                 <p className="text-sm text-white/60">
-                                  Chưa có dữ liệu MVP.
+                                  Chưa có dữ liệu cầu thủ ấn tượng.
                                 </p>
                               )}
                             </div>
@@ -1164,7 +1419,7 @@ const Matches = () => {
                               {topScorer ? (
                                 <div className="relative space-y-4">
                                   <div className="inline-flex items-center gap-2 rounded-full bg-emerald-400/20 text-emerald-100 px-3 py-1 text-xs font-semibold">
-                                    ĐIỂM TB CAO NHẤT
+                                    MVP (ĐIỂM CAO NHẤT)
                                   </div>
                                   <h3 className="text-3xl font-black">
                                     {topScorer.name}
@@ -1185,6 +1440,51 @@ const Matches = () => {
                                 </p>
                               )}
                             </div>
+                            <div className="relative rounded-3xl bg-white/5 border border-white/10 p-8 shadow-lg overflow-hidden md:col-span-2">
+                              <div className="absolute -right-10 -bottom-10 text-blue-300/15">
+                                <Trophy className="w-72 h-72" />
+                              </div>
+                              <div className="relative grid gap-4 md:grid-cols-2">
+                                <div className="space-y-3">
+                                  <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/20 text-blue-100 px-3 py-1 text-xs font-semibold">
+                                    VUA PHÁ LƯỚI
+                                  </div>
+                                  {topByField(liveStatsList, "goal")[0] ? (
+                                    <div>
+                                      <h3 className="text-2xl font-black">
+                                        {topByField(liveStatsList, "goal")[0].name}
+                                      </h3>
+                                      <p className="text-sm text-white/70">
+                                        {topByField(liveStatsList, "goal")[0].goal} bàn
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-white/60">
+                                      Chưa có dữ liệu bàn thắng.
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="space-y-3">
+                                  <div className="inline-flex items-center gap-2 rounded-full bg-indigo-500/20 text-indigo-100 px-3 py-1 text-xs font-semibold">
+                                    VUA KIẾN TẠO
+                                  </div>
+                                  {topByField(liveStatsList, "assist")[0] ? (
+                                    <div>
+                                      <h3 className="text-2xl font-black">
+                                        {topByField(liveStatsList, "assist")[0].name}
+                                      </h3>
+                                      <p className="text-sm text-white/70">
+                                        {topByField(liveStatsList, "assist")[0].assist} kiến tạo
+                                      </p>
+                                    </div>
+                                  ) : (
+                                    <p className="text-sm text-white/60">
+                                      Chưa có dữ liệu kiến tạo.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -1201,7 +1501,7 @@ const Matches = () => {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">
-                        {selectedMatch.totalAmount.toLocaleString()} VND
+                        {(selectedMatch?.totalAmount || 0).toLocaleString()} VND
                       </div>
                     </CardContent>
                   </Card>
@@ -1327,31 +1627,25 @@ const Matches = () => {
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-right">
-                                {!isFullyPaid && (
-                                  <>
-                                    {share.status === "PENDING" && (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() =>
-                                          handleMarkAsPaid(share.id)
-                                        }
-                                      >
-                                        Đã trả
-                                      </Button>
-                                    )}
-                                    {share.status === "PAID" && (
-                                      <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={() =>
-                                          handleMarkAsUnpaid(share.id)
-                                        }
-                                      >
-                                        Chưa trả
-                                      </Button>
-                                    )}
-                                  </>
+                                {share.status === "PENDING" && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleMarkAsPaid(share.id)}
+                                  >
+                                    Đã trả
+                                  </Button>
+                                )}
+                                {share.status === "PAID" && (
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() =>
+                                      handleMarkAsUnpaid(share.id)
+                                    }
+                                  >
+                                    Chưa trả
+                                  </Button>
                                 )}
                               </TableCell>
                             </TableRow>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -47,12 +47,17 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { AggregatedStat, aggregateLiveStats } from "@/lib/liveStats";
+import { useActionConfigs } from "@/hooks/useActionConfigs";
 
 interface Match {
   id: string;
   date: Timestamp | string;
   totalAmount: number;
   status: "PENDING" | "COMPLETED" | "PUBLISHED";
+  isDeleted?: boolean;
+  teamNames?: Record<string, string>;
+  teamsConfig?: { id: string; name: string; members?: { id: string }[] }[];
 }
 
 interface Member {
@@ -74,7 +79,55 @@ interface MvpData {
   votedBy: string[];
 }
 
+interface LiveEvent {
+  id: string;
+  memberId?: string;
+  type:
+    | "goal"
+    | "assist"
+    | "yellow"
+    | "red"
+    | "foul"
+    | "save_gk"
+    | "tackle"
+    | "dribble"
+    | "note"
+    | string;
+  note?: string;
+  minute?: number | null;
+  second?: number | null;
+}
+
+const MIN_MVP_VOTES = 2;
+
+const eventLabels: Record<string, string> = {
+  goal: "Bàn thắng",
+  assist: "Kiến tạo",
+  save_gk: "Cản phá GK",
+  tackle: "Tackle/Chặn",
+  dribble: "Qua người",
+  foul: "Phạm lỗi",
+  yellow: "Thẻ vàng",
+  red: "Thẻ đỏ",
+  note: "Ghi chú",
+};
+
+const topByField = (
+  stats: (AggregatedStat & { name: string })[],
+  field: keyof AggregatedStat
+) => {
+  return stats
+    .filter((s) => (s[field] as number) > 0)
+    .sort((a, b) => (b[field] as number) - (a[field] as number))
+    .slice(0, 3);
+};
+
 const PublicRatings = () => {
+  const { labelMap, weights, loading: actionsLoading } = useActionConfigs();
+  const labelFor = useCallback(
+    (key: string) => labelMap.get(key) || eventLabels[key] || key,
+    [labelMap]
+  );
   const [matches, setMatches] = useState<Match[]>([]);
   const [members, setMembers] = useState<Map<string, string>>(new Map());
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
@@ -85,6 +138,11 @@ const PublicRatings = () => {
   const [mvpData, setMvpData] = useState<MvpData[]>([]);
   const [showAllMvp, setShowAllMvp] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
+  const [liveStatsList, setLiveStatsList] = useState<
+    (AggregatedStat & { name: string })[]
+  >([]);
+  const [isLoadingLive, setIsLoadingLive] = useState(false);
   const [overallStats, setOverallStats] = useState<{
     topRatings: {
       memberId: string;
@@ -111,6 +169,18 @@ const PublicRatings = () => {
   });
   const [latestMatchDateLabel, setLatestMatchDateLabel] = useState<string>("");
   const [openCollapsible, setOpenCollapsible] = useState<string | null>(null);
+  const topScoreEntry = useMemo(() => {
+    if (playerRatings.size === 0) return null;
+    const [memberId, rating] = Array.from(playerRatings.entries()).sort(
+      ([, a], [, b]) => b.averageScore - a.averageScore
+    )[0];
+    return {
+      memberId,
+      name: members.get(memberId) || "Không rõ",
+      avg: rating.averageScore,
+      count: rating.ratingCount,
+    };
+  }, [playerRatings, members]);
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -130,48 +200,26 @@ const PublicRatings = () => {
       orderBy("date", "desc")
     );
 
-    const unsubscribe = onSnapshot(matchesQuery, async (querySnapshot) => {
-      const matchesPromises = querySnapshot.docs.map(async (matchDoc) => {
-        const sharesQuery = query(collection(matchDoc.ref, "shares"));
-        const sharesSnapshot = await getDocs(sharesQuery);
-
-        const totalShares = sharesSnapshot.size;
-        if (totalShares === 0) return null;
-
-        let paidCount = 0;
-        sharesSnapshot.forEach((shareDoc) => {
-          if (shareDoc.data().status === "PAID") {
-            paidCount++;
-          }
+    const unsubscribe = onSnapshot(matchesQuery, (querySnapshot) => {
+      const list = querySnapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() } as Match))
+        .filter((m) => !m.isDeleted)
+        .sort((a, b) => {
+          const dateA =
+            typeof a.date === "string" ? new Date(a.date) : a.date.toDate();
+          const dateB =
+            typeof b.date === "string" ? new Date(b.date) : b.date.toDate();
+          return dateB.getTime() - dateA.getTime();
         });
 
-        if (paidCount === totalShares) {
-          return { id: matchDoc.id, ...matchDoc.data() } as Match;
-        }
-        return null;
-      });
-
-      const resolvedMatches = await Promise.all(matchesPromises);
-      const validMatches = resolvedMatches.filter(
-        (match): match is Match => match !== null
-      );
-
-      // Chỉ giữ trận mới nhất đã đủ điều kiện
-      const latestMatch = validMatches.sort((a, b) => {
-        const dateA =
-          typeof a.date === "string" ? new Date(a.date) : a.date.toDate();
-        const dateB =
-          typeof b.date === "string" ? new Date(b.date) : b.date.toDate();
-        return dateB.getTime() - dateA.getTime();
-      })[0];
-
-      if (latestMatch) {
-        setMatches([latestMatch]);
-        setSelectedMatchId(latestMatch.id);
+      if (list.length > 0) {
+        setMatches(list);
+        const first = list[0];
+        setSelectedMatchId((prev) => prev || first.id);
         const latestDate =
-          typeof latestMatch.date === "string"
-            ? new Date(latestMatch.date)
-            : latestMatch.date.toDate();
+          typeof first.date === "string"
+            ? new Date(first.date)
+            : first.date.toDate();
         setLatestMatchDateLabel(latestDate.toLocaleDateString("vi-VN"));
       } else {
         setMatches([]);
@@ -196,66 +244,179 @@ const PublicRatings = () => {
   }, [matches, selectedMatchId]);
 
   useEffect(() => {
+    if (!selectedMatchId) {
+      setLiveEvents([]);
+      setLiveStatsList([]);
+      return;
+    }
+    setIsLoadingLive(true);
+    const eventsQuery = query(
+      collection(db, "matches", selectedMatchId, "liveEvents"),
+      orderBy("createdAt", "desc")
+    );
+    const unsubscribe = onSnapshot(
+      eventsQuery,
+      (snapshot) => {
+        const events = snapshot.docs.map(
+          (d) => ({ id: d.id, ...d.data() } as LiveEvent)
+        );
+        setLiveEvents(events);
+        setIsLoadingLive(false);
+      },
+      () => {
+        setLiveEvents([]);
+        setLiveStatsList([]);
+        setIsLoadingLive(false);
+      }
+    );
+    return () => unsubscribe();
+  }, [selectedMatchId]);
+
+  useEffect(() => {
+    const statsMap = aggregateLiveStats(
+      liveEvents.map((ev) => ({ memberId: ev.memberId, type: ev.type })),
+      weights
+    );
+    const statsList = Array.from(statsMap.values())
+      .map((stat) => ({
+        ...stat,
+        name: members.get(stat.memberId) || "Không rõ",
+      }))
+      .filter((s) => s.total > 0 || s.foul > 0 || s.yellow > 0 || s.red > 0)
+      .sort((a, b) => {
+        if (b.primaryScore !== a.primaryScore)
+          return b.primaryScore - a.primaryScore;
+        return b.total - a.total;
+      });
+    setLiveStatsList(statsList);
+  }, [liveEvents, members, weights]);
+
+  const selectedMatch = useMemo(
+    () => matches.find((m) => m.id === selectedMatchId),
+    [matches, selectedMatchId]
+  );
+
+  const memberTeamMap = useMemo(() => {
+    const map = new Map<string, string>();
+    const teams = selectedMatch?.teamsConfig || [];
+    teams.forEach((team) =>
+      (team.members || []).forEach((m) => map.set(m.id, team.id))
+    );
+    return map;
+  }, [selectedMatch]);
+
+  const displayTeams = useMemo(() => {
+    if (selectedMatch?.teamsConfig?.length) {
+      return selectedMatch.teamsConfig.map(
+        (t) => [t.id, t.name] as [string, string]
+      );
+    }
+    if (selectedMatch?.teamNames) {
+      return Object.entries(selectedMatch.teamNames);
+    }
+    return [];
+  }, [selectedMatch]);
+
+  const teamScore = useMemo(() => {
+    const map = new Map<string, number>();
+    liveEvents.forEach((ev) => {
+      if (ev.type !== "goal") return;
+      const teamId = ev.memberId ? memberTeamMap.get(ev.memberId) : undefined;
+      const key = teamId || "others";
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }, [liveEvents, memberTeamMap]);
+
+  const scoreLine = useMemo(() => {
+    if (displayTeams.length >= 2) {
+      const [homeId, homeName] = displayTeams[0];
+      const [awayId, awayName] = displayTeams[1];
+      return `${homeName} ${teamScore.get(homeId) || 0} - ${
+        teamScore.get(awayId) || 0
+      } ${awayName}`;
+    }
+    return null;
+  }, [displayTeams, teamScore]);
+
+  useEffect(() => {
     if (!selectedMatchId || members.size === 0) return;
 
     setIsLoadingDetails(true);
     const ratingsQuery = query(
       collection(db, "matches", selectedMatchId, "ratings")
     );
-    const unsubscribeRatings = onSnapshot(ratingsQuery, (ratingsSnapshot) => {
-      const ratingsByPlayer = new Map<string, RatingData>();
-      const mvpVotes = new Map<string, { count: number; voters: string[] }>();
+    const unsubscribeRatings = onSnapshot(
+      ratingsQuery,
+      (ratingsSnapshot) => {
+        const ratingsByPlayer = new Map<string, RatingData>();
+        const mvpVotes = new Map<string, { count: number; voters: string[] }>();
 
-      ratingsSnapshot.forEach((doc) => {
-        const rating = doc.data();
-        const ratedByName = members.get(rating.ratedByMemberId) || "Không rõ";
+        ratingsSnapshot.forEach((doc) => {
+          const rating = doc.data();
+          const ratedByName = members.get(rating.ratedByMemberId) || "Không rõ";
 
-        rating.playerRatings.forEach(
-          (playerRating: { memberId: string; score: number }) => {
-            const current = ratingsByPlayer.get(playerRating.memberId) || {
-              averageScore: 0,
-              totalPoints: 0,
-              ratingCount: 0,
-              details: [],
+          rating.playerRatings.forEach(
+            (playerRating: { memberId: string; score: number }) => {
+              const current = ratingsByPlayer.get(playerRating.memberId) || {
+                averageScore: 0,
+                totalPoints: 0,
+                ratingCount: 0,
+                details: [],
+              };
+              current.totalPoints += playerRating.score;
+              current.ratingCount += 1;
+              current.details.push({
+                ratedBy: ratedByName,
+                score: playerRating.score,
+              });
+              ratingsByPlayer.set(playerRating.memberId, current);
+            }
+          );
+
+          if (rating.mvpPlayerId) {
+            if (rating.ratedByMemberId === rating.mvpPlayerId) {
+              // Bỏ qua tự vote MVP
+              return;
+            }
+            const currentMvp = mvpVotes.get(rating.mvpPlayerId) || {
+              count: 0,
+              voters: [],
             };
-            current.totalPoints += playerRating.score;
-            current.ratingCount += 1;
-            current.details.push({
-              ratedBy: ratedByName,
-              score: playerRating.score,
-            });
-            ratingsByPlayer.set(playerRating.memberId, current);
+            currentMvp.count += 1;
+            currentMvp.voters.push(ratedByName);
+            mvpVotes.set(rating.mvpPlayerId, currentMvp);
           }
+        });
+
+        ratingsByPlayer.forEach((data) => {
+          data.averageScore = data.totalPoints / data.ratingCount;
+        });
+
+        const validMvpEntries = Array.from(mvpVotes.entries()).filter(
+          ([, data]) => data.count >= MIN_MVP_VOTES
         );
 
-        if (rating.mvpPlayerId) {
-          const currentMvp = mvpVotes.get(rating.mvpPlayerId) || {
-            count: 0,
-            voters: [],
-          };
-          currentMvp.count += 1;
-          currentMvp.voters.push(ratedByName);
-          mvpVotes.set(rating.mvpPlayerId, currentMvp);
-        }
-      });
+        const sortedMvp = validMvpEntries
+          .map(([mvpId, data]) => ({
+            mvpId,
+            mvpName: members.get(mvpId) || "Không rõ",
+            voteCount: data.count,
+            votedBy: data.voters,
+          }))
+          .sort((a, b) => b.voteCount - a.voteCount);
 
-      ratingsByPlayer.forEach((data) => {
-        data.averageScore = data.totalPoints / data.ratingCount;
-      });
-
-      const sortedMvp = Array.from(mvpVotes.entries())
-        .map(([mvpId, data]) => ({
-          mvpId,
-          mvpName: members.get(mvpId) || "Không rõ",
-          voteCount: data.count,
-          votedBy: data.voters,
-        }))
-        .sort((a, b) => b.voteCount - a.voteCount);
-
-      setPlayerRatings(ratingsByPlayer);
-      setMvpData(sortedMvp);
-      setIsLoadingDetails(false);
-    });
+        setPlayerRatings(ratingsByPlayer);
+        setMvpData(sortedMvp);
+        setIsLoadingDetails(false);
+      },
+      (err) => {
+        console.error("Error loading ratings", err);
+        setPlayerRatings(new Map());
+        setMvpData([]);
+        setIsLoadingDetails(false);
+      }
+    );
 
     return () => unsubscribeRatings();
   }, [selectedMatchId, members]);
@@ -301,6 +462,9 @@ const PublicRatings = () => {
       const weekMvpVotes = new Map<string, number>();
 
       for (const matchDoc of matchesSnapshot.docs) {
+        const matchData = matchDoc.data();
+        if (matchData.isDeleted) continue;
+
         const sharesQuery = query(collection(matchDoc.ref, "shares"));
         const sharesSnapshot = await getDocs(sharesQuery);
         const totalShares = sharesSnapshot.size;
@@ -317,7 +481,6 @@ const PublicRatings = () => {
           continue;
         }
 
-        const matchData = matchDoc.data();
         const dateObj = matchData.date as Timestamp | string | undefined;
         const matchDate = (dateObj as Timestamp)?.toDate
           ? (dateObj as Timestamp).toDate()
@@ -357,6 +520,9 @@ const PublicRatings = () => {
           );
 
           if (rating.mvpPlayerId) {
+            if (rating.ratedByMemberId === rating.mvpPlayerId) {
+              return;
+            }
             allMvpVotes.set(
               rating.mvpPlayerId,
               (allMvpVotes.get(rating.mvpPlayerId) || 0) + 1
@@ -388,6 +554,7 @@ const PublicRatings = () => {
           memberName: members.get(memberId) || "Không rõ",
           voteCount,
         }))
+        .filter((entry) => entry.voteCount >= MIN_MVP_VOTES)
         .sort((a, b) => b.voteCount - a.voteCount)
         .slice(0, 3);
 
@@ -406,6 +573,7 @@ const PublicRatings = () => {
           memberName: members.get(memberId) || "Không rõ",
           voteCount,
         }))
+        .filter((entry) => entry.voteCount >= MIN_MVP_VOTES)
         .sort((a, b) => b.voteCount - a.voteCount)[0];
 
       setOverallStats({
@@ -430,12 +598,30 @@ const PublicRatings = () => {
     );
   }, [playerRatings]);
 
+  const statCategories = useMemo(
+    () => [
+      { key: "goal", icon: "🥅" },
+      { key: "assist", icon: "🎯" },
+      { key: "save_gk", icon: "🧤" },
+      { key: "tackle", icon: "🛡️" },
+      { key: "dribble", icon: "🌀" },
+      { key: "foul", icon: "⚠️" },
+      { key: "yellow", icon: "🟨" },
+      { key: "red", icon: "🟥" },
+      ...(weights.extras || []).map((ex) => ({
+        key: ex.key,
+        icon: ex.isNegative ? "⚡" : "✨",
+      })),
+    ],
+    [weights.extras]
+  );
+
   return (
     <div className="min-h-screen animated-gradient p-4 sm:p-6 lg:p-8">
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-foreground">
-            Bảng xếp hạng & MVP
+            Bảng xếp hạng & Ấn tượng
           </h1>
           <p className="text-muted-foreground mt-2">
             Trận gần nhất: {latestMatchDateLabel || "Chưa có dữ liệu"}
@@ -446,8 +632,8 @@ const PublicRatings = () => {
           <Card className="shadow-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-blue-500" /> Top 3 Điểm Cao
-                Nhất
+                <TrendingUp className="w-5 h-5 text-blue-500" /> Top 3 MVP (điểm
+                cao)
               </CardTitle>
               <CardDescription>
                 Tính trên tất cả các trận đã đấu
@@ -483,7 +669,8 @@ const PublicRatings = () => {
           <Card className="shadow-card">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-yellow-500" /> Top 3 MVP
+                <Trophy className="w-5 h-5 text-yellow-500" /> Top 3 Ấn tượng
+                (vote)
               </CardTitle>
               <CardDescription>
                 Tính trên tất cả các trận đã đấu
@@ -591,49 +778,211 @@ const PublicRatings = () => {
                   </CardContent>
                 </Card>
               ) : (
-                <Card className="shadow-card">
-                  {mvpData.length === 0 && playerRatings.size === 0 ? (
-                    <CardContent className="p-12 text-center flex flex-col items-center justify-center h-full">
-                      <Info className="h-12 w-12 mx-auto text-muted-foreground opacity-50" />
-                      <h3 className="mt-4 text-lg font-semibold">
-                        Chưa có dữ liệu đánh giá
-                      </h3>
-                      <p className="mt-2 text-sm text-muted-foreground">
-                        Trận đấu này chưa có thông tin về MVP hoặc điểm số.
-                      </p>
-                    </CardContent>
-                  ) : (
-                    <CardContent className="p-4">
-                      {mvpData.length > 0 && (
-                        <Collapsible
-                          open={openCollapsible === "mvp"}
-                          onOpenChange={() =>
-                            setOpenCollapsible(
-                              openCollapsible === "mvp" ? null : "mvp"
-                            )
-                          }
-                          className="w-full"
-                        >
-                          <CollapsibleTrigger asChild>
-                            <div className="flex items-center justify-between cursor-pointer p-2 rounded-md hover:bg-muted">
-                              <div className="flex items-center gap-2">
-                                <Trophy className="w-5 h-5 text-yellow-500" />
-                                <h4 className="font-semibold">
-                                  Cầu thủ xuất sắc nhất (MVP)
-                                </h4>
-                              </div>
-                              <ChevronDown
-                                className={cn(
-                                  "h-5 w-5 transition-transform",
-                                  openCollapsible === "mvp" && "rotate-180"
-                                )}
-                              />
+                <div className="space-y-4">
+                  <Card className="shadow-card">
+                    <CardHeader>
+                      <CardTitle>Live notes & Thống kê nhanh</CardTitle>
+                      <CardDescription>
+                        Tổng hợp sự kiện của trận đấu (chỉ xem).
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {displayTeams.length >= 2 && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {displayTeams
+                            .slice(0, 2)
+                            .map(([teamId, teamName]) => (
+                              <Card key={teamId} className="p-3 border-dashed">
+                                <div className="text-base font-semibold truncate">
+                                  {teamName}
+                                </div>
+                                <div className="text-3xl font-black">
+                                  {teamScore.get(teamId) || 0}
+                                </div>
+                              </Card>
+                            ))}
+                        </div>
+                      )}
+                      {isLoadingLive ? (
+                        <div className="text-center">
+                          <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                          <p className="text-sm text-muted-foreground mt-2">
+                            Đang tải live notes...
+                          </p>
+                        </div>
+                      ) : liveEvents.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Chưa có live notes cho trận đấu này.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            {statCategories.map((item) => {
+                              const top = topByField(
+                                liveStatsList,
+                                item.key as keyof AggregatedStat
+                              );
+                              return (
+                                <div
+                                  key={item.key}
+                                  className="border rounded-md p-3"
+                                >
+                                  <div className="font-semibold mb-2 flex items-center gap-2">
+                                    <span>{item.icon}</span>
+                                    <span>{labelFor(item.key) || item.key}</span>
+                                  </div>
+                                  {top.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      Chưa có dữ liệu.
+                                    </p>
+                                  ) : (
+                                    <div className="space-y-1 text-sm">
+                                      {top.map((stat, idx) => {
+                                        const value =
+                                          item.key === "goal"
+                                            ? stat.goal
+                                            : item.key === "assist"
+                                            ? stat.assist
+                                            : item.key === "save_gk"
+                                            ? stat.save_gk
+                                            : item.key === "tackle"
+                                            ? stat.tackle
+                                            : item.key === "dribble"
+                                            ? stat.dribble
+                                            : item.key === "foul"
+                                            ? stat.foul
+                                            : item.key === "yellow"
+                                            ? stat.yellow
+                                            : stat.red;
+                                        return (
+                                          <div
+                                            key={stat.memberId + idx}
+                                            className="flex justify-between items-center"
+                                          >
+                                            <span>{stat.name}</span>
+                                            <Badge
+                                              variant="outline"
+                                              className="cursor-default"
+                                            >
+                                              {labelFor(item.key)} {value}
+                                            </Badge>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="space-y-2">
+                            <h4 className="font-semibold">Sự kiện</h4>
+                            <div className="space-y-1 max-h-72 overflow-y-auto text-sm">
+                              {liveEvents.slice(0, 20).map((ev) => {
+                                const name =
+                                  members.get(ev.memberId || "") || "Không rõ";
+                                return (
+                                  <div
+                                    key={ev.id}
+                                    className="flex items-center justify-between rounded border p-2"
+                                  >
+                                    <div className="space-y-1">
+                                      <div className="font-semibold">
+                                        {labelFor(ev.type)}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {name}
+                                      </div>
+                                    </div>
+                                    <Badge variant="secondary">
+                                      {ev.minute !== undefined &&
+                                      ev.minute !== null
+                                        ? `${ev.minute}'`
+                                        : "--"}{" "}
+                                      {ev.second !== undefined &&
+                                      ev.second !== null
+                                        ? `${String(ev.second).padStart(
+                                            2,
+                                            "0"
+                                          )}"`
+                                        : ""}
+                                    </Badge>
+                                  </div>
+                                );
+                              })}
                             </div>
-                          </CollapsibleTrigger>
-                          <CollapsibleContent className="py-2 px-4">
-                            <div className="space-y-3">
-                              {(showAllMvp ? mvpData : mvpData.slice(0, 3)).map(
-                                (mvp, index) => (
+                          </div>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card className="shadow-card">
+                    {mvpData.length === 0 && playerRatings.size === 0 ? (
+                      <CardContent className="p-12 text-center flex flex-col items-center justify-center h-full">
+                        <Info className="h-12 w-12 mx-auto text-muted-foreground opacity-50" />
+                        <h3 className="mt-4 text-lg font-semibold">
+                          Chưa có dữ liệu đánh giá
+                        </h3>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Trận đấu này chưa có thông tin về vote hoặc điểm số.
+                        </p>
+                      </CardContent>
+                    ) : (
+                      <CardContent className="p-4 space-y-4">
+                        {topScoreEntry && (
+                          <div className="rounded-md border p-3 bg-muted/50">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <TrendingUp className="w-5 h-5 text-blue-500" />
+                                <div>
+                                  <div className="font-semibold">
+                                    MVP (top điểm)
+                                  </div>
+                                  <div className="text-sm text-muted-foreground">
+                                    {topScoreEntry.name}
+                                  </div>
+                                </div>
+                              </div>
+                              <Badge variant="secondary">
+                                {topScoreEntry.avg.toFixed(2)} điểm
+                              </Badge>
+                            </div>
+                          </div>
+                        )}
+                        {mvpData.length > 0 && (
+                          <Collapsible
+                            open={openCollapsible === "mvp"}
+                            onOpenChange={() =>
+                              setOpenCollapsible(
+                                openCollapsible === "mvp" ? null : "mvp"
+                              )
+                            }
+                            className="w-full"
+                          >
+                            <CollapsibleTrigger asChild>
+                              <div className="flex items-center justify-between cursor-pointer p-2 rounded-md hover:bg-muted">
+                                <div className="flex items-center gap-2">
+                                  <Trophy className="w-5 h-5 text-yellow-500" />
+                                  <h4 className="font-semibold">
+                                    Cầu thủ ấn tượng (vote)
+                                  </h4>
+                                </div>
+                                <ChevronDown
+                                  className={cn(
+                                    "h-5 w-5 transition-transform",
+                                    openCollapsible === "mvp" && "rotate-180"
+                                  )}
+                                />
+                              </div>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent className="py-2 px-4">
+                              <div className="space-y-3">
+                                {(showAllMvp
+                                  ? mvpData
+                                  : mvpData.slice(0, 3)
+                                ).map((mvp, index) => (
                                   <Dialog key={mvp.mvpId}>
                                     <DialogTrigger asChild>
                                       <div className="flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md">
@@ -669,50 +1018,37 @@ const PublicRatings = () => {
                                       </ul>
                                     </DialogContent>
                                   </Dialog>
-                                )
+                                ))}
+                              </div>
+                              {mvpData.length > 3 && (
+                                <div className="mt-4 text-center">
+                                  <Button
+                                    variant="link"
+                                    className="p-0 h-auto"
+                                    onClick={() => setShowAllMvp(!showAllMvp)}
+                                  >
+                                    {showAllMvp ? "Thu gọn" : "Xem tất cả"}
+                                  </Button>
+                                </div>
                               )}
+                            </CollapsibleContent>
+                          </Collapsible>
+                        )}
+                        {mvpData.length === 0 && (
+                          <div className="p-3 text-sm text-muted-foreground">
+                            Vote sẽ hiển thị khi đủ phiếu hợp lệ (không tính tự
+                            vote).
+                          </div>
+                        )}
+
+                        {playerRatings.size > 0 && (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2">
+                              <TrendingUp className="w-5 h-5 text-blue-500" />
+                              <h4 className="font-semibold">
+                                Bảng điểm trận đấu
+                              </h4>
                             </div>
-                            {mvpData.length > 3 && (
-                              <div className="mt-4 text-center">
-                                <Button
-                                  variant="link"
-                                  className="p-0 h-auto"
-                                  onClick={() => setShowAllMvp(!showAllMvp)}
-                                >
-                                  {showAllMvp ? "Thu gọn" : "Xem tất cả"}
-                                </Button>
-                              </div>
-                            )}
-                          </CollapsibleContent>
-                        </Collapsible>
-                      )}
-                      {playerRatings.size > 0 && (
-                        <Collapsible
-                          open={openCollapsible === "ratings"}
-                          onOpenChange={() =>
-                            setOpenCollapsible(
-                              openCollapsible === "ratings" ? null : "ratings"
-                            )
-                          }
-                          className="w-full"
-                        >
-                          <CollapsibleTrigger asChild>
-                            <div className="flex items-center justify-between cursor-pointer p-2 rounded-md hover:bg-muted mt-2">
-                              <div className="flex items-center gap-2">
-                                <TrendingUp className="w-5 h-5 text-blue-500" />
-                                <h4 className="font-semibold">
-                                  Bảng xếp hạng điểm
-                                </h4>
-                              </div>
-                              <ChevronDown
-                                className={cn(
-                                  "h-5 w-5 transition-transform",
-                                  openCollapsible === "ratings" && "rotate-180"
-                                )}
-                              />
-                            </div>
-                          </CollapsibleTrigger>
-                          <CollapsibleContent className="py-2">
                             <Table>
                               <TableHeader>
                                 <TableRow>
@@ -737,10 +1073,7 @@ const PublicRatings = () => {
                                               "Không rõ"}
                                           </TableCell>
                                           <TableCell className="text-right">
-                                            <Badge
-                                              variant="outline"
-                                              className="cursor-pointer"
-                                            >
+                                            <Badge variant="outline">
                                               {ratingData.averageScore.toFixed(
                                                 2
                                               )}
@@ -773,12 +1106,12 @@ const PublicRatings = () => {
                                 )}
                               </TableBody>
                             </Table>
-                          </CollapsibleContent>
-                        </Collapsible>
-                      )}
-                    </CardContent>
-                  )}
-                </Card>
+                          </div>
+                        )}
+                      </CardContent>
+                    )}
+                  </Card>
+                </div>
               )}
             </div>
           </div>

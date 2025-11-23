@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "seed:actions": "node scripts/seedActionConfigs.mjs",
     "deploy": "npm run build && cd .. && firebase deploy --only hosting",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
@@ -71,6 +72,7 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "autoprefixer": "^10.4.21",
+    "dotenv": "^16.6.1",
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",

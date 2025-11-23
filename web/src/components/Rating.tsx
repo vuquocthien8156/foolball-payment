@@ -90,6 +90,10 @@ export const Rating = ({
         const matchSnap = await getDoc(matchRef);
         if (matchSnap.exists()) {
           const matchData = matchSnap.data();
+          if (matchData.isDeleted) {
+            setIsLoading(false);
+            return;
+          }
           const teamsConfig = matchData.teamsConfig || [];
           const allMemberIds = teamsConfig.flatMap(
             (t: any) => t.members?.map((m: any) => m.id) || []
@@ -111,7 +115,9 @@ export const Rating = ({
                 id: member.id,
                 name: memberMap.get(member.id),
               }))
-              .filter((m: Player) => m.name !== "Unknown"),
+              .filter(
+                (m: Player) => m.name !== "Unknown" && m.id !== ratedByMemberId
+              ),
           }));
           setTeams(populatedTeams);
         }
@@ -157,8 +163,8 @@ export const Rating = ({
 
     if (!mvp) {
       toast({
-        title: "Chưa chọn MVP",
-        description: "Vui lòng chọn Cầu thủ xuất sắc nhất trận.",
+        title: "Chưa chọn cầu thủ ấn tượng",
+        description: "Vui lòng chọn cầu thủ ấn tượng nhất trận (bắt buộc).",
         variant: "destructive",
       });
       return;
@@ -209,11 +215,15 @@ export const Rating = ({
       </CardHeader>
 
       <CardContent className="space-y-6">
-        {/* MVP Selection */}
+        {/* Vote cầu thủ ấn tượng */}
         <div className="space-y-2">
           <h3 className="font-semibold flex items-center">
-            <Trophy className="w-4 h-4 mr-2" /> Cầu thủ xuất sắc nhất trận
+            <Trophy className="w-4 h-4 mr-2" /> Cầu thủ ấn tượng nhất (vote)
           </h3>
+          <p className="text-xs text-muted-foreground">
+            Đây là vote "ấn tượng"; MVP sẽ tính theo điểm số. Không tự chọn
+            bản thân.
+          </p>
           <Popover open={isMvpComboboxOpen} onOpenChange={setIsMvpComboboxOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -223,7 +233,7 @@ export const Rating = ({
               >
                 {mvp
                   ? allPlayers.find((player) => player.id === mvp)?.name
-                  : "Chọn MVP..."}
+                  : "Chọn cầu thủ ấn tượng nhất (không chọn bản thân)..."}
                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
               </Button>
             </PopoverTrigger>
@@ -249,6 +259,7 @@ export const Rating = ({
                           setMvp(player.id);
                           setIsMvpComboboxOpen(false);
                         }}
+                        disabled={player.id === ratedByMemberId}
                       >
                         <Check
                           className={`mr-2 h-4 w-4 ${
@@ -256,6 +267,11 @@ export const Rating = ({
                           }`}
                         />
                         {player.name}
+                        {player.id === ratedByMemberId && (
+                          <span className="ml-2 text-[11px] text-muted-foreground">
+                            (không tự chọn)
+                          </span>
+                        )}
                       </CommandItem>
                     ))}
                   </CommandGroup>
@@ -265,10 +281,12 @@ export const Rating = ({
           </Popover>
         </div>
 
+        <div className="border-t border-dashed border-muted-foreground/30" />
+
         <div className="flex flex-col gap-3 p-3 rounded-lg bg-muted/50">
           <div className="text-sm text-muted-foreground">
             Bạn có thể bỏ qua chấm điểm (điểm không tính). Nếu bật chấm điểm,
-            vui lòng chấm đủ tất cả cầu thủ. MVP vẫn bắt buộc.
+            vui lòng chấm đủ tất cả cầu thủ. Vote ấn tượng vẫn bắt buộc.
           </div>
           <div className="flex items-center gap-2">
             <Switch
@@ -285,6 +303,9 @@ export const Rating = ({
             <h3 className="font-semibold flex items-center">
               <Star className="w-4 h-4 mr-2" /> Chấm điểm cầu thủ
             </h3>
+            <p className="text-xs text-muted-foreground">
+              Bạn không thể tự chấm điểm mình; danh sách dưới đã ẩn tên bạn.
+            </p>
             {teams.map((team) => (
               <div key={team.id}>
                 <h4 className="font-medium text-sm text-muted-foreground mb-2">
