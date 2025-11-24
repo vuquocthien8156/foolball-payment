@@ -43,6 +43,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Loader2, Clock, Undo2 } from "lucide-react";
 
 interface Match {
@@ -112,6 +118,7 @@ const LiveNotes = () => {
   );
   const [selectedMemberId, setSelectedMemberId] = useState<string>("");
   const [showRecentMobile, setShowRecentMobile] = useState(false);
+  const [showRecentEventsModal, setShowRecentEventsModal] = useState(false);
   const [actionWeights, setActionWeights] =
     useState<ActionWeights>(defaultActionWeights);
   const labelFor = useCallback(
@@ -639,7 +646,8 @@ const LiveNotes = () => {
           </CardContent>
         </Card>
 
-        <Card className="shadow-card lg:hidden">
+        {/* Recent Events - Hidden on mobile to prevent layout issues */}
+        <Card className="shadow-card hidden">
           <CardHeader>
             <CardTitle>Sự kiện gần đây</CardTitle>
             <CardDescription>Hiển thị trên mobile/tablet.</CardDescription>
@@ -812,10 +820,22 @@ const LiveNotes = () => {
 
         <Card className="shadow-card">
           <CardHeader>
-            <CardTitle>Ghi sự kiện</CardTitle>
-            <CardDescription>
-              Chọn cầu thủ từ danh sách đã điểm danh và bấm nút sự kiện.
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Ghi sự kiện</CardTitle>
+                <CardDescription>
+                  Chọn cầu thủ từ danh sách đã điểm danh và bấm nút sự kiện.
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="lg:hidden shrink-0"
+                onClick={() => setShowRecentEventsModal(true)}
+              >
+                📋 Sự kiện
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-6 lg:flex-row">
             <div className="lg:flex-1 space-y-4">
@@ -1007,6 +1027,68 @@ const LiveNotes = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Recent Events Modal for Mobile/Tablet */}
+        <Dialog
+          open={showRecentEventsModal}
+          onOpenChange={setShowRecentEventsModal}
+        >
+          <DialogContent className="max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Sự kiện gần đây</DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto">
+              {liveEvents.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  Chưa có sự kiện.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {liveEvents.slice(0, 20).map((ev) => (
+                    <div
+                      key={ev.id}
+                      className="p-3 rounded-md border bg-muted/40"
+                    >
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-semibold">
+                          {liveTypeLabel[ev.type]}
+                        </span>
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {ev.minute !== null && ev.minute !== undefined
+                            ? `${ev.minute}'${
+                                ev.second !== null && ev.second !== undefined
+                                  ? `:${String(ev.second).padStart(2, "0")}`
+                                  : ""
+                              }`
+                            : "--:--"}
+                        </span>
+                      </div>
+                      <div className="text-sm">
+                        {membersMap.get(ev.memberId) || ev.memberId}
+                      </div>
+                      {ev.note && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {ev.note}
+                        </p>
+                      )}
+                      <div className="mt-2 text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-xs text-muted-foreground h-7 px-2"
+                          onClick={() => handleUndoEvent(ev.id)}
+                        >
+                          <Undo2 className="h-3 w-3 mr-1" />
+                          Hoàn tác
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
