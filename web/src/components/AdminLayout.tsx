@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Bell,
@@ -47,10 +47,14 @@ const AdminLayout = () => {
   const { user } = useAuth();
   const { roles, tabs, loading: rolesLoading } = useUserRoles(user?.uid);
   const isSuperAdmin = roles.includes("superadmin");
-  const allowedTabs = new Set(
-    isSuperAdmin
-      ? ["dashboard", "matches", "members", "scoring", "live", "public"]
-      : tabs
+  const allowedTabs = useMemo(
+    () =>
+      new Set(
+        isSuperAdmin
+          ? ["dashboard", "matches", "members", "scoring", "live", "public"]
+          : tabs
+      ),
+    [isSuperAdmin, tabs]
   );
   const navigate = useNavigate();
 
@@ -127,6 +131,31 @@ const AdminLayout = () => {
       });
     }
   };
+
+  // Auto-redirect to first available tab
+  useEffect(() => {
+    if (rolesLoading) return;
+
+    const currentPath = window.location.pathname;
+    if (currentPath === "/admin" || currentPath === "/admin/") {
+      const tabRoutes = [
+        { key: "dashboard", path: "/admin/dashboard" },
+        { key: "matches", path: "/admin/matches" },
+        { key: "members", path: "/admin/members" },
+        { key: "scoring", path: "/admin/scoring" },
+        { key: "live", path: "/admin/live" },
+        { key: "public", path: "/public" },
+      ];
+
+      const firstAvailableTab = tabRoutes.find(
+        (tab) => isSuperAdmin || allowedTabs.has(tab.key)
+      );
+
+      if (firstAvailableTab) {
+        navigate(firstAvailableTab.path, { replace: true });
+      }
+    }
+  }, [rolesLoading, isSuperAdmin, allowedTabs, navigate]);
 
   return (
     <div

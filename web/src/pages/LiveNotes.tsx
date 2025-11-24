@@ -38,7 +38,11 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Loader2, Clock, Undo2 } from "lucide-react";
 
 interface Match {
@@ -77,8 +81,13 @@ interface LiveEvent {
 }
 
 const LiveNotes = () => {
-  const { okActions, badActions, labelMap, weights, loading: actionsLoading } =
-    useActionConfigs();
+  const {
+    okActions,
+    badActions,
+    labelMap,
+    weights,
+    loading: actionsLoading,
+  } = useActionConfigs();
   const [matches, setMatches] = useState<Match[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<string>("");
   const [membersMap, setMembersMap] = useState<Map<string, string>>(new Map());
@@ -330,6 +339,47 @@ const LiveNotes = () => {
       if (interval) window.clearInterval(interval);
     };
   }, [isTimerRunning, startTimestamp]);
+
+  // Wake Lock API to prevent screen sleep during match
+  useEffect(() => {
+    let wakeLock: WakeLockSentinel | null = null;
+
+    const requestWakeLock = async () => {
+      try {
+        if ("wakeLock" in navigator) {
+          wakeLock = await navigator.wakeLock.request("screen");
+          console.log("Wake Lock activated");
+
+          wakeLock.addEventListener("release", () => {
+            console.log("Wake Lock released");
+          });
+        }
+      } catch (err) {
+        console.error("Wake Lock request failed:", err);
+      }
+    };
+
+    const releaseWakeLock = async () => {
+      if (wakeLock) {
+        try {
+          await wakeLock.release();
+          wakeLock = null;
+        } catch (err) {
+          console.error("Wake Lock release failed:", err);
+        }
+      }
+    };
+
+    if (isTimerRunning) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+
+    return () => {
+      releaseWakeLock();
+    };
+  }, [isTimerRunning]);
 
   const formatTime = (seconds: number) => {
     const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
@@ -753,7 +803,10 @@ const LiveNotes = () => {
                           )}
                           variant="secondary"
                           onClick={() =>
-                            handleAddLiveEvent(selectedMemberId, action.key as any)
+                            handleAddLiveEvent(
+                              selectedMemberId,
+                              action.key as any
+                            )
                           }
                           disabled={!selectedMemberId || actionsLoading}
                         >
@@ -790,7 +843,10 @@ const LiveNotes = () => {
                                 : "border-slate-400 text-slate-700")
                           )}
                           onClick={() =>
-                            handleAddLiveEvent(selectedMemberId, action.key as any)
+                            handleAddLiveEvent(
+                              selectedMemberId,
+                              action.key as any
+                            )
                           }
                           disabled={!selectedMemberId || actionsLoading}
                         >
