@@ -437,21 +437,72 @@ const LiveNotes = () => {
 
   const renderMemberChip = (m: { id: string; name: string }) => {
     const stats = eventStats.get(m.id);
+    const hasEvents =
+      stats &&
+      (stats.total > 0 || stats.foul > 0 || stats.yellow > 0 || stats.red > 0);
+
     return (
-      <Button
+      <button
         key={m.id}
-        variant={selectedMemberId === m.id ? "default" : "outline"}
-        size="sm"
         className={cn(
-          "justify-start w-full",
-          selectedMemberId === m.id && "shadow-sm"
+          "relative flex flex-col items-start gap-1 p-3 rounded-lg border-2 transition-all",
+          "active:scale-95 touch-manipulation min-h-[70px] min-w-[140px] flex-shrink-0",
+          selectedMemberId === m.id
+            ? "border-primary bg-primary/10 shadow-md"
+            : "border-border bg-card hover:border-primary/50 hover:bg-accent"
         )}
         onClick={() => setSelectedMemberId(m.id)}
       >
-        <div className="flex flex-col items-start w-full gap-1">
-          <span className="font-semibold">{m.name}</span>
-        </div>
-      </Button>
+        <span
+          className={cn(
+            "font-semibold text-base leading-tight",
+            selectedMemberId === m.id ? "text-primary" : "text-foreground"
+          )}
+        >
+          {m.name}
+        </span>
+        {hasEvents && (
+          <div className="flex flex-wrap gap-1">
+            {stats.goal > 0 && (
+              <Badge
+                variant="secondary"
+                className="h-5 px-1.5 text-xs bg-emerald-100 text-emerald-700"
+              >
+                ⚽ {stats.goal}
+              </Badge>
+            )}
+            {stats.assist > 0 && (
+              <Badge
+                variant="secondary"
+                className="h-5 px-1.5 text-xs bg-blue-100 text-blue-700"
+              >
+                🅰️ {stats.assist}
+              </Badge>
+            )}
+            {stats.yellow > 0 && (
+              <Badge
+                variant="secondary"
+                className="h-5 px-1.5 text-xs bg-amber-100 text-amber-800"
+              >
+                🟨 {stats.yellow}
+              </Badge>
+            )}
+            {stats.red > 0 && (
+              <Badge
+                variant="secondary"
+                className="h-5 px-1.5 text-xs bg-red-100 text-red-700"
+              >
+                🟥 {stats.red}
+              </Badge>
+            )}
+          </div>
+        )}
+        {selectedMemberId === m.id && (
+          <div className="absolute top-1 right-1">
+            <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+          </div>
+        )}
+      </button>
     );
   };
 
@@ -627,9 +678,9 @@ const LiveNotes = () => {
                     )}
                     <div className="mt-2 text-right">
                       <Button
-                        size="xs"
+                        size="sm"
                         variant="ghost"
-                        className="text-xs text-muted-foreground"
+                        className="text-xs text-muted-foreground h-7 px-2"
                         onClick={() => handleUndoEvent(ev.id)}
                       >
                         <Undo2 className="h-3 w-3 mr-1" />
@@ -862,27 +913,31 @@ const LiveNotes = () => {
                   Chưa có ai điểm danh hoặc không tìm thấy.
                 </p>
               ) : teamsConfig.length >= 2 ? (
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-4">
                   {groupedByTeam.slice(0, 2).map((group) => (
                     <div key={group.id} className="space-y-2">
-                      <h4 className="font-semibold text-base">
-                        {group.name} ({group.members.length})
+                      <h4 className="font-semibold text-sm flex items-center gap-2">
+                        <span>{group.name}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {group.members.length}
+                        </Badge>
                       </h4>
-                      <div className="space-y-2">
+                      <div className="flex flex-wrap gap-2">
                         {group.members.map((m) => renderMemberChip(m))}
                       </div>
                     </div>
                   ))}
                   {groupedByTeam.slice(2).length > 0 && (
-                    <div className="lg:col-span-2 space-y-2">
-                      <h4 className="font-semibold text-base">
-                        Khác (
-                        {groupedByTeam
-                          .slice(2)
-                          .reduce((acc, g) => acc + g.members.length, 0)}
-                        )
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm flex items-center gap-2">
+                        <span>Khác</span>
+                        <Badge variant="outline" className="text-xs">
+                          {groupedByTeam
+                            .slice(2)
+                            .reduce((acc, g) => acc + g.members.length, 0)}
+                        </Badge>
                       </h4>
-                      <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="flex flex-wrap gap-2">
                         {groupedByTeam
                           .slice(2)
                           .flatMap((g) => g.members)
@@ -892,7 +947,7 @@ const LiveNotes = () => {
                   )}
                 </div>
               ) : (
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="flex flex-wrap gap-2">
                   {groupedByTeam.flatMap((g) =>
                     g.members.map((m) => renderMemberChip(m))
                   )}
@@ -936,9 +991,9 @@ const LiveNotes = () => {
                       )}
                       <div className="mt-2 text-right">
                         <Button
-                          size="xs"
+                          size="sm"
                           variant="ghost"
-                          className="text-xs text-muted-foreground"
+                          className="text-xs text-muted-foreground h-7 px-2"
                           onClick={() => handleUndoEvent(ev.id)}
                         >
                           <Undo2 className="h-3 w-3 mr-1" />
