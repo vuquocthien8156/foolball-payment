@@ -496,7 +496,7 @@ const Members = () => {
     id: string,
     updatedData: Partial<Member>
   ) => {
-  const stripUndefined = (data: Partial<Member>) =>
+    const stripUndefined = (data: Partial<Member>) =>
       Object.fromEntries(
         Object.entries(data).filter(([, value]) => value !== undefined)
       );
@@ -515,7 +515,7 @@ const Members = () => {
 
       let authUid = updatedData.authUid;
       let loginEmail = updatedData.loginEmail;
-      let loginRole = updatedData.loginRole;
+      const loginRole = updatedData.loginRole;
       let existingRoles: string[] = [];
       if (updatedData.loginEnabled) {
         if (!authUid && !loginPassword) {
@@ -940,14 +940,14 @@ const Members = () => {
                   </div>
                   {editingMember.loginRole === "admin" && (
                     <div className="space-y-2">
-                    <Label>
-                      Tab được phép hiển thị cho admin này{" "}
-                      {isLoadingUserRole && (
-                        <span className="text-xs text-muted-foreground">
-                          (Đang tải...)
-                        </span>
-                      )}
-                    </Label>
+                      <Label>
+                        Tab được phép hiển thị cho admin này{" "}
+                        {isLoadingUserRole && (
+                          <span className="text-xs text-muted-foreground">
+                            (Đang tải...)
+                          </span>
+                        )}
+                      </Label>
                       <div className="grid grid-cols-2 gap-2">
                         {availableAdminTabs.map((tab) => {
                           const currentTabs = editingMember.adminTabs || [];
@@ -1047,6 +1047,8 @@ const Members = () => {
                       loginEnabled: editingMember.loginEnabled,
                       authUid: editingMember.authUid,
                       loginEmail: editingMember.loginEmail,
+                      adminTabs: editingMember.adminTabs,
+                      loginRole: editingMember.loginRole,
                     })
                   }
                   disabled={isUpdating}
