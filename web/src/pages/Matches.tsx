@@ -319,9 +319,9 @@ const Matches = () => {
   >(new Map());
   const [selectedRaterId, setSelectedRaterId] = useState<string | null>(null);
   const [isLoadingRatings, setIsLoadingRatings] = useState(false);
-  const [liveStatsMap, setLiveStatsMap] = useState<
-    Map<string, AggregatedStat>
-  >(new Map());
+  const [liveStatsMap, setLiveStatsMap] = useState<Map<string, AggregatedStat>>(
+    new Map()
+  );
   const [isLoadingLiveStats, setIsLoadingLiveStats] = useState(false);
   const [isLiveStatsDialogOpen, setIsLiveStatsDialogOpen] = useState(false);
   const { labelMap, weights } = useActionConfigs();
@@ -759,7 +759,9 @@ const Matches = () => {
   }, [liveStatsMap, memberTeamMap]);
 
   const topMedalScores = useMemo(() => {
-    const unique = Array.from(new Set(liveStatsList.map((s) => s.primaryScore)));
+    const unique = Array.from(
+      new Set(liveStatsList.map((s) => s.primaryScore))
+    );
     return unique.slice(0, 3);
   }, [liveStatsList]);
 
@@ -772,6 +774,23 @@ const Matches = () => {
       return "bronze";
     return "";
   };
+
+  const topByField = useCallback(
+    (
+      statsList: AggregatedStat[],
+      field: keyof AggregatedStat
+    ): AggregatedStat[] => {
+      return [...statsList].sort((a, b) => {
+        const aVal = a[field];
+        const bVal = b[field];
+        if (typeof aVal === "number" && typeof bVal === "number") {
+          return bVal - aVal;
+        }
+        return 0;
+      });
+    },
+    []
+  );
 
   const handleUpdateMatchStatus = useCallback(
     async (newStatus: "PUBLISHED" | "COMPLETED") => {
@@ -1248,7 +1267,10 @@ const Matches = () => {
                                 {Object.entries(currentTeamNames)
                                   .slice(0, 2)
                                   .map(([teamId, teamName]) => (
-                                    <Card key={teamId} className="p-3 border-dashed">
+                                    <Card
+                                      key={teamId}
+                                      className="p-3 border-dashed"
+                                    >
                                       <div className="text-sm font-semibold truncate">
                                         {teamName}
                                       </div>
@@ -1259,90 +1281,99 @@ const Matches = () => {
                                   ))}
                               </div>
                             )}
-                          <div className="flex flex-wrap gap-2">
-                            {liveStatsList.map((stats) => {
-                              const medal = medalClassForScore(stats.primaryScore);
-                              const medalIcon =
-                                medal === "gold"
-                                  ? "🥇"
-                                  : medal === "silver"
-                                  ? "🥈"
-                                  : medal === "bronze"
-                                  ? "🥉"
-                                  : null;
-                              const medalClass =
-                                medal === "gold"
-                                  ? "border-emerald-400 bg-emerald-50"
-                                  : medal === "silver"
-                                  ? "border-blue-400 bg-blue-50"
-                                  : medal === "bronze"
-                                  ? "border-amber-400 bg-amber-50"
-                                  : "";
-                              return (
-                                <div
-                                  key={stats.memberId}
-                                  className={cn(
-                                    "rounded border p-2 bg-muted/30 text-xs space-y-1 w-[48%] sm:w-[31%] lg:w-[23%]",
-                                    medalClass
-                                  )}
-                                >
-                                  <div className="font-semibold truncate flex items-center gap-1">
-                                    {medalIcon && <span>{medalIcon}</span>}
-                                    <span className="truncate">
-                                      {members.get(stats.memberId) || "Không rõ"}
-                                    </span>
-                                  </div>
-                                  <div className="flex flex-wrap gap-1">
-                                    {stats.goal > 0 && (
-                                      <Badge className="bg-emerald-100 text-emerald-700 cursor-default">
-                                        {labelFor("goal")} {stats.goal}
-                                      </Badge>
+                            <div className="flex flex-wrap gap-2">
+                              {liveStatsList.map((stats) => {
+                                const medal = medalClassForScore(
+                                  stats.primaryScore
+                                );
+                                const medalIcon =
+                                  medal === "gold"
+                                    ? "🥇"
+                                    : medal === "silver"
+                                    ? "🥈"
+                                    : medal === "bronze"
+                                    ? "🥉"
+                                    : null;
+                                const medalClass =
+                                  medal === "gold"
+                                    ? "border-emerald-400 bg-emerald-50"
+                                    : medal === "silver"
+                                    ? "border-blue-400 bg-blue-50"
+                                    : medal === "bronze"
+                                    ? "border-amber-400 bg-amber-50"
+                                    : "";
+                                return (
+                                  <div
+                                    key={stats.memberId}
+                                    className={cn(
+                                      "rounded border p-2 bg-muted/30 text-xs space-y-1 w-[48%] sm:w-[31%] lg:w-[23%]",
+                                      medalClass
                                     )}
-                                    {stats.assist > 0 && (
-                                      <Badge className="bg-blue-100 text-blue-700 cursor-default">
-                                        {labelFor("assist")} {stats.assist}
-                                      </Badge>
-                                    )}
-                                    {stats.save_gk > 0 && (
-                                      <Badge className="bg-cyan-100 text-cyan-700 cursor-default">
-                                        {labelFor("save_gk")} {stats.save_gk}
-                                      </Badge>
-                                    )}
-                                    {stats.tackle > 0 && (
-                                      <Badge className="bg-indigo-100 text-indigo-700 cursor-default">
-                                        {labelFor("tackle")} {stats.tackle}
-                                      </Badge>
-                                    )}
-                                    {stats.dribble > 0 && (
-                                      <Badge className="bg-purple-100 text-purple-700 cursor-default">
-                                        {labelFor("dribble")} {stats.dribble}
-                                      </Badge>
-                                    )}
-                                    {stats.yellow > 0 && (
-                                      <Badge className="bg-amber-100 text-amber-800 cursor-default">
-                                        {labelFor("yellow")} {stats.yellow}
-                                      </Badge>
-                                    )}
-                                    {stats.red > 0 && (
-                                      <Badge className="bg-red-100 text-red-700 cursor-default">
-                                        {labelFor("red")} {stats.red}
-                                      </Badge>
-                                    )}
-                                    {stats.foul > 0 && (
-                                      <Badge variant="outline" className="cursor-default">
-                                        {labelFor("foul")} {stats.foul}
-                                      </Badge>
-                                    )}
-                                    {stats.note > 0 && (
-                                      <Badge variant="outline" className="cursor-default">
-                                        {labelFor("note")} {stats.note}
-                                      </Badge>
-                                    )}
-                                  </div>
+                                  >
+                                    <div className="font-semibold truncate flex items-center gap-1">
+                                      {medalIcon && <span>{medalIcon}</span>}
+                                      <span className="truncate">
+                                        {members.get(stats.memberId) ||
+                                          "Không rõ"}
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {stats.goal > 0 && (
+                                        <Badge className="bg-emerald-100 text-emerald-700 cursor-default">
+                                          {labelFor("goal")} {stats.goal}
+                                        </Badge>
+                                      )}
+                                      {stats.assist > 0 && (
+                                        <Badge className="bg-blue-100 text-blue-700 cursor-default">
+                                          {labelFor("assist")} {stats.assist}
+                                        </Badge>
+                                      )}
+                                      {stats.save_gk > 0 && (
+                                        <Badge className="bg-cyan-100 text-cyan-700 cursor-default">
+                                          {labelFor("save_gk")} {stats.save_gk}
+                                        </Badge>
+                                      )}
+                                      {stats.tackle > 0 && (
+                                        <Badge className="bg-indigo-100 text-indigo-700 cursor-default">
+                                          {labelFor("tackle")} {stats.tackle}
+                                        </Badge>
+                                      )}
+                                      {stats.dribble > 0 && (
+                                        <Badge className="bg-purple-100 text-purple-700 cursor-default">
+                                          {labelFor("dribble")} {stats.dribble}
+                                        </Badge>
+                                      )}
+                                      {stats.yellow > 0 && (
+                                        <Badge className="bg-amber-100 text-amber-800 cursor-default">
+                                          {labelFor("yellow")} {stats.yellow}
+                                        </Badge>
+                                      )}
+                                      {stats.red > 0 && (
+                                        <Badge className="bg-red-100 text-red-700 cursor-default">
+                                          {labelFor("red")} {stats.red}
+                                        </Badge>
+                                      )}
+                                      {stats.foul > 0 && (
+                                        <Badge
+                                          variant="outline"
+                                          className="cursor-default"
+                                        >
+                                          {labelFor("foul")} {stats.foul}
+                                        </Badge>
+                                      )}
+                                      {stats.note > 0 && (
+                                        <Badge
+                                          variant="outline"
+                                          className="cursor-default"
+                                        >
+                                          {labelFor("note")} {stats.note}
+                                        </Badge>
+                                      )}
+                                    </div>
                                   </div>
                                 );
                               })}
-                          </div>
+                            </div>
                           </>
                         )}
                       </div>
@@ -1371,7 +1402,8 @@ const Matches = () => {
                                 {matchDateString}
                               </h2>
                               <p className="text-sm text-white/70 mt-2">
-                                Vinh danh cầu thủ ấn tượng (vote) & MVP (điểm cao nhất)
+                                Vinh danh cầu thủ ấn tượng (vote) & MVP (điểm
+                                cao nhất)
                               </p>
                             </div>
                             <div className="flex items-center gap-3 text-amber-300">
@@ -1452,10 +1484,17 @@ const Matches = () => {
                                   {topByField(liveStatsList, "goal")[0] ? (
                                     <div>
                                       <h3 className="text-2xl font-black">
-                                        {topByField(liveStatsList, "goal")[0].name}
+                                        {members.get(
+                                          topByField(liveStatsList, "goal")[0]
+                                            .memberId
+                                        ) || "Không rõ"}
                                       </h3>
                                       <p className="text-sm text-white/70">
-                                        {topByField(liveStatsList, "goal")[0].goal} bàn
+                                        {
+                                          topByField(liveStatsList, "goal")[0]
+                                            .goal
+                                        }{" "}
+                                        bàn
                                       </p>
                                     </div>
                                   ) : (
@@ -1471,10 +1510,17 @@ const Matches = () => {
                                   {topByField(liveStatsList, "assist")[0] ? (
                                     <div>
                                       <h3 className="text-2xl font-black">
-                                        {topByField(liveStatsList, "assist")[0].name}
+                                        {members.get(
+                                          topByField(liveStatsList, "assist")[0]
+                                            .memberId
+                                        ) || "Không rõ"}
                                       </h3>
                                       <p className="text-sm text-white/70">
-                                        {topByField(liveStatsList, "assist")[0].assist} kiến tạo
+                                        {
+                                          topByField(liveStatsList, "assist")[0]
+                                            .assist
+                                        }{" "}
+                                        kiến tạo
                                       </p>
                                     </div>
                                   ) : (
@@ -1640,9 +1686,7 @@ const Matches = () => {
                                   <Button
                                     variant="secondary"
                                     size="sm"
-                                    onClick={() =>
-                                      handleMarkAsUnpaid(share.id)
-                                    }
+                                    onClick={() => handleMarkAsUnpaid(share.id)}
                                   >
                                     Chưa trả
                                   </Button>

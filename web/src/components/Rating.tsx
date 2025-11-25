@@ -133,11 +133,12 @@ export const Rating = ({
 
   const handleRatingChange = (memberId: string, score: string) => {
     // Allow empty string to clear, or validate numeric input
+    // Members can only rate up to 5 points (admin can add remaining 5 points)
     if (
       score === "" ||
       (!isNaN(parseFloat(score)) &&
         parseFloat(score) >= 0 &&
-        parseFloat(score) <= 10)
+        parseFloat(score) <= 5)
     ) {
       setPlayerRatings((prev) => ({ ...prev, [memberId]: score }));
     }
@@ -221,8 +222,8 @@ export const Rating = ({
             <Trophy className="w-4 h-4 mr-2" /> Cầu thủ ấn tượng nhất (vote)
           </h3>
           <p className="text-xs text-muted-foreground">
-            Đây là vote "ấn tượng"; MVP sẽ tính theo điểm số. Không tự chọn
-            bản thân.
+            Đây là vote "ấn tượng"; MVP sẽ tính theo điểm số. Không tự chọn bản
+            thân.
           </p>
           <Popover open={isMvpComboboxOpen} onOpenChange={setIsMvpComboboxOpen}>
             <PopoverTrigger asChild>
@@ -324,7 +325,7 @@ export const Rating = ({
                         id={`rating-${member.id}`}
                         type="number"
                         min="0"
-                        max="10"
+                        max="5"
                         step="0.5"
                         value={playerRatings[member.id] || ""}
                         onChange={(e) =>

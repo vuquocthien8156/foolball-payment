@@ -65,6 +65,25 @@ const PublicPortal = () => {
           const matchDate =
             dateObj?.toDate?.() || new Date(dateObj as unknown as string);
 
+          // Check if all shares are paid before showing ratings
+          const sharesSnapshot = await getDocs(
+            collection(matchDoc.ref, "shares")
+          );
+          const totalShares = sharesSnapshot.size;
+          if (totalShares === 0) continue;
+
+          let paidCount = 0;
+          sharesSnapshot.forEach((shareDoc) => {
+            if (shareDoc.data().status === "PAID") {
+              paidCount++;
+            }
+          });
+
+          // Only show ratings if all shares are paid
+          if (paidCount !== totalShares) {
+            continue;
+          }
+
           const ratingsSnapshot = await getDocs(
             collection(matchDoc.ref, "ratings")
           );

@@ -118,8 +118,7 @@ const topByField = (
 ) => {
   return stats
     .filter((s) => (s[field] as number) > 0)
-    .sort((a, b) => (b[field] as number) - (a[field] as number))
-    .slice(0, 3);
+    .sort((a, b) => (b[field] as number) - (a[field] as number));
 };
 
 const PublicRatings = () => {
@@ -169,6 +168,8 @@ const PublicRatings = () => {
   });
   const [latestMatchDateLabel, setLatestMatchDateLabel] = useState<string>("");
   const [openCollapsible, setOpenCollapsible] = useState<string | null>(null);
+  const [isMatchFullyPaid, setIsMatchFullyPaid] = useState(false);
+  const [expandedStats, setExpandedStats] = useState<Set<string>>(new Set());
   const topScoreEntry = useMemo(() => {
     if (playerRatings.size === 0) return null;
     const [memberId, rating] = Array.from(playerRatings.entries()).sort(
@@ -343,6 +344,30 @@ const PublicRatings = () => {
     if (!selectedMatchId || members.size === 0) return;
 
     setIsLoadingDetails(true);
+
+    // Check if all shares are paid
+    const checkPaymentStatus = async () => {
+      const sharesSnapshot = await getDocs(
+        collection(db, "matches", selectedMatchId, "shares")
+      );
+      const totalShares = sharesSnapshot.size;
+      if (totalShares === 0) {
+        setIsMatchFullyPaid(false);
+        return;
+      }
+
+      let paidCount = 0;
+      sharesSnapshot.forEach((shareDoc) => {
+        if (shareDoc.data().status === "PAID") {
+          paidCount++;
+        }
+      });
+
+      setIsMatchFullyPaid(paidCount === totalShares);
+    };
+
+    checkPaymentStatus();
+
     const ratingsQuery = query(
       collection(db, "matches", selectedMatchId, "ratings")
     );
@@ -829,46 +854,62 @@ const PublicRatings = () => {
                                 >
                                   <div className="font-semibold mb-2 flex items-center gap-2">
                                     <span>{item.icon}</span>
-                                    <span>{labelFor(item.key) || item.key}</span>
+                                    <span>
+                                      {labelFor(item.key) || item.key}
+                                    </span>
                                   </div>
                                   {top.length === 0 ? (
                                     <p className="text-xs text-muted-foreground">
                                       Chưa có dữ liệu.
                                     </p>
                                   ) : (
-                                    <div className="space-y-1 text-sm">
-                                      {top.map((stat, idx) => {
-                                        const value =
-                                          item.key === "goal"
-                                            ? stat.goal
-                                            : item.key === "assist"
-                                            ? stat.assist
-                                            : item.key === "save_gk"
-                                            ? stat.save_gk
-                                            : item.key === "tackle"
-                                            ? stat.tackle
-                                            : item.key === "dribble"
-                                            ? stat.dribble
-                                            : item.key === "foul"
-                                            ? stat.foul
-                                            : item.key === "yellow"
-                                            ? stat.yellow
-                                            : stat.red;
-                                        return (
-                                          <div
-                                            key={stat.memberId + idx}
-                                            className="flex justify-between items-center"
-                                          >
-                                            <span>{stat.name}</span>
-                                            <Badge
-                                              variant="outline"
-                                              className="cursor-default"
+                                    <div className="space-y-2">
+                                      <div className="space-y-1 text-sm">
+                                        {(expandedStats.has(item.key)
+                                          ? top
+                                          : top.slice(0, 3)
+                                        ).map((stat, idx) => {
+                                          const value = stat[
+                                            item.key as keyof AggregatedStat
+                                          ] as number;
+                                          return (
+                                            <div
+                                              key={stat.memberId + idx}
+                                              className="flex justify-between items-center"
                                             >
-                                              {labelFor(item.key)} {value}
-                                            </Badge>
-                                          </div>
-                                        );
-                                      })}
+                                              <span>{stat.name}</span>
+                                              <Badge
+                                                variant="outline"
+                                                className="cursor-default"
+                                              >
+                                                {labelFor(item.key)} {value}
+                                              </Badge>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                      {top.length > 3 && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="w-full h-7 text-xs"
+                                          onClick={() => {
+                                            setExpandedStats((prev) => {
+                                              const next = new Set(prev);
+                                              if (next.has(item.key)) {
+                                                next.delete(item.key);
+                                              } else {
+                                                next.add(item.key);
+                                              }
+                                              return next;
+                                            });
+                                          }}
+                                        >
+                                          {expandedStats.has(item.key)
+                                            ? "Thu gọn"
+                                            : `Xem thêm (${top.length - 3})`}
+                                        </Button>
+                                      )}
                                     </div>
                                   )}
                                 </div>
@@ -919,7 +960,18 @@ const PublicRatings = () => {
                   </Card>
 
                   <Card className="shadow-card">
-                    {mvpData.length === 0 && playerRatings.size === 0 ? (
+                    {!isMatchFullyPaid ? (
+                      <CardContent className="p-12 text-center flex flex-col items-center justify-center h-full">
+                        <Info className="h-12 w-12 mx-auto text-muted-foreground opacity-50" />
+                        <h3 className="mt-4 text-lg font-semibold">
+                          Chưa công khai đánh giá
+                        </h3>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Đánh giá sẽ được công khai sau khi trận đấu hoàn thành
+                          thanh toán.
+                        </p>
+                      </CardContent>
+                    ) : mvpData.length === 0 && playerRatings.size === 0 ? (
                       <CardContent className="p-12 text-center flex flex-col items-center justify-center h-full">
                         <Info className="h-12 w-12 mx-auto text-muted-foreground opacity-50" />
                         <h3 className="mt-4 text-lg font-semibold">
