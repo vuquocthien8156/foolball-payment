@@ -121,6 +121,9 @@ const LiveNotes = () => {
   const [showRecentEventsModal, setShowRecentEventsModal] = useState(false);
   const [actionWeights, setActionWeights] =
     useState<ActionWeights>(defaultActionWeights);
+  const [floatingBubbles, setFloatingBubbles] = useState<
+    { id: string; memberName: string; actionLabel: string; x: number }[]
+  >([]);
   const labelFor = useCallback(
     (key: string) =>
       labelMap.get(key) ||
@@ -544,6 +547,22 @@ const LiveNotes = () => {
         second,
         createdAt: Timestamp.now(),
       });
+
+      // Trigger floating bubble animation
+      const bubbleId = `${Date.now()}-${Math.random()}`;
+      const memberName = membersMap.get(targetId) || "Không rõ";
+      const actionLabel = labelFor(type);
+      const randomX = Math.random() * 60 - 30; // Random horizontal offset -30 to 30
+
+      setFloatingBubbles((prev) => [
+        ...prev,
+        { id: bubbleId, memberName, actionLabel, x: randomX },
+      ]);
+
+      // Remove bubble after animation completes (2s)
+      setTimeout(() => {
+        setFloatingBubbles((prev) => prev.filter((b) => b.id !== bubbleId));
+      }, 2000);
     } catch (error) {
       console.error("Error adding live event:", error);
       toast({
@@ -590,7 +609,22 @@ const LiveNotes = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
+    <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background relative overflow-hidden">
+      {/* Floating Bubbles */}
+      {floatingBubbles.map((bubble) => (
+        <div
+          key={bubble.id}
+          className="fixed bottom-1/3 left-1/2 pointer-events-none z-50"
+          style={{
+            transform: `translateX(calc(-50% + ${bubble.x}px))`,
+            animation: "floatUp 2s ease-out forwards",
+          }}
+        >
+          <div className="bg-primary text-primary-foreground px-4 py-2 rounded-full shadow-lg text-sm font-semibold whitespace-nowrap">
+            {bubble.memberName} • {bubble.actionLabel}
+          </div>
+        </div>
+      ))}
       <div className="container mx-auto px-4 py-8 max-w-6xl space-y-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>

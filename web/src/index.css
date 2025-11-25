@@ -147,3 +147,17 @@ All colors MUST be HSL.
   background-size: 400% 400%;
   animation: gradient-animation 15s ease infinite;
 }
+
+@keyframes floatUp {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-400px) scale(0.8);
+    opacity: 0;
+  }
+}

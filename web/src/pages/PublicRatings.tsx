@@ -29,6 +29,8 @@ import {
   orderBy,
   onSnapshot,
   getDocs,
+  doc,
+  getDoc,
   where,
   Timestamp,
 } from "firebase/firestore";
@@ -56,6 +58,7 @@ interface Match {
   totalAmount: number;
   status: "PENDING" | "COMPLETED" | "PUBLISHED";
   isDeleted?: boolean;
+  ratingsPublished?: boolean;
   teamNames?: Record<string, string>;
   teamsConfig?: { id: string; name: string; members?: { id: string }[] }[];
 }
@@ -345,28 +348,18 @@ const PublicRatings = () => {
 
     setIsLoadingDetails(true);
 
-    // Check if all shares are paid
-    const checkPaymentStatus = async () => {
-      const sharesSnapshot = await getDocs(
-        collection(db, "matches", selectedMatchId, "shares")
-      );
-      const totalShares = sharesSnapshot.size;
-      if (totalShares === 0) {
+    // Check if ratings are published for this match
+    const checkRatingsPublished = async () => {
+      const matchRef = doc(db, "matches", selectedMatchId);
+      const matchSnap = await getDoc(matchRef);
+      if (matchSnap.exists()) {
+        setIsMatchFullyPaid(matchSnap.data().ratingsPublished || false);
+      } else {
         setIsMatchFullyPaid(false);
-        return;
       }
-
-      let paidCount = 0;
-      sharesSnapshot.forEach((shareDoc) => {
-        if (shareDoc.data().status === "PAID") {
-          paidCount++;
-        }
-      });
-
-      setIsMatchFullyPaid(paidCount === totalShares);
     };
 
-    checkPaymentStatus();
+    checkRatingsPublished();
 
     const ratingsQuery = query(
       collection(db, "matches", selectedMatchId, "ratings")

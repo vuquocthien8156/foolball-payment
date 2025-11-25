@@ -42,6 +42,8 @@ import {
   Star,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -93,6 +95,7 @@ interface Match {
   status: "PENDING" | "COMPLETED" | "PUBLISHED";
   isDeleted?: boolean;
   isTest?: boolean;
+  ratingsPublished?: boolean;
   teamNames?: { [key: string]: string };
   teamsConfig?: {
     id: string;
@@ -810,6 +813,30 @@ const Matches = () => {
           variant: "destructive",
           title: "Lỗi",
           description: "Không thể cập nhật trạng thái trận đấu.",
+        });
+      }
+    },
+    [selectedMatchId]
+  );
+
+  const handleToggleRatingsPublished = useCallback(
+    async (published: boolean) => {
+      if (!selectedMatchId) return;
+      const matchRef = doc(db, "matches", selectedMatchId);
+      try {
+        await updateDoc(matchRef, { ratingsPublished: published });
+        toast({
+          title: "Thành công",
+          description: `Đã ${
+            published ? "công khai" : "ẩn"
+          } đánh giá trận đấu.`,
+        });
+      } catch (error) {
+        console.error("Error toggling ratings published:", error);
+        toast({
+          variant: "destructive",
+          title: "Lỗi",
+          description: "Không thể cập nhật trạng thái công khai đánh giá.",
         });
       }
     },
@@ -1597,6 +1624,33 @@ const Matches = () => {
                     </CardContent>
                   </Card>
                 </div>
+                <Card className="shadow-card mb-6">
+                  <CardHeader className="flex flex-row items-center justify-between pb-2">
+                    <div>
+                      <CardTitle className="text-sm font-medium">
+                        Công khai đánh giá
+                      </CardTitle>
+                      <CardDescription className="text-xs mt-1">
+                        Cho phép hiển thị MVP và điểm đánh giá trên trang public
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label
+                        htmlFor="ratings-published-toggle"
+                        className="text-sm font-normal cursor-pointer"
+                      >
+                        {selectedMatch?.ratingsPublished
+                          ? "Đã công khai"
+                          : "Đang ẩn"}
+                      </Label>
+                      <Switch
+                        id="ratings-published-toggle"
+                        checked={selectedMatch?.ratingsPublished || false}
+                        onCheckedChange={handleToggleRatingsPublished}
+                      />
+                    </div>
+                  </CardHeader>
+                </Card>
                 <Card className="shadow-card">
                   <CardHeader>
                     <CardTitle>Chi tiết</CardTitle>
