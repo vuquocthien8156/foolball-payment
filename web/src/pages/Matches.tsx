@@ -795,6 +795,20 @@ const Matches = () => {
     []
   );
 
+  const topGoalLeaders = useMemo(() => {
+    const sorted = topByField(liveStatsList, "goal");
+    const topValue = sorted[0]?.goal ?? 0;
+    if (topValue <= 0) return [];
+    return sorted.filter((stat) => stat.goal === topValue);
+  }, [liveStatsList, topByField]);
+
+  const topAssistLeaders = useMemo(() => {
+    const sorted = topByField(liveStatsList, "assist");
+    const topValue = sorted[0]?.assist ?? 0;
+    if (topValue <= 0) return [];
+    return sorted.filter((stat) => stat.assist === topValue);
+  }, [liveStatsList, topByField]);
+
   const handleUpdateMatchStatus = useCallback(
     async (newStatus: "PUBLISHED" | "COMPLETED") => {
       if (!selectedMatchId) return;
@@ -1508,20 +1522,22 @@ const Matches = () => {
                                   <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/20 text-blue-100 px-3 py-1 text-xs font-semibold">
                                     VUA PHÁ LƯỚI
                                   </div>
-                                  {topByField(liveStatsList, "goal")[0] ? (
-                                    <div>
-                                      <h3 className="text-2xl font-black">
-                                        {members.get(
-                                          topByField(liveStatsList, "goal")[0]
-                                            .memberId
-                                        ) || "Không rõ"}
+                                  {topGoalLeaders.length > 0 ? (
+                                    <div className="space-y-1">
+                                      <h3 className="text-2xl font-black leading-tight">
+                                        {topGoalLeaders
+                                          .map(
+                                            (stat) =>
+                                              members.get(stat.memberId) ||
+                                              "Không rõ"
+                                          )
+                                          .join(", ")}
                                       </h3>
                                       <p className="text-sm text-white/70">
-                                        {
-                                          topByField(liveStatsList, "goal")[0]
-                                            .goal
-                                        }{" "}
-                                        bàn
+                                        {topGoalLeaders[0].goal} bàn
+                                        {topGoalLeaders.length > 1
+                                          ? " (đồng vua phá lưới)"
+                                          : ""}
                                       </p>
                                     </div>
                                   ) : (
@@ -1534,20 +1550,22 @@ const Matches = () => {
                                   <div className="inline-flex items-center gap-2 rounded-full bg-indigo-500/20 text-indigo-100 px-3 py-1 text-xs font-semibold">
                                     VUA KIẾN TẠO
                                   </div>
-                                  {topByField(liveStatsList, "assist")[0] ? (
-                                    <div>
-                                      <h3 className="text-2xl font-black">
-                                        {members.get(
-                                          topByField(liveStatsList, "assist")[0]
-                                            .memberId
-                                        ) || "Không rõ"}
+                                  {topAssistLeaders.length > 0 ? (
+                                    <div className="space-y-1">
+                                      <h3 className="text-2xl font-black leading-tight">
+                                        {topAssistLeaders
+                                          .map(
+                                            (stat) =>
+                                              members.get(stat.memberId) ||
+                                              "Không rõ"
+                                          )
+                                          .join(", ")}
                                       </h3>
                                       <p className="text-sm text-white/70">
-                                        {
-                                          topByField(liveStatsList, "assist")[0]
-                                            .assist
-                                        }{" "}
-                                        kiến tạo
+                                        {topAssistLeaders[0].assist} kiến tạo
+                                        {topAssistLeaders.length > 1
+                                          ? " (đồng vua kiến tạo)"
+                                          : ""}
                                       </p>
                                     </div>
                                   ) : (

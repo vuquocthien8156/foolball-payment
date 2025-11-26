@@ -130,6 +130,41 @@ const PublicRatings = () => {
     (key: string) => labelMap.get(key) || eventLabels[key] || key,
     [labelMap]
   );
+  const positiveExtras = useMemo(
+    () =>
+      new Set(
+        (weights.extras || [])
+          .filter((ex) => !ex.isNegative)
+          .map((ex) => ex.key)
+      ),
+    [weights.extras]
+  );
+  const negativeExtras = useMemo(
+    () =>
+      new Set(
+        (weights.extras || [])
+          .filter((ex) => ex.isNegative)
+          .map((ex) => ex.key)
+      ),
+    [weights.extras]
+  );
+  const badgeClassFor = useCallback(
+    (key: string) => {
+      if (key === "goal") return "bg-emerald-100 text-emerald-700";
+      if (key === "assist") return "bg-blue-100 text-blue-700";
+      if (key === "save_gk") return "bg-cyan-100 text-cyan-700";
+      if (key === "tackle") return "bg-indigo-100 text-indigo-700";
+      if (key === "dribble") return "bg-purple-100 text-purple-700";
+      if (key === "note") return "bg-slate-100 text-slate-700";
+      if (key === "yellow") return "bg-amber-100 text-amber-800";
+      if (key === "red") return "bg-red-100 text-red-700";
+      if (key === "foul") return "bg-orange-100 text-orange-800";
+      if (positiveExtras.has(key)) return "bg-teal-100 text-teal-700";
+      if (negativeExtras.has(key)) return "bg-rose-100 text-rose-700";
+      return "bg-muted text-foreground";
+    },
+    [negativeExtras, positiveExtras]
+  );
   const [matches, setMatches] = useState<Match[]>([]);
   const [members, setMembers] = useState<Map<string, string>>(new Map());
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
@@ -840,6 +875,13 @@ const PublicRatings = () => {
                                 liveStatsList,
                                 item.key as keyof AggregatedStat
                               );
+                              const displayList = expandedStats.has(item.key)
+                                ? top
+                                : top.slice(0, 3);
+                              const remainingCount = Math.max(
+                                0,
+                                top.length - displayList.length
+                              );
                               return (
                                 <div
                                   key={item.key}
@@ -858,10 +900,7 @@ const PublicRatings = () => {
                                   ) : (
                                     <div className="space-y-2">
                                       <div className="space-y-1 text-sm">
-                                        {(expandedStats.has(item.key)
-                                          ? top
-                                          : top.slice(0, 3)
-                                        ).map((stat, idx) => {
+                                        {displayList.map((stat, idx) => {
                                           const value = stat[
                                             item.key as keyof AggregatedStat
                                           ] as number;
@@ -872,8 +911,11 @@ const PublicRatings = () => {
                                             >
                                               <span>{stat.name}</span>
                                               <Badge
-                                                variant="outline"
-                                                className="cursor-default"
+                                                variant="secondary"
+                                                className={cn(
+                                                  "cursor-default",
+                                                  badgeClassFor(item.key)
+                                                )}
                                               >
                                                 {labelFor(item.key)} {value}
                                               </Badge>
@@ -881,7 +923,7 @@ const PublicRatings = () => {
                                           );
                                         })}
                                       </div>
-                                      {top.length > 3 && (
+                                      {remainingCount > 0 && (
                                         <Button
                                           variant="ghost"
                                           size="sm"
@@ -900,7 +942,7 @@ const PublicRatings = () => {
                                         >
                                           {expandedStats.has(item.key)
                                             ? "Thu gọn"
-                                            : `Xem thêm (${top.length - 3})`}
+                                            : `Xem thêm (${remainingCount})`}
                                         </Button>
                                       )}
                                     </div>

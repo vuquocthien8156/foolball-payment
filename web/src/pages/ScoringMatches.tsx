@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   collection,
   doc,
@@ -128,6 +128,45 @@ const ScoringMatches = () => {
     isNegative: boolean;
   }>({ key: "", label: "", weight: "0.5", isNegative: false });
   const { labelMap, weights, loading: actionsLoading } = useActionConfigs();
+  const dialogStat = useMemo(
+    () => (dialogTarget ? liveStatsMap.get(dialogTarget.memberId) : undefined),
+    [dialogTarget, liveStatsMap]
+  );
+  const positiveExtras = useMemo(
+    () =>
+      new Set(
+        (actionWeights.extras || [])
+          .filter((ex) => !ex.isNegative)
+          .map((ex) => ex.key)
+      ),
+    [actionWeights.extras]
+  );
+  const negativeExtras = useMemo(
+    () =>
+      new Set(
+        (actionWeights.extras || [])
+          .filter((ex) => ex.isNegative)
+          .map((ex) => ex.key)
+      ),
+    [actionWeights.extras]
+  );
+  const badgeClassFor = useCallback(
+    (key: string) => {
+      if (key === "goal") return "bg-emerald-100 text-emerald-700";
+      if (key === "assist") return "bg-blue-100 text-blue-700";
+      if (key === "save_gk") return "bg-cyan-100 text-cyan-700";
+      if (key === "tackle") return "bg-indigo-100 text-indigo-700";
+      if (key === "dribble") return "bg-purple-100 text-purple-700";
+      if (key === "note") return "bg-slate-100 text-slate-700";
+      if (key === "yellow") return "bg-amber-100 text-amber-800";
+      if (key === "red") return "bg-red-100 text-red-700";
+      if (key === "foul") return "bg-orange-100 text-orange-800";
+      if (positiveExtras.has(key)) return "bg-teal-100 text-teal-700";
+      if (negativeExtras.has(key)) return "bg-rose-100 text-rose-700";
+      return "bg-muted text-foreground";
+    },
+    [negativeExtras, positiveExtras]
+  );
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -888,10 +927,10 @@ const ScoringMatches = () => {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {dialogTarget && liveStatsMap.get(dialogTarget.memberId) && (
+            {dialogTarget && dialogStat && (
               <div className="rounded-md border p-3 bg-muted/40 space-y-2 text-sm">
                 {(() => {
-                  const stat = liveStatsMap.get(dialogTarget.memberId)!;
+                  const stat = dialogStat;
                   const suggested = clampScore(stat.primaryScore);
                   const statBadges: { label: string; value: number }[] = [
                     { label: labelMap.get("goal") || "Bàn thắng", value: stat.goal },
@@ -941,6 +980,51 @@ const ScoringMatches = () => {
                 })()}
               </div>
             )}
+            <div className="rounded-md border p-3 bg-muted/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">Chỉ số hành động</span>
+                <Badge variant="outline">
+                  {dialogStat ? `Primary: ${dialogStat.primaryScore.toFixed(2)}` : "Chưa có dữ liệu"}
+                </Badge>
+              </div>
+              {dialogStat ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                  {[
+                    { key: "goal", label: labelMap.get("goal") || "Bàn thắng", value: dialogStat.goal },
+                    { key: "assist", label: labelMap.get("assist") || "Kiến tạo", value: dialogStat.assist },
+                    { key: "save_gk", label: labelMap.get("save_gk") || "Cản phá GK", value: dialogStat.save_gk },
+                    { key: "tackle", label: labelMap.get("tackle") || "Tackle/Chặn", value: dialogStat.tackle },
+                    { key: "dribble", label: labelMap.get("dribble") || "Qua người", value: dialogStat.dribble },
+                    { key: "note", label: labelMap.get("note") || "Ghi chú", value: dialogStat.note },
+                    { key: "yellow", label: labelMap.get("yellow") || "Thẻ vàng", value: dialogStat.yellow },
+                    { key: "red", label: labelMap.get("red") || "Thẻ đỏ", value: dialogStat.red },
+                    { key: "foul", label: labelMap.get("foul") || "Phạm lỗi", value: dialogStat.foul },
+                    ...(actionWeights.extras || []).map((extra) => ({
+                      key: extra.key,
+                      label: extra.label || labelMap.get(extra.key) || extra.key,
+                      value: (dialogStat as any)[extra.key] || 0,
+                    })),
+                  ].map((item) => (
+                    <div
+                      key={item.key}
+                      className="flex items-center justify-between rounded border bg-background px-2 py-1"
+                    >
+                      <span className="truncate">{item.label}</span>
+                      <Badge
+                        variant="secondary"
+                        className={badgeClassFor(item.key)}
+                      >
+                        {item.value}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Chưa có sự kiện hành động cho cầu thủ này.
+                </p>
+              )}
+            </div>
             <div className="space-y-2">
               <Label htmlFor="admin-score">Điểm (0 - 5)</Label>
               <Input
