@@ -101,6 +101,17 @@ interface LiveEvent {
   second?: number | null;
 }
 
+interface AdminRating {
+  score: number;
+  notes?: string;
+}
+
+interface CombinedRatingData extends RatingData {
+  adminScore: number;
+  finalScore: number;
+  hasAdminScore: boolean;
+}
+
 const MIN_MVP_VOTES = 2;
 
 const eventLabels: Record<string, string> = {
@@ -172,6 +183,9 @@ const PublicRatings = () => {
   const [playerRatings, setPlayerRatings] = useState<Map<string, RatingData>>(
     new Map()
   );
+  const [adminRatings, setAdminRatings] = useState<Map<string, AdminRating>>(
+    new Map()
+  );
   const [mvpData, setMvpData] = useState<MvpData[]>([]);
   const [showAllMvp, setShowAllMvp] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
@@ -208,18 +222,54 @@ const PublicRatings = () => {
   const [openCollapsible, setOpenCollapsible] = useState<string | null>(null);
   const [isMatchFullyPaid, setIsMatchFullyPaid] = useState(false);
   const [expandedStats, setExpandedStats] = useState<Set<string>>(new Set());
+  const combinedRatings = useMemo<Map<string, CombinedRatingData>>(() => {
+    const merged = new Map<string, CombinedRatingData>();
+
+    playerRatings.forEach((data, memberId) => {
+      const adminScore = adminRatings.get(memberId)?.score ?? 0;
+      const peerScore = Number.isFinite(data.averageScore)
+        ? data.averageScore
+        : 0;
+      merged.set(memberId, {
+        ...data,
+        averageScore: peerScore,
+        adminScore,
+        hasAdminScore: adminRatings.has(memberId),
+        finalScore: Math.min(peerScore + adminScore, 10),
+      });
+    });
+
+    adminRatings.forEach((data, memberId) => {
+      if (merged.has(memberId)) return;
+      const adminScore = data.score ?? 0;
+      merged.set(memberId, {
+        averageScore: 0,
+        totalPoints: 0,
+        ratingCount: 0,
+        details: [],
+        adminScore,
+        hasAdminScore: true,
+        finalScore: Math.min(adminScore, 10),
+      });
+    });
+
+    return merged;
+  }, [adminRatings, playerRatings]);
   const topScoreEntry = useMemo(() => {
-    if (playerRatings.size === 0) return null;
-    const [memberId, rating] = Array.from(playerRatings.entries()).sort(
-      ([, a], [, b]) => b.averageScore - a.averageScore
+    if (combinedRatings.size === 0) return null;
+    const [memberId, rating] = Array.from(combinedRatings.entries()).sort(
+      ([, a], [, b]) => b.finalScore - a.finalScore
     )[0];
     return {
       memberId,
       name: members.get(memberId) || "Không rõ",
-      avg: rating.averageScore,
+      final: rating.finalScore,
+      peer: rating.averageScore,
+      admin: rating.adminScore,
+      hasAdmin: rating.hasAdminScore,
       count: rating.ratingCount,
     };
-  }, [playerRatings, members]);
+  }, [combinedRatings, members]);
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -382,6 +432,15 @@ const PublicRatings = () => {
     if (!selectedMatchId || members.size === 0) return;
 
     setIsLoadingDetails(true);
+    setAdminRatings(new Map());
+
+    let ratingsLoaded = false;
+    let adminLoaded = false;
+    const finishLoading = () => {
+      if (ratingsLoaded && adminLoaded) {
+        setIsLoadingDetails(false);
+      }
+    };
 
     // Check if ratings are published for this match
     const checkRatingsPublished = async () => {
@@ -461,17 +520,48 @@ const PublicRatings = () => {
 
         setPlayerRatings(ratingsByPlayer);
         setMvpData(sortedMvp);
-        setIsLoadingDetails(false);
+        ratingsLoaded = true;
+        finishLoading();
       },
       (err) => {
         console.error("Error loading ratings", err);
         setPlayerRatings(new Map());
         setMvpData([]);
-        setIsLoadingDetails(false);
+        ratingsLoaded = true;
+        finishLoading();
       }
     );
 
-    return () => unsubscribeRatings();
+    const adminRatingsQuery = query(
+      collection(db, "matches", selectedMatchId, "adminRatings")
+    );
+    const unsubscribeAdminRatings = onSnapshot(
+      adminRatingsQuery,
+      (adminSnapshot) => {
+        const adminMap = new Map<string, AdminRating>();
+        adminSnapshot.forEach((docSnap) => {
+          const data = docSnap.data() as AdminRating;
+          adminMap.set(docSnap.id, {
+            score: typeof data.score === "number" ? data.score : 0,
+            notes: data.notes,
+          });
+        });
+        setAdminRatings(adminMap);
+        adminLoaded = true;
+        finishLoading();
+      },
+      (err) => {
+        console.error("Error loading admin ratings", err);
+        setAdminRatings(new Map());
+        adminLoaded = true;
+        finishLoading();
+      }
+    );
+
+    return () => {
+      unsubscribeRatings();
+      unsubscribeAdminRatings();
+    };
   }, [selectedMatchId, members]);
 
   useEffect(() => {
@@ -645,11 +735,11 @@ const PublicRatings = () => {
     fetchOverallStats();
   }, [members]);
 
-  const sortedPlayerRatings = useMemo(() => {
-    return Array.from(playerRatings.entries()).sort(
-      ([, a], [, b]) => b.averageScore - a.averageScore
+  const sortedFinalRatings = useMemo(() => {
+    return Array.from(combinedRatings.entries()).sort(
+      ([, a], [, b]) => b.finalScore - a.finalScore
     );
-  }, [playerRatings]);
+  }, [combinedRatings]);
 
   const statCategories = useMemo(
     () => [
@@ -788,6 +878,7 @@ const PublicRatings = () => {
                       onClick={() => {
                         setSelectedMatchId(match.id);
                         setPlayerRatings(new Map());
+                        setAdminRatings(new Map());
                         setMvpData([]);
                       }}
                       className={cn(
@@ -1006,7 +1097,7 @@ const PublicRatings = () => {
                           thanh toán.
                         </p>
                       </CardContent>
-                    ) : mvpData.length === 0 && playerRatings.size === 0 ? (
+                    ) : mvpData.length === 0 && combinedRatings.size === 0 ? (
                       <CardContent className="p-12 text-center flex flex-col items-center justify-center h-full">
                         <Info className="h-12 w-12 mx-auto text-muted-foreground opacity-50" />
                         <h3 className="mt-4 text-lg font-semibold">
@@ -1023,17 +1114,24 @@ const PublicRatings = () => {
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 <TrendingUp className="w-5 h-5 text-blue-500" />
-                                <div>
+                                <div className="space-y-1">
                                   <div className="font-semibold">
-                                    MVP (top điểm)
+                                    MVP (top tổng điểm)
                                   </div>
                                   <div className="text-sm text-muted-foreground">
                                     {topScoreEntry.name}
                                   </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Peer: {topScoreEntry.peer.toFixed(2)} /5 ·
+                                    Admin:{" "}
+                                    {topScoreEntry.hasAdmin
+                                      ? `${topScoreEntry.admin.toFixed(2)} /5`
+                                      : "Chưa chấm"}
+                                  </div>
                                 </div>
                               </div>
                               <Badge variant="secondary">
-                                {topScoreEntry.avg.toFixed(2)} điểm
+                                {topScoreEntry.final.toFixed(2)} / 10
                               </Badge>
                             </div>
                           </div>
@@ -1128,12 +1226,12 @@ const PublicRatings = () => {
                           </div>
                         )}
 
-                        {playerRatings.size > 0 && (
+                        {combinedRatings.size > 0 && (
                           <div className="space-y-2">
                             <div className="flex items-center gap-2">
                               <TrendingUp className="w-5 h-5 text-blue-500" />
                               <h4 className="font-semibold">
-                                Bảng điểm trận đấu
+                                Bảng điểm trận đấu (final)
                               </h4>
                             </div>
                             <Table>
@@ -1142,54 +1240,129 @@ const PublicRatings = () => {
                                   <TableHead>Hạng</TableHead>
                                   <TableHead>Cầu thủ</TableHead>
                                   <TableHead className="text-right">
-                                    Điểm TB
+                                    Peer /5
+                                  </TableHead>
+                                  <TableHead className="text-right">
+                                    Admin /5
+                                  </TableHead>
+                                  <TableHead className="text-right">
+                                    Điểm cuối /10
                                   </TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {sortedPlayerRatings.map(
-                                  ([memberId, ratingData], index) => (
-                                    <Dialog key={memberId}>
-                                      <DialogTrigger asChild>
-                                        <TableRow className="cursor-pointer">
-                                          <TableCell className="font-medium">
-                                            {index + 1}
-                                          </TableCell>
-                                          <TableCell>
-                                            {members.get(memberId) ||
-                                              "Không rõ"}
-                                          </TableCell>
-                                          <TableCell className="text-right">
-                                            <Badge variant="outline">
-                                              {ratingData.averageScore.toFixed(
-                                                2
+                                {sortedFinalRatings.map(
+                                  ([memberId, ratingData], index) => {
+                                    const peerScore = ratingData.averageScore;
+                                    const adminScore = ratingData.adminScore;
+                                    const finalScore = ratingData.finalScore;
+                                    const hasAdminScore = ratingData.hasAdminScore;
+                                    return (
+                                      <Dialog key={memberId}>
+                                        <DialogTrigger asChild>
+                                          <TableRow className="cursor-pointer">
+                                            <TableCell className="font-medium">
+                                              {index + 1}
+                                            </TableCell>
+                                            <TableCell>
+                                              {members.get(memberId) ||
+                                                "Không rõ"}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                              {ratingData.ratingCount > 0 ? (
+                                                <Badge variant="outline">
+                                                  {peerScore.toFixed(2)}
+                                                </Badge>
+                                              ) : (
+                                                <span className="text-xs text-muted-foreground">
+                                                  Chưa có
+                                                </span>
                                               )}
-                                            </Badge>
-                                          </TableCell>
-                                        </TableRow>
-                                      </DialogTrigger>
-                                      <DialogContent>
-                                        <DialogHeader>
-                                          <DialogTitle>
-                                            Chi tiết điểm của{" "}
-                                            {members.get(memberId) ||
-                                              "Không rõ"}
-                                          </DialogTitle>
-                                        </DialogHeader>
-                                        <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
-                                          {ratingData.details.map((d, i) => (
-                                            <li
-                                              key={i}
-                                              className="flex justify-between"
-                                            >
-                                              <span>{d.ratedBy}</span>
-                                              <strong>{d.score} điểm</strong>
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      </DialogContent>
-                                    </Dialog>
-                                  )
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                              {hasAdminScore ? (
+                                                <Badge variant="secondary">
+                                                  {adminScore.toFixed(2)}
+                                                </Badge>
+                                              ) : (
+                                                <span className="text-xs text-muted-foreground">
+                                                  Chưa chấm
+                                                </span>
+                                              )}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                              <Badge>
+                                                {finalScore.toFixed(2)}
+                                              </Badge>
+                                            </TableCell>
+                                          </TableRow>
+                                        </DialogTrigger>
+                                        <DialogContent>
+                                          <DialogHeader>
+                                            <DialogTitle>
+                                              Chi tiết điểm của{" "}
+                                              {members.get(memberId) ||
+                                                "Không rõ"}
+                                            </DialogTitle>
+                                          </DialogHeader>
+                                          <div className="space-y-3 text-sm">
+                                            <div className="flex items-center justify-between">
+                                              <span>Điểm cuối</span>
+                                              <Badge>
+                                                {finalScore.toFixed(2)} / 10
+                                              </Badge>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                              <span>Peer</span>
+                                              <Badge variant="outline">
+                                                {peerScore.toFixed(2)} / 5
+                                              </Badge>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                              <span>Admin</span>
+                                              {hasAdminScore ? (
+                                                <Badge variant="secondary">
+                                                  {adminScore.toFixed(2)} / 5
+                                                </Badge>
+                                              ) : (
+                                                <span className="text-xs text-muted-foreground">
+                                                  Chưa chấm
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="pt-2 border-t">
+                                              <div className="font-medium mb-2">
+                                                Chi tiết điểm từ thành viên khác
+                                              </div>
+                                              {ratingData.details.length ===
+                                              0 ? (
+                                                <p className="text-xs text-muted-foreground">
+                                                  Chưa có đánh giá từ thành viên
+                                                  khác.
+                                                </p>
+                                              ) : (
+                                                <ul className="space-y-2 max-h-60 overflow-y-auto">
+                                                  {ratingData.details.map(
+                                                    (d, i) => (
+                                                      <li
+                                                        key={i}
+                                                        className="flex justify-between"
+                                                      >
+                                                        <span>{d.ratedBy}</span>
+                                                        <strong>
+                                                          {d.score} điểm
+                                                        </strong>
+                                                      </li>
+                                                    )
+                                                  )}
+                                                </ul>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </DialogContent>
+                                      </Dialog>
+                                    );
+                                  }
                                 )}
                               </TableBody>
                             </Table>
