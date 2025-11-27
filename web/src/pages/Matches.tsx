@@ -126,6 +126,19 @@ interface RatingData {
   details: { ratedBy: string; score: number }[];
 }
 
+interface AdminRating {
+  memberId: string;
+  score: number;
+  notes?: string;
+  updatedAt?: Timestamp;
+}
+
+type CombinedRatingData = RatingData & {
+  adminScore: number;
+  hasAdminScore: boolean;
+  finalScore: number;
+};
+
 interface MvpData {
   mvpId: string;
   mvpName: string;
@@ -306,6 +319,9 @@ const Matches = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [playerRatings, setPlayerRatings] = useState<Map<string, RatingData>>(
+    new Map()
+  );
+  const [adminRatings, setAdminRatings] = useState<Map<string, AdminRating>>(
     new Map()
   );
   const [mvpData, setMvpData] = useState<MvpData[]>([]);
@@ -536,9 +552,27 @@ const Matches = () => {
       setIsLoadingRatings(false);
     });
 
+    const adminRatingsQuery = query(
+      collection(db, "matches", selectedMatchId, "adminRatings")
+    );
+    const unsubscribeAdminRatings = onSnapshot(
+      adminRatingsQuery,
+      (snapshot) => {
+        const map = new Map<string, AdminRating>();
+        snapshot.forEach((docSnap) => {
+          map.set(docSnap.id, {
+            memberId: docSnap.id,
+            ...(docSnap.data() as AdminRating),
+          });
+        });
+        setAdminRatings(map);
+      }
+    );
+
     return () => {
       unsubscribeShares();
       unsubscribeRatings();
+      unsubscribeAdminRatings();
     };
   }, [selectedMatchId, matches, members]);
 
@@ -695,25 +729,62 @@ const Matches = () => {
     ).toLocaleDateString("vi-VN");
   }, [selectedMatch]);
 
+  const combinedRatings = useMemo<Map<string, CombinedRatingData>>(() => {
+    const merged = new Map<string, CombinedRatingData>();
+
+    playerRatings.forEach((data, memberId) => {
+      const peerScore = Number.isFinite(data.averageScore)
+        ? data.averageScore
+        : 0;
+      const adminScore = adminRatings.get(memberId)?.score ?? 0;
+      merged.set(memberId, {
+        ...data,
+        averageScore: peerScore,
+        adminScore,
+        hasAdminScore: adminRatings.has(memberId),
+        finalScore: Math.min(peerScore + adminScore, 10),
+      });
+    });
+
+    adminRatings.forEach((data, memberId) => {
+      if (merged.has(memberId)) return;
+      const adminScore = data.score ?? 0;
+      merged.set(memberId, {
+        averageScore: 0,
+        totalPoints: 0,
+        ratingCount: 0,
+        details: [],
+        adminScore,
+        hasAdminScore: true,
+        finalScore: Math.min(adminScore, 10),
+      });
+    });
+
+    return merged;
+  }, [adminRatings, playerRatings]);
+
   const topMvp = useMemo(() => {
     if (mvpData.length === 0) return null;
     return mvpData[0];
   }, [mvpData]);
 
   const topScorer = useMemo(() => {
-    if (playerRatings.size === 0) return null;
-    const [memberId, ratingData] = Array.from(playerRatings.entries()).sort(
-      ([, a], [, b]) => b.averageScore - a.averageScore
+    if (combinedRatings.size === 0) return null;
+    const [memberId, ratingData] = Array.from(combinedRatings.entries()).sort(
+      ([, a], [, b]) => b.finalScore - a.finalScore
     )[0];
     const shareInfo = shares.find((s) => s.memberId === memberId);
     return {
       memberId,
       name: members.get(memberId) || "Không rõ",
       teamName: shareInfo?.teamName || "N/A",
-      averageScore: ratingData.averageScore,
+      finalScore: ratingData.finalScore,
+      peerScore: ratingData.averageScore,
+      adminScore: ratingData.adminScore,
+      hasAdminScore: ratingData.hasAdminScore,
       ratingCount: ratingData.ratingCount,
     };
-  }, [playerRatings, members, shares]);
+  }, [combinedRatings, members, shares]);
 
   const liveStatsList = useMemo(() => {
     return Array.from(liveStatsMap.values())
@@ -1074,7 +1145,7 @@ const Matches = () => {
                                 </CardContent>
                               </Card>
                             )}
-                            {playerRatings.size > 0 ? (
+                            {combinedRatings.size > 0 ? (
                               <Table>
                                 <TableHeader>
                                   <TableRow>
@@ -1082,15 +1153,21 @@ const Matches = () => {
                                     <TableHead>Thành viên</TableHead>
                                     <TableHead>Đội</TableHead>
                                     <TableHead className="text-right">
-                                      Điểm TB
+                                      Peer /5
+                                    </TableHead>
+                                    <TableHead className="text-right">
+                                      Admin /5
+                                    </TableHead>
+                                    <TableHead className="text-right">
+                                      Điểm cuối /10
                                     </TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                  {Array.from(playerRatings.entries())
+                                  {Array.from(combinedRatings.entries())
                                     .sort(
                                       ([, a], [, b]) =>
-                                        b.averageScore - a.averageScore
+                                        b.finalScore - a.finalScore
                                     )
                                     .map(([memberId, ratingData], index) => {
                                       const shareInfo = shares.find(
@@ -1099,6 +1176,11 @@ const Matches = () => {
                                       const teamName =
                                         shareInfo?.teamName || "N/A";
                                       const isTopScorer = index === 0;
+                                      const peerScore = Number.isFinite(
+                                        ratingData.averageScore
+                                      )
+                                        ? ratingData.averageScore
+                                        : 0;
                                       return (
                                         <Dialog key={memberId}>
                                           <DialogTrigger asChild>
@@ -1134,6 +1216,24 @@ const Matches = () => {
                                               </TableCell>
                                               <TableCell>{teamName}</TableCell>
                                               <TableCell className="text-right">
+                                                <Badge variant="outline">
+                                                  {peerScore.toFixed(2)}
+                                                </Badge>
+                                              </TableCell>
+                                              <TableCell className="text-right">
+                                                {ratingData.hasAdminScore ? (
+                                                  <Badge variant="secondary">
+                                                    {ratingData.adminScore.toFixed(
+                                                      2
+                                                    )}
+                                                  </Badge>
+                                                ) : (
+                                                  <span className="text-xs text-muted-foreground">
+                                                    Chưa chấm
+                                                  </span>
+                                                )}
+                                              </TableCell>
+                                              <TableCell className="text-right">
                                                 <Badge
                                                   variant={
                                                     isTopScorer
@@ -1145,7 +1245,7 @@ const Matches = () => {
                                                       "bg-green-500 text-white text-base px-3 py-1"
                                                   )}
                                                 >
-                                                  {ratingData.averageScore.toFixed(
+                                                  {ratingData.finalScore.toFixed(
                                                     2
                                                   )}
                                                 </Badge>
@@ -1160,21 +1260,60 @@ const Matches = () => {
                                                   "Không rõ"}
                                               </DialogTitle>
                                             </DialogHeader>
-                                            <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
-                                              {ratingData.details.map(
-                                                (d, i) => (
-                                                  <li
-                                                    key={i}
-                                                    className="flex justify-between"
-                                                  >
-                                                    <span>{d.ratedBy}</span>
-                                                    <strong>
-                                                      {d.score} điểm
-                                                    </strong>
-                                                  </li>
-                                                )
-                                              )}
-                                            </ul>
+                                            <div className="space-y-3">
+                                              <div className="flex justify-between text-sm">
+                                                <span>Điểm peer</span>
+                                                <strong>
+                                                  {peerScore.toFixed(2)} / 5
+                                                </strong>
+                                              </div>
+                                              <div className="flex justify-between text-sm">
+                                                <span>Điểm admin</span>
+                                                <strong>
+                                                  {ratingData.hasAdminScore
+                                                    ? `${ratingData.adminScore.toFixed(
+                                                        2
+                                                      )} / 5`
+                                                    : "Chưa chấm"}
+                                                </strong>
+                                              </div>
+                                              <div className="flex justify-between text-sm items-center">
+                                                <span>Tổng</span>
+                                                <Badge>
+                                                  {ratingData.finalScore.toFixed(
+                                                    2
+                                                  )}{" "}
+                                                  / 10
+                                                </Badge>
+                                              </div>
+                                              <div>
+                                                <p className="text-xs text-muted-foreground mb-2">
+                                                  Chi tiết điểm peer:
+                                                </p>
+                                                <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
+                                                  {ratingData.details.length >
+                                                  0 ? (
+                                                    ratingData.details.map(
+                                                      (d, i) => (
+                                                        <li
+                                                          key={i}
+                                                          className="flex justify-between"
+                                                        >
+                                                          <span>{d.ratedBy}</span>
+                                                          <strong>
+                                                            {d.score} điểm
+                                                          </strong>
+                                                        </li>
+                                                      )
+                                                    )
+                                                  ) : (
+                                                    <li className="text-xs text-muted-foreground">
+                                                      Chưa có đánh giá peer.
+                                                    </li>
+                                                  )}
+                                                </ul>
+                                              </div>
+                                            </div>
                                           </DialogContent>
                                         </Dialog>
                                       );
@@ -1501,11 +1640,22 @@ const Matches = () => {
                                     {topScorer.teamName}
                                   </p>
                                   <div className="text-5xl font-black tracking-tight text-emerald-200">
-                                    {topScorer.averageScore.toFixed(2)}
+                                    {topScorer.finalScore.toFixed(2)}
                                   </div>
-                                  <p className="text-sm text-white/70">
-                                    {topScorer.ratingCount} lượt đánh giá
-                                  </p>
+                                  <div className="space-y-1 text-sm text-white/70">
+                                    <p>
+                                      Peer: {topScorer.peerScore.toFixed(2)} / 5
+                                      {" • "}
+                                      {topScorer.hasAdminScore
+                                        ? `Admin: ${topScorer.adminScore.toFixed(
+                                            2
+                                          )} / 5`
+                                        : "Admin: Chưa chấm"}
+                                    </p>
+                                    <p>
+                                      {topScorer.ratingCount} lượt đánh giá peer
+                                    </p>
+                                  </div>
                                 </div>
                               ) : (
                                 <p className="text-sm text-white/60">
