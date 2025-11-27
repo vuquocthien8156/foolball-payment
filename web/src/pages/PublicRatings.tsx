@@ -198,7 +198,9 @@ const PublicRatings = () => {
     topRatings: {
       memberId: string;
       memberName: string;
-      averageScore: number;
+      finalScore: number;
+      peerScore: number;
+      adminScore: number;
     }[];
     topMvp: { memberId: string; memberName: string; voteCount: number }[];
     isLoading: boolean;
@@ -207,7 +209,9 @@ const PublicRatings = () => {
     topRating: {
       memberId: string;
       memberName: string;
-      averageScore: number;
+      finalScore: number;
+      peerScore: number;
+      adminScore: number;
     } | null;
     topMvp: { memberId: string; memberName: string; voteCount: number } | null;
     rangeLabel: string;
@@ -595,12 +599,12 @@ const PublicRatings = () => {
 
       const allPlayerRatings = new Map<
         string,
-        { totalPoints: number; ratingCount: number }
+        { totalPoints: number; ratingCount: number; adminTotal: number; adminCount: number }
       >();
       const allMvpVotes = new Map<string, number>();
       const weekPlayerRatings = new Map<
         string,
-        { totalPoints: number; ratingCount: number }
+        { totalPoints: number; ratingCount: number; adminTotal: number; adminCount: number }
       >();
       const weekMvpVotes = new Map<string, number>();
 
@@ -632,8 +636,12 @@ const PublicRatings = () => {
           matchDate.getTime() >= startOfPrevWeek.getTime() &&
           matchDate.getTime() <= endOfPrevWeek.getTime();
 
-        const ratingsQuery = query(collection(matchDoc.ref, "ratings"));
-        const ratingsSnapshot = await getDocs(ratingsQuery);
+        const ratingsSnapshot = await getDocs(
+          query(collection(matchDoc.ref, "ratings"))
+        );
+        const adminRatingsSnapshot = await getDocs(
+          query(collection(matchDoc.ref, "adminRatings"))
+        );
 
         ratingsSnapshot.forEach((ratingDoc) => {
           const rating = ratingDoc.data();
@@ -643,6 +651,8 @@ const PublicRatings = () => {
               const current = allPlayerRatings.get(playerRating.memberId) || {
                 totalPoints: 0,
                 ratingCount: 0,
+                adminTotal: 0,
+                adminCount: 0,
               };
               current.totalPoints += playerRating.score;
               current.ratingCount += 1;
@@ -654,6 +664,8 @@ const PublicRatings = () => {
                 ) || {
                   totalPoints: 0,
                   ratingCount: 0,
+                  adminTotal: 0,
+                  adminCount: 0,
                 };
                 weekCurrent.totalPoints += playerRating.score;
                 weekCurrent.ratingCount += 1;
@@ -679,16 +691,62 @@ const PublicRatings = () => {
             }
           }
         });
+
+        adminRatingsSnapshot.forEach((adminDoc) => {
+          const data = adminDoc.data();
+          const rawScore = data.score;
+          const adminScore =
+            typeof rawScore === "number"
+              ? rawScore
+              : Number.parseFloat(rawScore || "0");
+          if (!Number.isFinite(adminScore)) return;
+          const addAdmin = (map: typeof allPlayerRatings) => {
+            const current = map.get(adminDoc.id) || {
+              totalPoints: 0,
+              ratingCount: 0,
+              adminTotal: 0,
+              adminCount: 0,
+            };
+            current.adminTotal += adminScore;
+            current.adminCount += 1;
+            map.set(adminDoc.id, current);
+          };
+
+          addAdmin(allPlayerRatings);
+          if (inPrevWeek) {
+            addAdmin(weekPlayerRatings);
+          }
+        });
       }
 
-      const calculatedRatings = Array.from(allPlayerRatings.entries())
-        .map(([memberId, data]) => ({
-          memberId,
-          memberName: members.get(memberId) || "Không rõ",
-          averageScore:
-            data.ratingCount > 0 ? data.totalPoints / data.ratingCount : 0,
-        }))
-        .sort((a, b) => b.averageScore - a.averageScore)
+      const calculateTop = (
+        map: Map<
+          string,
+          {
+            totalPoints: number;
+            ratingCount: number;
+            adminTotal: number;
+            adminCount: number;
+          }
+        >
+      ) =>
+        Array.from(map.entries())
+          .map(([memberId, data]) => {
+            const peer =
+              data.ratingCount > 0 ? data.totalPoints / data.ratingCount : 0;
+            const admin =
+              data.adminCount > 0 ? data.adminTotal / data.adminCount : 0;
+            return {
+              memberId,
+              memberName: members.get(memberId) || "Không rõ",
+              finalScore: Math.min(peer + admin, 10),
+              peerScore: peer,
+              adminScore: admin,
+            };
+          })
+          .sort((a, b) => b.finalScore - a.finalScore);
+
+      const calculatedRatings = calculateTop(allPlayerRatings)
         .slice(0, 3);
 
       const sortedMvp = Array.from(allMvpVotes.entries())
@@ -701,14 +759,7 @@ const PublicRatings = () => {
         .sort((a, b) => b.voteCount - a.voteCount)
         .slice(0, 3);
 
-      const topWeekRatingEntry = Array.from(weekPlayerRatings.entries())
-        .map(([memberId, data]) => ({
-          memberId,
-          memberName: members.get(memberId) || "Không rõ",
-          averageScore:
-            data.ratingCount > 0 ? data.totalPoints / data.ratingCount : 0,
-        }))
-        .sort((a, b) => b.averageScore - a.averageScore)[0];
+      const topWeekRatingEntry = calculateTop(weekPlayerRatings)[0];
 
       const topWeekMvp = Array.from(weekMvpVotes.entries())
         .map(([memberId, voteCount]) => ({
@@ -800,9 +851,20 @@ const PublicRatings = () => {
                       >
                         {index + 1}. {player.memberName}
                       </span>
-                      <Badge variant={index === 0 ? "default" : "secondary"}>
-                        {player.averageScore.toFixed(2)} điểm
-                      </Badge>
+                      <div className="text-right">
+                        <Badge
+                          variant={index === 0 ? "default" : "secondary"}
+                          className="mb-1"
+                        >
+                          {player.finalScore.toFixed(2)} điểm /10
+                        </Badge>
+                        <div className="text-[11px] text-muted-foreground">
+                          Peer: {player.peerScore.toFixed(2)} /5 • Admin:{" "}
+                          {player.adminScore > 0
+                            ? `${player.adminScore.toFixed(2)} /5`
+                            : "Chưa chấm"}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -30,7 +30,10 @@ interface TopHighlight {
   mvpName: string;
   mvpVotes: number;
   topScorerName: string;
-  topScorerScore: number;
+  topScorerFinal: number;
+  topScorerPeer: number;
+  topScorerAdmin: number;
+  hasAdminScore: boolean;
   matchDateLabel: string;
 }
 
@@ -72,13 +75,17 @@ const PublicPortal = () => {
           const ratingsSnapshot = await getDocs(
             collection(matchDoc.ref, "ratings")
           );
-          if (ratingsSnapshot.empty) continue;
+          const adminRatingsSnapshot = await getDocs(
+            collection(matchDoc.ref, "adminRatings")
+          );
+          if (ratingsSnapshot.empty && adminRatingsSnapshot.empty) continue;
 
           const playerRatings = new Map<
             string,
             { totalPoints: number; ratingCount: number }
           >();
           const mvpVotes = new Map<string, number>();
+          const adminRatings = new Map<string, number>();
 
           ratingsSnapshot.forEach((ratingDoc) => {
             const rating = ratingDoc.data();
@@ -105,10 +112,44 @@ const PublicPortal = () => {
             }
           });
 
-          const topRatingEntry = Array.from(playerRatings.entries()).sort(
-            (a, b) =>
-              (b[1].totalPoints / b[1].ratingCount || 0) -
-              (a[1].totalPoints / a[1].ratingCount || 0)
+          adminRatingsSnapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const raw = data.score;
+            const score =
+              typeof raw === "number" ? raw : Number.parseFloat(raw || "0");
+            if (!Number.isFinite(score)) return;
+            adminRatings.set(docSnap.id, score);
+          });
+
+          const combinedRatings = new Map<
+            string,
+            { peer: number; admin: number; final: number; hasAdmin: boolean }
+          >();
+
+          playerRatings.forEach((data, memberId) => {
+            const peer =
+              data.ratingCount > 0 ? data.totalPoints / data.ratingCount : 0;
+            const admin = adminRatings.get(memberId) || 0;
+            combinedRatings.set(memberId, {
+              peer,
+              admin,
+              final: Math.min(peer + admin, 10),
+              hasAdmin: adminRatings.has(memberId),
+            });
+          });
+
+          adminRatings.forEach((admin, memberId) => {
+            if (combinedRatings.has(memberId)) return;
+            combinedRatings.set(memberId, {
+              peer: 0,
+              admin,
+              final: Math.min(admin, 10),
+              hasAdmin: true,
+            });
+          });
+
+          const topRatingEntry = Array.from(combinedRatings.entries()).sort(
+            (a, b) => b[1].final - a[1].final
           )[0];
 
           const topMvpEntry = Array.from(mvpVotes.entries())
@@ -116,9 +157,10 @@ const PublicPortal = () => {
             .sort((a, b) => b[1] - a[1])[0];
 
           // Chỉ fetch tên cho hai người cần hiển thị
-          const memberIds = [topRatingEntry?.[0], topMvpEntry?.[0]].filter(
-            Boolean
-          ) as string[];
+          const memberIds = [
+            topRatingEntry?.[0],
+            topMvpEntry?.[0],
+          ].filter(Boolean) as string[];
           const nameCache = new Map<string, string>();
           await Promise.all(
             memberIds.map(async (id) => {
@@ -137,11 +179,10 @@ const PublicPortal = () => {
             topScorerName: topRatingEntry
               ? nameCache.get(topRatingEntry[0]) || "Không rõ"
               : "Chưa có",
-            topScorerScore: topRatingEntry
-              ? topRatingEntry[1].ratingCount > 0
-                ? topRatingEntry[1].totalPoints / topRatingEntry[1].ratingCount
-                : 0
-              : 0,
+            topScorerFinal: topRatingEntry ? topRatingEntry[1].final : 0,
+            topScorerPeer: topRatingEntry ? topRatingEntry[1].peer : 0,
+            topScorerAdmin: topRatingEntry ? topRatingEntry[1].admin : 0,
+            hasAdminScore: topRatingEntry ? topRatingEntry[1].hasAdmin : false,
             matchDateLabel: matchDate.toLocaleDateString("vi-VN"),
           };
           break;
@@ -320,7 +361,13 @@ const PublicPortal = () => {
                     {highlight.topScorerName}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {highlight.topScorerScore.toFixed(2)} điểm TB
+                    {highlight.topScorerFinal.toFixed(2)} điểm cuối /10
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Peer: {highlight.topScorerPeer.toFixed(2)} /5 • Admin:{" "}
+                    {highlight.hasAdminScore
+                      ? `${highlight.topScorerAdmin.toFixed(2)} /5`
+                      : "Chưa chấm"}
                   </p>
                 </div>
               ) : (
