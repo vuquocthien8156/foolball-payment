@@ -48,12 +48,14 @@ import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
   AggregatedStat,
+  ActionWeights,
   LiveEventRecord,
   aggregateLiveStats,
-  ActionWeights,
   defaultActionWeights,
 } from "@/lib/liveStats";
 import { useActionConfigs } from "@/hooks/useActionConfigs";
+import { useAuth } from "@/contexts/AuthContext";
+import { useUserRoles } from "@/hooks/useUserRoles";
 
 interface Match {
   id: string;
@@ -93,6 +95,11 @@ const quickNotes = [
 ];
 
 const ScoringMatches = () => {
+  const { user } = useAuth();
+  const { roles, loading: rolesLoading } = useUserRoles(user?.uid);
+  const isSuperAdmin = roles.includes("superadmin");
+  const canSeePeerScores = isSuperAdmin;
+  const shouldHidePeerScores = rolesLoading ? true : !canSeePeerScores;
   const [matches, setMatches] = useState<Match[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [members, setMembers] = useState<Map<string, string>>(new Map());
@@ -267,7 +274,10 @@ const ScoringMatches = () => {
       ratingsByPlayer.forEach((data, key) => {
         ratingsByPlayer.set(key, {
           ...data,
-          averageScore: data.totalPoints / data.ratingCount,
+          averageScore:
+            data.ratingCount > 0
+              ? Math.min(5, data.totalPoints / data.ratingCount)
+              : 0,
         });
       });
       setPlayerRatings(ratingsByPlayer);
@@ -312,18 +322,22 @@ const ScoringMatches = () => {
     return found.teamNames || {};
   }, [matches, selectedMatchId]);
 
-  const players = useMemo(() => {
+  const basePlayers = useMemo(() => {
     const unique = new Map<string, Share>();
     shares.forEach((s) => {
       if (!unique.has(s.memberId)) unique.set(s.memberId, s);
     });
-    return Array.from(unique.values()).filter((p) => {
+    return Array.from(unique.values());
+  }, [shares]);
+
+  const players = useMemo(() => {
+    return basePlayers.filter((p) => {
       const name = members.get(p.memberId) || "";
       return searchTerm
         ? name.toLowerCase().includes(searchTerm.toLowerCase())
         : true;
     });
-  }, [shares, members, searchTerm]);
+  }, [basePlayers, members, searchTerm]);
 
   const memberTeamMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -395,6 +409,48 @@ const ScoringMatches = () => {
         return b.total - a.total;
       });
   }, [liveStatsMap, members, memberTeamMap]);
+
+  const playerRows = useMemo(() => {
+    return basePlayers.map((player) => {
+      const peer = playerRatings.get(player.memberId);
+      const admin = adminRatings.get(player.memberId);
+      const peerScore = Math.min(5, Math.max(0, peer?.averageScore || 0));
+      const adminScore = Math.min(5, Math.max(0, admin?.score || 0));
+      const total = Math.min(peerScore + adminScore, 10);
+      return {
+        ...player,
+        name: members.get(player.memberId) || "Không rõ",
+        peerScore,
+        adminScore,
+        total,
+        ratingCount: peer?.ratingCount || 0,
+        hasAdminScore: !!admin,
+        hasPeerScore: !!peer,
+      };
+    });
+  }, [adminRatings, basePlayers, members, playerRatings]);
+
+  const visiblePlayerRows = useMemo(() => {
+    const visibleIds = new Set(players.map((p) => p.memberId));
+    return playerRows.filter((row) => visibleIds.has(row.memberId));
+  }, [playerRows, players]);
+
+  const mvpCandidates = useMemo(() => {
+    const scored = playerRows.filter(
+      (p) => p.hasAdminScore || p.hasPeerScore
+    );
+    if (scored.length === 0) return [];
+    const topScore = Math.max(...scored.map((p) => p.total));
+    if (!Number.isFinite(topScore) || topScore <= 0) return [];
+    return scored
+      .filter((p) => Math.abs(p.total - topScore) < 1e-9)
+      .sort(
+        (a, b) =>
+          b.total - a.total ||
+          b.ratingCount - a.ratingCount ||
+          a.name.localeCompare(b.name)
+      );
+  }, [playerRows]);
 
   const topMedalScores = useMemo(() => {
     const uniqueScores = Array.from(
@@ -723,6 +779,12 @@ const ScoringMatches = () => {
               </div>
             ) : (
               <div className="space-y-4">
+                {shouldHidePeerScores && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    Điểm peer của các thành viên khác được ẩn cho role admin để
+                    đảm bảo khách quan. Super admin vẫn xem đầy đủ.
+                  </div>
+                )}
                 <div className="rounded-md border p-3 bg-muted/30">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <h4 className="font-semibold text-sm">
@@ -843,7 +905,44 @@ const ScoringMatches = () => {
                   )}
                 </div>
 
-                {players.length === 0 ? (
+                <div className="rounded-md border p-3 bg-white/70">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <Trophy className="h-4 w-4 text-amber-500" />
+                      <div>
+                        <h4 className="font-semibold text-sm">
+                          MVP (tổng điểm)
+                        </h4>
+                        <p className="text-xs text-muted-foreground">
+                          Peer + Admin; vẫn hiện đồng MVP khi bằng điểm.
+                        </p>
+                      </div>
+                    </div>
+                    {mvpCandidates.length > 1 && (
+                      <Badge variant="outline" className="border-amber-500">
+                        Đồng MVP
+                      </Badge>
+                    )}
+                  </div>
+                  {mvpCandidates.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {mvpCandidates.map((mvp) => (
+                        <Badge
+                          key={mvp.memberId}
+                          className="bg-amber-100 text-amber-800 border-amber-200"
+                        >
+                          {mvp.name} · {mvp.total.toFixed(2)} / 10
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Chưa có đủ điểm để xác định MVP.
+                    </p>
+                  )}
+                </div>
+
+                {visiblePlayerRows.length === 0 ? (
                   <div className="p-6 text-center text-sm text-muted-foreground">
                     Chưa có thành viên cho trận này.
                   </div>
@@ -853,34 +952,49 @@ const ScoringMatches = () => {
                       <TableRow>
                         <TableHead>Thành viên</TableHead>
                         <TableHead>Đội</TableHead>
-                        <TableHead className="text-right">Peer /5</TableHead>
+                        <TableHead className="text-right">
+                          Peer /5{" "}
+                          {shouldHidePeerScores && (
+                            <span className="text-[11px] text-muted-foreground">
+                              (ẩn)
+                            </span>
+                          )}
+                        </TableHead>
                         <TableHead className="text-right">Admin /5</TableHead>
-                        <TableHead className="text-right">Total /10</TableHead>
+                        <TableHead className="text-right">
+                          Total /10{" "}
+                          {shouldHidePeerScores && (
+                            <span className="text-[11px] text-muted-foreground">
+                              (ẩn peer)
+                            </span>
+                          )}
+                        </TableHead>
                         <TableHead className="text-right">Hành động</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {players.map((player) => {
-                        const peer = playerRatings.get(player.memberId);
-                        const peerScore = peer?.averageScore || 0;
-                        const admin = adminRatings.get(player.memberId);
-                        const adminScore = admin?.score || 0;
-                        const total = Math.min(peerScore + adminScore, 10);
+                      {visiblePlayerRows.map((player) => {
                         return (
                           <TableRow key={player.memberId}>
                             <TableCell className="font-medium">
-                              {members.get(player.memberId) || "Không rõ"}
+                              {player.name}
                             </TableCell>
                             <TableCell>{player.teamName}</TableCell>
                             <TableCell className="text-right">
-                              <Badge variant="outline">
-                                {peer ? peerScore.toFixed(2) : "Chưa có"}
-                              </Badge>
+                              {shouldHidePeerScores ? (
+                                <Badge variant="outline">Ẩn</Badge>
+                              ) : (
+                                <Badge variant="outline">
+                                  {player.hasPeerScore
+                                    ? player.peerScore.toFixed(2)
+                                    : "Chưa có"}
+                                </Badge>
+                              )}
                             </TableCell>
                             <TableCell className="text-right">
-                              {admin ? (
+                              {player.hasAdminScore ? (
                                 <Badge variant="secondary">
-                                  {adminScore.toFixed(2)}
+                                  {player.adminScore.toFixed(2)}
                                 </Badge>
                               ) : (
                                 <span className="text-xs text-muted-foreground">
@@ -889,7 +1003,9 @@ const ScoringMatches = () => {
                               )}
                             </TableCell>
                             <TableCell className="text-right font-semibold">
-                              {total.toFixed(2)}
+                              {shouldHidePeerScores
+                                ? "—"
+                                : player.total.toFixed(2)}
                             </TableCell>
                             <TableCell className="text-right">
                               <Button
@@ -898,7 +1014,7 @@ const ScoringMatches = () => {
                                 onClick={() => openDialog(player.memberId)}
                               >
                                 <FilePenLine className="h-4 w-4 mr-1" />
-                                {admin ? "Sửa" : "Chấm"}
+                                {player.hasAdminScore ? "Sửa" : "Chấm"}
                               </Button>
                             </TableCell>
                           </TableRow>

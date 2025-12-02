@@ -259,20 +259,25 @@ const PublicRatings = () => {
 
     return merged;
   }, [adminRatings, playerRatings]);
-  const topScoreEntry = useMemo(() => {
-    if (combinedRatings.size === 0) return null;
-    const [memberId, rating] = Array.from(combinedRatings.entries()).sort(
+  const topScoreEntries = useMemo(() => {
+    if (combinedRatings.size === 0) return [];
+    const entries = Array.from(combinedRatings.entries()).sort(
       ([, a], [, b]) => b.finalScore - a.finalScore
-    )[0];
-    return {
-      memberId,
-      name: members.get(memberId) || "Không rõ",
-      final: rating.finalScore,
-      peer: rating.averageScore,
-      admin: rating.adminScore,
-      hasAdmin: rating.hasAdminScore,
-      count: rating.ratingCount,
-    };
+    );
+    const topScore = entries[0][1].finalScore;
+    return entries
+      .filter(
+        ([, rating]) => Math.abs(rating.finalScore - topScore) < 1e-9
+      )
+      .map(([memberId, rating]) => ({
+        memberId,
+        name: members.get(memberId) || "Không rõ",
+        final: rating.finalScore,
+        peer: rating.averageScore,
+        admin: rating.adminScore,
+        hasAdmin: rating.hasAdminScore,
+        count: rating.ratingCount,
+      }));
   }, [combinedRatings, members]);
 
   useEffect(() => {
@@ -599,12 +604,12 @@ const PublicRatings = () => {
 
       const allPlayerRatings = new Map<
         string,
-        { totalPoints: number; ratingCount: number; adminTotal: number; adminCount: number }
+        { finalTotal: number; peerTotal: number; adminTotal: number; matchCount: number }
       >();
       const allMvpVotes = new Map<string, number>();
       const weekPlayerRatings = new Map<
         string,
-        { totalPoints: number; ratingCount: number; adminTotal: number; adminCount: number }
+        { finalTotal: number; peerTotal: number; adminTotal: number; matchCount: number }
       >();
       const weekMvpVotes = new Map<string, number>();
 
@@ -636,6 +641,9 @@ const PublicRatings = () => {
           matchDate.getTime() >= startOfPrevWeek.getTime() &&
           matchDate.getTime() <= endOfPrevWeek.getTime();
 
+        const perMatchPeer = new Map<string, { total: number; count: number }>();
+        const perMatchAdmin = new Map<string, number>();
+
         const ratingsSnapshot = await getDocs(
           query(collection(matchDoc.ref, "ratings"))
         );
@@ -648,29 +656,14 @@ const PublicRatings = () => {
 
           rating.playerRatings.forEach(
             (playerRating: { memberId: string; score: number }) => {
-              const current = allPlayerRatings.get(playerRating.memberId) || {
-                totalPoints: 0,
-                ratingCount: 0,
-                adminTotal: 0,
-                adminCount: 0,
+              const current = perMatchPeer.get(playerRating.memberId) || {
+                total: 0,
+                count: 0,
               };
-              current.totalPoints += playerRating.score;
-              current.ratingCount += 1;
-              allPlayerRatings.set(playerRating.memberId, current);
-
-              if (inPrevWeek) {
-                const weekCurrent = weekPlayerRatings.get(
-                  playerRating.memberId
-                ) || {
-                  totalPoints: 0,
-                  ratingCount: 0,
-                  adminTotal: 0,
-                  adminCount: 0,
-                };
-                weekCurrent.totalPoints += playerRating.score;
-                weekCurrent.ratingCount += 1;
-                weekPlayerRatings.set(playerRating.memberId, weekCurrent);
-              }
+              perMatchPeer.set(playerRating.memberId, {
+                total: current.total + playerRating.score,
+                count: current.count + 1,
+              });
             }
           );
 
@@ -700,46 +693,70 @@ const PublicRatings = () => {
               ? rawScore
               : Number.parseFloat(rawScore || "0");
           if (!Number.isFinite(adminScore)) return;
-          const addAdmin = (map: typeof allPlayerRatings) => {
-            const current = map.get(adminDoc.id) || {
-              totalPoints: 0,
-              ratingCount: 0,
-              adminTotal: 0,
-              adminCount: 0,
-            };
-            current.adminTotal += adminScore;
-            current.adminCount += 1;
-            map.set(adminDoc.id, current);
-          };
-
-          addAdmin(allPlayerRatings);
-          if (inPrevWeek) {
-            addAdmin(weekPlayerRatings);
-          }
+          perMatchAdmin.set(adminDoc.id, adminScore);
         });
+
+        const addMatchScores = (
+          target: Map<
+            string,
+            { finalTotal: number; peerTotal: number; adminTotal: number; matchCount: number }
+          >
+        ) => {
+          const ids = new Set([
+            ...Array.from(perMatchPeer.keys()),
+            ...Array.from(perMatchAdmin.keys()),
+          ]);
+          ids.forEach((memberId) => {
+            const peerScore = perMatchPeer.has(memberId)
+              ? Math.min(
+                  5,
+                  perMatchPeer.get(memberId)!.total /
+                    Math.max(1, perMatchPeer.get(memberId)!.count)
+                )
+              : 0;
+            const adminScore = Math.min(5, Math.max(0, perMatchAdmin.get(memberId) || 0));
+            const finalScore = Math.min(peerScore + adminScore, 10);
+            const current = target.get(memberId) || {
+              finalTotal: 0,
+              peerTotal: 0,
+              adminTotal: 0,
+              matchCount: 0,
+            };
+            target.set(memberId, {
+              finalTotal: current.finalTotal + finalScore,
+              peerTotal: current.peerTotal + peerScore,
+              adminTotal: current.adminTotal + adminScore,
+              matchCount: current.matchCount + 1,
+            });
+          });
+        };
+
+        addMatchScores(allPlayerRatings);
+        if (inPrevWeek) {
+          addMatchScores(weekPlayerRatings);
+        }
       }
 
       const calculateTop = (
         map: Map<
           string,
           {
-            totalPoints: number;
-            ratingCount: number;
+            finalTotal: number;
+            peerTotal: number;
             adminTotal: number;
-            adminCount: number;
+            matchCount: number;
           }
         >
       ) =>
         Array.from(map.entries())
           .map(([memberId, data]) => {
-            const peer =
-              data.ratingCount > 0 ? data.totalPoints / data.ratingCount : 0;
-            const admin =
-              data.adminCount > 0 ? data.adminTotal / data.adminCount : 0;
+            const matches = Math.max(1, data.matchCount);
+            const peer = data.peerTotal / matches;
+            const admin = data.adminTotal / matches;
             return {
               memberId,
               memberName: members.get(memberId) || "Không rõ",
-              finalScore: Math.min(peer + admin, 10),
+              finalScore: Math.min(data.finalTotal / matches, 10),
               peerScore: peer,
               adminScore: admin,
             };
@@ -1171,7 +1188,7 @@ const PublicRatings = () => {
                       </CardContent>
                     ) : (
                       <CardContent className="p-4 space-y-4">
-                        {topScoreEntry && (
+                        {topScoreEntries.length > 0 && (
                           <div className="rounded-md border p-3 bg-muted/50">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
@@ -1181,19 +1198,23 @@ const PublicRatings = () => {
                                     MVP (top tổng điểm)
                                   </div>
                                   <div className="text-sm text-muted-foreground">
-                                    {topScoreEntry.name}
+                                    {topScoreEntries
+                                      .map((entry) => entry.name)
+                                      .join(", ")}
                                   </div>
                                   <div className="text-xs text-muted-foreground">
-                                    Peer: {topScoreEntry.peer.toFixed(2)} /5 ·
+                                    Peer: {topScoreEntries[0].peer.toFixed(2)} /5 ·
                                     Admin:{" "}
-                                    {topScoreEntry.hasAdmin
-                                      ? `${topScoreEntry.admin.toFixed(2)} /5`
+                                    {topScoreEntries[0].hasAdmin
+                                      ? `${topScoreEntries[0].admin.toFixed(2)} /5`
                                       : "Chưa chấm"}
+                                    {topScoreEntries.length > 1 &&
+                                      " (Đồng MVP)"}
                                   </div>
                                 </div>
                               </div>
                               <Badge variant="secondary">
-                                {topScoreEntry.final.toFixed(2)} / 10
+                                {topScoreEntries[0].final.toFixed(2)} / 10
                               </Badge>
                             </div>
                           </div>

@@ -112,6 +112,9 @@ const SetupMatch = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
+  const [existingStatus, setExistingStatus] = useState<
+    "PENDING" | "COMPLETED" | undefined
+  >("PENDING");
   const [searchQuery, setSearchQuery] = useState("");
   const [isTestMatch, setIsTestMatch] = useState(false);
   const [pool, setPool] = useState<Member[]>([]);
@@ -142,6 +145,9 @@ const SetupMatch = () => {
         const matchSnap = await getDoc(matchRef);
         if (matchSnap.exists()) {
           configSource = matchSnap.data() as MatchConfig;
+          if ((configSource as any).status) {
+            setExistingStatus((configSource as any).status);
+          }
           const attendanceCollectionRef = collection(
             db,
             "matches",
@@ -453,7 +459,7 @@ const SetupMatch = () => {
     setIsUpdatingConfig(true);
     try {
       const matchRef = doc(db, "matches", matchId);
-      const matchData = {
+      const matchData: any = {
         date: new Date(date),
         totalAmount: parseFloat(totalAmount) || 0,
         teamCount,
@@ -470,10 +476,15 @@ const SetupMatch = () => {
         })),
         updatedAt: serverTimestamp(),
       };
+      if (!existingStatus || existingStatus === "PENDING") {
+        matchData.status = "PENDING";
+      } else {
+        delete matchData.status;
+      }
       await updateDoc(matchRef, matchData);
       toast({
         title: "Đã lưu!",
-        description: "Cấu hình và đội hình đã được lưu.",
+        description: "Chỉ cập nhật cấu hình/đội hình, chưa tính tiền.",
       });
     } catch (error) {
       toast({
@@ -683,6 +694,7 @@ const SetupMatch = () => {
       });
 
       await batch.commit();
+      setExistingStatus("COMPLETED");
       toast({ title: "Thành công!", description: `Đã xử lý trận đấu.` });
     } catch (error) {
       toast({
@@ -1116,7 +1128,7 @@ const SetupMatch = () => {
                 ) : (
                   <Save className="h-4 w-4 mr-2" />
                 )}
-                Cập nhật
+                Cập nhật (không tính tiền)
               </Button>
               <Button onClick={handleSave} size="lg" disabled={isSaving}>
                 {isSaving ? (

@@ -29,7 +29,7 @@ import { db } from "@/lib/firebase";
 interface TopHighlight {
   mvpName: string;
   mvpVotes: number;
-  topScorerName: string;
+  topScorerNames: string[];
   topScorerFinal: number;
   topScorerPeer: number;
   topScorerAdmin: number;
@@ -148,19 +148,31 @@ const PublicPortal = () => {
             });
           });
 
-          const topRatingEntry = Array.from(combinedRatings.entries()).sort(
+          const ratingEntries = Array.from(combinedRatings.entries()).sort(
             (a, b) => b[1].final - a[1].final
-          )[0];
+          );
+          const topRatingEntry = ratingEntries[0];
+          const topRatingEntries =
+            ratingEntries.length > 0
+              ? ratingEntries.filter(
+                  (entry) =>
+                    Math.abs(entry[1].final - ratingEntries[0][1].final) < 1e-9
+                )
+              : [];
 
           const topMvpEntry = Array.from(mvpVotes.entries())
             .filter(([, count]) => count >= MIN_MVP_VOTES)
             .sort((a, b) => b[1] - a[1])[0];
 
-          // Chỉ fetch tên cho hai người cần hiển thị
-          const memberIds = [
-            topRatingEntry?.[0],
-            topMvpEntry?.[0],
-          ].filter(Boolean) as string[];
+          // Chỉ fetch tên cho những người cần hiển thị
+          const memberIds = Array.from(
+            new Set(
+              [
+                ...topRatingEntries.map((entry) => entry[0]),
+                topMvpEntry?.[0],
+              ].filter(Boolean) as string[]
+            )
+          );
           const nameCache = new Map<string, string>();
           await Promise.all(
             memberIds.map(async (id) => {
@@ -176,9 +188,12 @@ const PublicPortal = () => {
               ? nameCache.get(topMvpEntry[0]) || "Không rõ"
               : "Chưa đủ 2 phiếu hợp lệ",
             mvpVotes: topMvpEntry?.[1] || 0,
-            topScorerName: topRatingEntry
-              ? nameCache.get(topRatingEntry[0]) || "Không rõ"
-              : "Chưa có",
+            topScorerNames:
+              topRatingEntries.length > 0
+                ? topRatingEntries.map(
+                    (entry) => nameCache.get(entry[0]) || "Không rõ"
+                  )
+                : [],
             topScorerFinal: topRatingEntry ? topRatingEntry[1].final : 0,
             topScorerPeer: topRatingEntry ? topRatingEntry[1].peer : 0,
             topScorerAdmin: topRatingEntry ? topRatingEntry[1].admin : 0,
@@ -358,10 +373,13 @@ const PublicPortal = () => {
               ) : highlight ? (
                 <div className="mt-2 space-y-1">
                   <p className="text-lg font-bold text-foreground">
-                    {highlight.topScorerName}
+                    {highlight.topScorerNames.length > 0
+                      ? highlight.topScorerNames.join(", ")
+                      : "Chưa có"}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {highlight.topScorerFinal.toFixed(2)} điểm cuối /10
+                    {highlight.topScorerFinal.toFixed(2)} điểm cuối /10{" "}
+                    {highlight.topScorerNames.length > 1 && "(Đồng MVP)"}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     Peer: {highlight.topScorerPeer.toFixed(2)} /5 • Admin:{" "}

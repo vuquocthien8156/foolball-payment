@@ -39,7 +39,10 @@ const Dashboard = () => {
 
       const unsubscribe = onSnapshot(matchesQuery, async (matchesSnapshot) => {
         const paymentsByMember = new Map<string, number>();
-        const ratingsByPlayer = new Map<string, { total: number; count: number }>();
+        const ratingsByPlayer = new Map<
+          string,
+          { finalTotal: number; peerTotal: number; adminTotal: number; matches: number }
+        >();
         const mvpVotes = new Map<string, number>();
 
         for (const matchDoc of matchesSnapshot.docs) {
@@ -50,12 +53,15 @@ const Dashboard = () => {
                 paymentsByMember.set(share.memberId, (paymentsByMember.get(share.memberId) || 0) + share.amount);
             });
 
+            const perMatchPeer = new Map<string, { total: number; count: number }>();
+            const perMatchAdmin = new Map<string, number>();
+
             const ratingsSnapshot = await getDocs(collection(db, "matches", matchDoc.id, "ratings"));
             ratingsSnapshot.forEach(ratingDoc => {
                 const rating = ratingDoc.data();
                 rating.playerRatings.forEach((pr: {memberId: string, score: number}) => {
-                    const current = ratingsByPlayer.get(pr.memberId) || { total: 0, count: 0 };
-                    ratingsByPlayer.set(pr.memberId, { total: current.total + pr.score, count: current.count + 1 });
+                    const current = perMatchPeer.get(pr.memberId) || { total: 0, count: 0 };
+                    perMatchPeer.set(pr.memberId, { total: current.total + pr.score, count: current.count + 1 });
                 });
                 if (rating.mvpPlayerId) {
                     if (rating.ratedByMemberId === rating.mvpPlayerId) {
@@ -64,10 +70,57 @@ const Dashboard = () => {
                     mvpVotes.set(rating.mvpPlayerId, (mvpVotes.get(rating.mvpPlayerId) || 0) + 1);
                 }
             });
+
+            const adminRatingsSnapshot = await getDocs(collection(db, "matches", matchDoc.id, "adminRatings"));
+            adminRatingsSnapshot.forEach((adminDoc) => {
+              const data = adminDoc.data() as { score?: number };
+              const adminScore = typeof data.score === "number" ? data.score : 0;
+              perMatchAdmin.set(adminDoc.id, adminScore);
+            });
+
+            const playerIds = new Set([
+              ...Array.from(perMatchPeer.keys()),
+              ...Array.from(perMatchAdmin.keys()),
+            ]);
+            playerIds.forEach((memberId) => {
+              const peerScore = perMatchPeer.has(memberId)
+                ? Math.min(
+                    5,
+                    perMatchPeer.get(memberId)!.total /
+                      Math.max(1, perMatchPeer.get(memberId)!.count)
+                  )
+                : 0;
+              const adminScore = Math.min(
+                5,
+                Math.max(0, perMatchAdmin.get(memberId) || 0)
+              );
+              const finalScore = Math.min(peerScore + adminScore, 10);
+              const current = ratingsByPlayer.get(memberId) || {
+                finalTotal: 0,
+                peerTotal: 0,
+                adminTotal: 0,
+                matches: 0,
+              };
+              ratingsByPlayer.set(memberId, {
+                finalTotal: current.finalTotal + finalScore,
+                peerTotal: current.peerTotal + peerScore,
+                adminTotal: current.adminTotal + adminScore,
+                matches: current.matches + 1,
+              });
+            });
         }
 
         const topPayers = Array.from(paymentsByMember.entries()).map(([id, total]) => ({ name: membersMap.get(id) || "N/A", total })).sort((a,b) => b.total - a.total).slice(0,3);
-        const topRated = Array.from(ratingsByPlayer.entries()).map(([id, data]) => ({ name: membersMap.get(id) || "N/A", avg: data.total / data.count })).sort((a,b) => b.avg - a.avg).slice(0,3);
+        const topRated = Array.from(ratingsByPlayer.entries())
+          .map(([id, data]) => {
+            const matchCount = data.matches || 1;
+            return {
+              name: membersMap.get(id) || "N/A",
+              avg: data.finalTotal / matchCount,
+            };
+          })
+          .sort((a,b) => b.avg - a.avg)
+          .slice(0,3);
         const topMvps = Array.from(mvpVotes.entries())
           .filter(([, count]) => count >= MIN_MVP_VOTES)
           .map(([id, count]) => ({ name: membersMap.get(id) || "N/A", count }))

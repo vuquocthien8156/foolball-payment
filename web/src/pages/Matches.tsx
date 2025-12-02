@@ -768,23 +768,36 @@ const Matches = () => {
     return mvpData[0];
   }, [mvpData]);
 
-  const topScorer = useMemo(() => {
-    if (combinedRatings.size === 0) return null;
-    const [memberId, ratingData] = Array.from(combinedRatings.entries()).sort(
+  const topScorers = useMemo(() => {
+    if (combinedRatings.size === 0) return [];
+    const sorted = Array.from(combinedRatings.entries()).sort(
       ([, a], [, b]) => b.finalScore - a.finalScore
-    )[0];
-    const shareInfo = shares.find((s) => s.memberId === memberId);
-    return {
-      memberId,
-      name: members.get(memberId) || "Không rõ",
-      teamName: shareInfo?.teamName || "N/A",
-      finalScore: ratingData.finalScore,
-      peerScore: ratingData.averageScore,
-      adminScore: ratingData.adminScore,
-      hasAdminScore: ratingData.hasAdminScore,
-      ratingCount: ratingData.ratingCount,
-    };
+    );
+    const topScore = sorted[0][1].finalScore;
+    return sorted
+      .filter(
+        ([, ratingData]) =>
+          Math.abs(ratingData.finalScore - topScore) < 1e-9
+      )
+      .map(([memberId, ratingData]) => {
+        const shareInfo = shares.find((s) => s.memberId === memberId);
+        return {
+          memberId,
+          name: members.get(memberId) || "Không rõ",
+          teamName: shareInfo?.teamName || "N/A",
+          finalScore: ratingData.finalScore,
+          peerScore: ratingData.averageScore,
+          adminScore: ratingData.adminScore,
+          hasAdminScore: ratingData.hasAdminScore,
+          ratingCount: ratingData.ratingCount,
+        };
+      });
   }, [combinedRatings, members, shares]);
+
+  const topScorerIds = useMemo(
+    () => new Set(topScorers.map((s) => s.memberId)),
+    [topScorers]
+  );
 
   const liveStatsList = useMemo(() => {
     return Array.from(liveStatsMap.values())
@@ -1175,7 +1188,8 @@ const Matches = () => {
                                       );
                                       const teamName =
                                         shareInfo?.teamName || "N/A";
-                                      const isTopScorer = index === 0;
+                                      const isTopScorer =
+                                        topScorerIds.has(memberId);
                                       const peerScore = Number.isFinite(
                                         ratingData.averageScore
                                       )
@@ -1567,7 +1581,7 @@ const Matches = () => {
                       </Button>
                     </DialogTrigger>
                     <DialogContent className="max-w-5xl p-0 overflow-hidden border-0 shadow-2xl">
-                      {!topMvp && !topScorer ? (
+                      {!topMvp && topScorers.length === 0 ? (
                         <div className="p-8 text-center text-muted-foreground">
                           Chưa có dữ liệu để tạo poster.
                         </div>
@@ -1628,32 +1642,35 @@ const Matches = () => {
                               <div className="absolute -left-10 -bottom-16 text-emerald-300/20">
                                 <Trophy className="w-60 h-60" />
                               </div>
-                              {topScorer ? (
+                              {topScorers.length > 0 ? (
                                 <div className="relative space-y-4">
                                   <div className="inline-flex items-center gap-2 rounded-full bg-emerald-400/20 text-emerald-100 px-3 py-1 text-xs font-semibold">
                                     MVP (ĐIỂM CAO NHẤT)
+                                    {topScorers.length > 1 && " · Đồng MVP"}
                                   </div>
                                   <h3 className="text-3xl font-black">
-                                    {topScorer.name}
+                                    {topScorers.map((s) => s.name).join(", ")}
                                   </h3>
                                   <p className="text-sm text-white/70">
-                                    {topScorer.teamName}
+                                    {topScorers
+                                      .map((s) => s.teamName)
+                                      .join(" • ")}
                                   </p>
                                   <div className="text-5xl font-black tracking-tight text-emerald-200">
-                                    {topScorer.finalScore.toFixed(2)}
+                                    {topScorers[0].finalScore.toFixed(2)}
                                   </div>
                                   <div className="space-y-1 text-sm text-white/70">
                                     <p>
-                                      Peer: {topScorer.peerScore.toFixed(2)} / 5
+                                      Peer: {topScorers[0].peerScore.toFixed(2)} / 5
                                       {" • "}
-                                      {topScorer.hasAdminScore
-                                        ? `Admin: ${topScorer.adminScore.toFixed(
+                                      {topScorers[0].hasAdminScore
+                                        ? `Admin: ${topScorers[0].adminScore.toFixed(
                                             2
                                           )} / 5`
                                         : "Admin: Chưa chấm"}
                                     </p>
                                     <p>
-                                      {topScorer.ratingCount} lượt đánh giá peer
+                                      {topScorers[0].ratingCount} lượt đánh giá peer
                                     </p>
                                   </div>
                                 </div>
