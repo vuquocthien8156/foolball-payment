@@ -25,6 +25,7 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { ensureNotificationToken } from "@/lib/notifications";
 
 interface TopHighlight {
   mvpName: string;
@@ -46,6 +47,20 @@ const PublicPortal = () => {
     { teamId: string; teamName: string; wins: number }[]
   >([]);
   const [isLoadingScoreboard, setIsLoadingScoreboard] = useState(true);
+
+  useEffect(() => {
+    const requestNotify = async () => {
+      if (typeof Notification === "undefined") return;
+      const prompted = localStorage.getItem("publicNotifyPrompted");
+      if (prompted && Notification.permission === "denied") return;
+      const token = await ensureNotificationToken(null);
+      localStorage.setItem("publicNotifyPrompted", "1");
+      if (token) {
+        console.info("[notify] Token registered from /public");
+      }
+    };
+    requestNotify();
+  }, []);
 
   useEffect(() => {
     const fetchHighlight = async () => {

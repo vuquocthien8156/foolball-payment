@@ -37,13 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-import { Loader2, Search, Trophy, FilePenLine } from "lucide-react";
+import { Loader2, Search, FilePenLine } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -435,40 +429,6 @@ const ScoringMatches = () => {
     return playerRows.filter((row) => visibleIds.has(row.memberId));
   }, [playerRows, players]);
 
-  const mvpCandidates = useMemo(() => {
-    const scored = playerRows.filter(
-      (p) => p.hasAdminScore || p.hasPeerScore
-    );
-    if (scored.length === 0) return [];
-    const topScore = Math.max(...scored.map((p) => p.total));
-    if (!Number.isFinite(topScore) || topScore <= 0) return [];
-    return scored
-      .filter((p) => Math.abs(p.total - topScore) < 1e-9)
-      .sort(
-        (a, b) =>
-          b.total - a.total ||
-          b.ratingCount - a.ratingCount ||
-          a.name.localeCompare(b.name)
-      );
-  }, [playerRows]);
-
-  const topMedalScores = useMemo(() => {
-    const uniqueScores = Array.from(
-      new Set(liveStatsList.map((s) => s.primaryScore))
-    );
-    return uniqueScores.slice(0, 3);
-  }, [liveStatsList]);
-
-  const medalClassForScore = (score: number) => {
-    if (topMedalScores[0] !== undefined && score === topMedalScores[0])
-      return "gold";
-    if (topMedalScores[1] !== undefined && score === topMedalScores[1])
-      return "silver";
-    if (topMedalScores[2] !== undefined && score === topMedalScores[2])
-      return "bronze";
-    return "";
-  };
-
   const handleSaveWeights = async () => {
     try {
       await setDoc(doc(db, "configs", "scoringWeights"), actionWeights, {
@@ -817,128 +777,68 @@ const ScoringMatches = () => {
                         </div>
                       )}
                     <div className="flex flex-wrap gap-2">
-                      {liveStatsList.map((stats) => {
-                        const medal = medalClassForScore(stats.primaryScore);
-                        const medalIcon =
-                          medal === "gold"
-                            ? "🥇"
-                            : medal === "silver"
-                            ? "🥈"
-                            : medal === "bronze"
-                            ? "🥉"
-                            : null;
-                        const medalClass =
-                          medal === "gold"
-                            ? "border-emerald-400 bg-emerald-50"
-                            : medal === "silver"
-                            ? "border-blue-400 bg-blue-50"
-                            : medal === "bronze"
-                            ? "border-amber-400 bg-amber-50"
-                            : "";
-                        return (
-                          <div
-                            key={stats.memberId}
-                            className={cn(
-                              "rounded border p-2 bg-white text-xs space-y-1 w-[48%] sm:w-[31%] lg:w-[23%]",
-                              medalClass
-                            )}
-                          >
-                            <div className="flex items-center gap-1 font-semibold truncate">
-                              {medalIcon && <span>{medalIcon}</span>}
-                              <span className="truncate">{stats.name}</span>
-                            </div>
-                            <div className="text-[11px] text-muted-foreground truncate">
-                              {stats.teamName || "Chưa rõ đội"}
-                            </div>
-                            <div className="flex flex-wrap gap-1 justify-start">
-                              {stats.goal > 0 && (
-                                <Badge className="bg-emerald-100 text-emerald-700">
-                                  {(labelMap.get("goal") || "Bàn thắng") + " " + stats.goal}
-                                </Badge>
-                              )}
-                              {stats.assist > 0 && (
-                                <Badge className="bg-blue-100 text-blue-700">
-                                  {(labelMap.get("assist") || "Kiến tạo") + " " + stats.assist}
-                                </Badge>
-                              )}
-                              {stats.save_gk > 0 && (
-                                <Badge className="bg-cyan-100 text-cyan-700">
-                                  {(labelMap.get("save_gk") || "Cản phá GK") + " " + stats.save_gk}
-                                </Badge>
-                              )}
-                              {stats.tackle > 0 && (
-                                <Badge className="bg-indigo-100 text-indigo-700">
-                                  {(labelMap.get("tackle") || "Tackle/Chặn") + " " + stats.tackle}
-                                </Badge>
-                              )}
-                              {stats.dribble > 0 && (
-                                <Badge className="bg-purple-100 text-purple-700">
-                                  {(labelMap.get("dribble") || "Qua người") + " " + stats.dribble}
-                                </Badge>
-                              )}
-                              {stats.yellow > 0 && (
-                                <Badge className="bg-amber-100 text-amber-800">
-                                  {(labelMap.get("yellow") || "Thẻ vàng") + " " + stats.yellow}
-                                </Badge>
-                              )}
-                              {stats.red > 0 && (
-                                <Badge className="bg-red-100 text-red-700">
-                                  {(labelMap.get("red") || "Thẻ đỏ") + " " + stats.red}
-                                </Badge>
-                              )}
-                              {stats.foul > 0 && (
-                                <Badge className="bg-slate-100 text-slate-700">
-                                  {(labelMap.get("foul") || "Phạm lỗi") + " " + stats.foul}
-                                </Badge>
-                              )}
-                              {stats.note > 0 && (
-                                <Badge variant="outline">
-                                  {(labelMap.get("note") || "Ghi chú") + " " + stats.note}
-                                </Badge>
-                              )}
-                            </div>
+                      {liveStatsList.map((stats) => (
+                        <div
+                          key={stats.memberId}
+                          className="rounded border p-2 bg-white text-xs space-y-1 w-[48%] sm:w-[31%] lg:w-[23%]"
+                        >
+                          <div className="flex items-center gap-1 font-semibold truncate">
+                            <span className="truncate">{stats.name}</span>
                           </div>
-                        );
-                      })}
+                          <div className="text-[11px] text-muted-foreground truncate">
+                            {stats.teamName || "Chưa rõ đội"}
+                          </div>
+                          <div className="flex flex-wrap gap-1 justify-start">
+                            {stats.goal > 0 && (
+                              <Badge className="bg-emerald-100 text-emerald-700">
+                                {(labelMap.get("goal") || "Bàn thắng") + " " + stats.goal}
+                              </Badge>
+                            )}
+                            {stats.assist > 0 && (
+                              <Badge className="bg-blue-100 text-blue-700">
+                                {(labelMap.get("assist") || "Kiến tạo") + " " + stats.assist}
+                              </Badge>
+                            )}
+                            {stats.save_gk > 0 && (
+                              <Badge className="bg-cyan-100 text-cyan-700">
+                                {(labelMap.get("save_gk") || "Cản phá GK") + " " + stats.save_gk}
+                              </Badge>
+                            )}
+                            {stats.tackle > 0 && (
+                              <Badge className="bg-indigo-100 text-indigo-700">
+                                {(labelMap.get("tackle") || "Tackle/Chặn") + " " + stats.tackle}
+                              </Badge>
+                            )}
+                            {stats.dribble > 0 && (
+                              <Badge className="bg-purple-100 text-purple-700">
+                                {(labelMap.get("dribble") || "Qua người") + " " + stats.dribble}
+                              </Badge>
+                            )}
+                            {stats.yellow > 0 && (
+                              <Badge className="bg-amber-100 text-amber-800">
+                                {(labelMap.get("yellow") || "Thẻ vàng") + " " + stats.yellow}
+                              </Badge>
+                            )}
+                            {stats.red > 0 && (
+                              <Badge className="bg-red-100 text-red-700">
+                                {(labelMap.get("red") || "Thẻ đỏ") + " " + stats.red}
+                              </Badge>
+                            )}
+                            {stats.foul > 0 && (
+                              <Badge className="bg-slate-100 text-slate-700">
+                                {(labelMap.get("foul") || "Phạm lỗi") + " " + stats.foul}
+                              </Badge>
+                            )}
+                            {stats.note > 0 && (
+                              <Badge variant="outline">
+                                {(labelMap.get("note") || "Ghi chú") + " " + stats.note}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                       </div>
                     </>
-                  )}
-                </div>
-
-                <div className="rounded-md border p-3 bg-white/70">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-2">
-                      <Trophy className="h-4 w-4 text-amber-500" />
-                      <div>
-                        <h4 className="font-semibold text-sm">
-                          MVP (tổng điểm)
-                        </h4>
-                        <p className="text-xs text-muted-foreground">
-                          Peer + Admin; vẫn hiện đồng MVP khi bằng điểm.
-                        </p>
-                      </div>
-                    </div>
-                    {mvpCandidates.length > 1 && (
-                      <Badge variant="outline" className="border-amber-500">
-                        Đồng MVP
-                      </Badge>
-                    )}
-                  </div>
-                  {mvpCandidates.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {mvpCandidates.map((mvp) => (
-                        <Badge
-                          key={mvp.memberId}
-                          className="bg-amber-100 text-amber-800 border-amber-200"
-                        >
-                          {mvp.name} · {mvp.total.toFixed(2)} / 10
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Chưa có đủ điểm để xác định MVP.
-                    </p>
                   )}
                 </div>
 

@@ -87,6 +87,7 @@ import { db } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
 import { aggregateLiveStats, AggregatedStat } from "@/lib/liveStats";
 import { useActionConfigs } from "@/hooks/useActionConfigs";
+import { postApiJson } from "@/lib/api";
 
 interface Match {
   id: string;
@@ -609,6 +610,15 @@ const Matches = () => {
     if (!matchIdToDelete) return;
     setIsDeleting(true);
     try {
+      const deletingMatch = matches.find((m) => m.id === matchIdToDelete);
+      // Notify members nếu đang ở trạng thái điểm danh
+      if (deletingMatch?.status === "PENDING") {
+        postApiJson("/notify/attendance-deleted", {
+          matchId: matchIdToDelete,
+        }).catch((err) =>
+          console.error("Failed to send delete attendance notification", err)
+        );
+      }
       const batch = writeBatch(db);
       const sharesSnapshot = await getDocs(
         collection(db, "matches", matchIdToDelete, "shares")

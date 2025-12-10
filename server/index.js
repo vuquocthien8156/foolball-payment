@@ -34,6 +34,91 @@ app.use(express.json());
 
 const apiRoutes = express.Router();
 
+const FieldValue = admin.firestore.FieldValue;
+
+const chunkArray = (arr, size) =>
+  arr.reduce((acc, _, idx) => {
+    if (idx % size === 0) acc.push(arr.slice(idx, idx + size));
+    return acc;
+  }, []);
+
+const collectAllTokens = async () => {
+  const db = admin.firestore();
+  const tokens = new Set();
+
+  const tokenSnap = await db.collection("notificationTokens").get();
+  tokenSnap.forEach((doc) => {
+    const data = doc.data();
+    const token = data.token || doc.id;
+    if (token) tokens.add(token);
+  });
+
+  const membersSnap = await db.collection("members").get();
+  membersSnap.forEach((doc) => {
+    const data = doc.data();
+    if (data.fcmToken) tokens.add(data.fcmToken);
+  });
+
+  return Array.from(tokens);
+};
+
+const cleanUpInvalidTokens = async (invalidTokens = []) => {
+  if (invalidTokens.length === 0) return;
+  const db = admin.firestore();
+  const batch = db.batch();
+  invalidTokens.forEach((token) => {
+    batch.delete(db.collection("notificationTokens").doc(token));
+  });
+
+  for (const chunk of chunkArray(invalidTokens, 10)) {
+    const snap = await db
+      .collection("members")
+      .where("fcmToken", "in", chunk)
+      .get();
+    snap.forEach((doc) => {
+      batch.update(doc.ref, {
+        fcmToken: null,
+        fcmTokenUpdatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
+  await batch.commit();
+};
+
+const sendPushToTokens = async (tokens, payload) => {
+  const messaging = admin.messaging();
+  let successCount = 0;
+  let failureCount = 0;
+  const invalidTokens = [];
+
+  for (const chunk of chunkArray(tokens, 500)) {
+    const response = await messaging.sendEachForMulticast({
+      tokens: chunk,
+      ...payload,
+    });
+    successCount += response.successCount;
+    failureCount += response.failureCount;
+    response.responses.forEach((resp, idx) => {
+      if (!resp.success) {
+        const code = resp.error?.code || "";
+        if (
+          code === "messaging/registration-token-not-registered" ||
+          code === "messaging/invalid-registration-token"
+        ) {
+          invalidTokens.push(chunk[idx]);
+        }
+      }
+    });
+  }
+
+  if (invalidTokens.length > 0) {
+    await cleanUpInvalidTokens(invalidTokens);
+  }
+
+  return { successCount, failureCount, invalidTokens: invalidTokens.length };
+};
+
 apiRoutes.post("/create-payment-link", async (req, res) => {
   const { shareIds, memberId, ratings } = req.body;
 
@@ -315,6 +400,101 @@ apiRoutes.post("/send-match-notification", async (req, res) => {
     });
   } catch (error) {
     console.error("Error sending notification:", error);
+    res.status(500).json({ error: "Failed to send notification" });
+  }
+});
+
+apiRoutes.post("/notify/attendance-created", async (req, res) => {
+  const { matchId } = req.body;
+  if (!matchId) {
+    return res.status(400).json({ error: "matchId is required" });
+  }
+
+  try {
+    const db = admin.firestore();
+    const matchSnap = await db.collection("matches").doc(matchId).get();
+    if (!matchSnap.exists) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+    const match = matchSnap.data();
+    const dateLabel =
+      match.date?.toDate?.().toLocaleDateString("vi-VN") || "trận mới";
+
+    const tokens = await collectAllTokens();
+    if (tokens.length === 0) {
+      return res.status(200).json({ message: "No subscribers" });
+    }
+
+    const result = await sendPushToTokens(tokens, {
+      notification: {
+        title: "Đã mở điểm danh!",
+        body: `Trận ngày ${dateLabel} đã mở điểm danh. Vào ứng dụng để xác nhận.`,
+      },
+      data: {
+        matchId,
+        type: "attendance_created",
+      },
+    });
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error("Error sending attendance-created notification:", error);
+    res.status(500).json({ error: "Failed to send notification" });
+  }
+});
+
+apiRoutes.post("/notify/attendance-deleted", async (req, res) => {
+  const { matchId } = req.body;
+  if (!matchId) {
+    return res.status(400).json({ error: "matchId is required" });
+  }
+  try {
+    const db = admin.firestore();
+    const matchSnap = await db.collection("matches").doc(matchId).get();
+    const match = matchSnap.exists ? matchSnap.data() : null;
+    const dateLabel =
+      match?.date?.toDate?.().toLocaleDateString("vi-VN") || "trận điểm danh";
+
+    const tokens = await collectAllTokens();
+    if (tokens.length === 0) {
+      return res.status(200).json({ message: "No subscribers" });
+    }
+    const result = await sendPushToTokens(tokens, {
+      notification: {
+        title: "Trận điểm danh đã hủy",
+        body: `Điểm danh trận ${dateLabel} đã bị hủy. Vui lòng chờ thông báo mới.`,
+      },
+      data: {
+        matchId,
+        type: "attendance_deleted",
+      },
+    });
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error("Error sending attendance-deleted notification:", error);
+    res.status(500).json({ error: "Failed to send notification" });
+  }
+});
+
+apiRoutes.post("/notify/manual", async (req, res) => {
+  const { title, body } = req.body;
+  if (!title || !body) {
+    return res.status(400).json({ error: "title and body are required" });
+  }
+  try {
+    const tokens = await collectAllTokens();
+    if (tokens.length === 0) {
+      return res.status(200).json({ message: "No subscribers" });
+    }
+    const result = await sendPushToTokens(tokens, {
+      notification: {
+        title,
+        body,
+      },
+      data: { type: "manual_broadcast" },
+    });
+    res.status(200).json({ success: true, ...result });
+  } catch (error) {
+    console.error("Error sending manual notification:", error);
     res.status(500).json({ error: "Failed to send notification" });
   }
 });

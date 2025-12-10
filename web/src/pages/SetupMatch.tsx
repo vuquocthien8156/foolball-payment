@@ -40,6 +40,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { postApiJson } from "@/lib/api";
 
 // Interfaces
 interface Member {
@@ -527,6 +528,11 @@ const SetupMatch = () => {
         description:
           "Đã tạo trận điểm danh. Link điểm danh chung đã được sao chép.",
       });
+      // Fire push notification cho members
+      postApiJson("/notify/attendance-created", { matchId: matchRef.id }).catch(
+        (error) =>
+          console.error("Failed to send attendance created notification", error)
+      );
       navigate(`/admin/setup/${matchRef.id}`);
     } catch (error) {
       toast({

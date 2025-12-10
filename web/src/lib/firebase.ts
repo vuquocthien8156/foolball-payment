@@ -27,6 +27,10 @@ const messaging = getMessaging(app);
 // Function to request permission and get token
 export const requestNotificationPermission = async () => {
   try {
+    if (typeof Notification === "undefined") {
+      console.warn("Notifications are not supported in this browser.");
+      return null;
+    }
     const permission = await Notification.requestPermission();
     if (permission === "granted") {
       console.log("Notification permission granted.");

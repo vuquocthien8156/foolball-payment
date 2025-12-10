@@ -73,7 +73,12 @@ import {
   addDoc,
   serverTimestamp,
 } from "firebase/firestore";
-import { db, requestNotificationPermission } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
+import {
+  ensureNotificationToken,
+  fetchStoredMemberToken,
+  removeNotificationToken,
+} from "@/lib/notifications";
 import { usePWAInstall } from "@/contexts/PWAInstallContext";
 import {
   Bar,
@@ -172,6 +177,7 @@ const Pay = () => {
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
   const [isNotificationEnabled, setIsNotificationEnabled] = useState(false);
   const [isUpdatingNotification, setIsUpdatingNotification] = useState(false);
+  const [currentToken, setCurrentToken] = useState<string | null>(null);
   const [topPayers, setTopPayers] = useState<TopPayer[]>([]);
   const [isLoadingStats, setIsLoadingStats] = useState(true);
   const [detailedTeamShares, setDetailedTeamShares] = useState<TeamShareInfo[]>(
@@ -304,19 +310,17 @@ const Pay = () => {
     const checkNotificationStatus = async () => {
       if (!selectedMemberId) {
         setIsNotificationEnabled(false);
+        setCurrentToken(null);
         return;
       }
       try {
-        const memberDocRef = doc(db, "members", selectedMemberId);
-        const memberDoc = await getDoc(memberDocRef);
-        if (memberDoc.exists() && memberDoc.data().fcmToken) {
-          setIsNotificationEnabled(true);
-        } else {
-          setIsNotificationEnabled(false);
-        }
+        const token = await fetchStoredMemberToken(selectedMemberId);
+        setCurrentToken(token);
+        setIsNotificationEnabled(!!token);
       } catch (error) {
         console.error("Error checking notification status:", error);
         setIsNotificationEnabled(false);
+        setCurrentToken(null);
       }
     };
     if (selectedMemberId) {
@@ -809,13 +813,12 @@ const Pay = () => {
     if (!selectedMemberId) return;
 
     setIsUpdatingNotification(true);
-    const memberDocRef = doc(db, "members", selectedMemberId);
 
     try {
       if (enabled) {
-        const token = await requestNotificationPermission();
+        const token = await ensureNotificationToken(selectedMemberId);
         if (token) {
-          await updateDoc(memberDocRef, { fcmToken: token });
+          setCurrentToken(token);
           setIsNotificationEnabled(true);
           toast({
             title: "Thành công",
@@ -832,8 +835,9 @@ const Pay = () => {
           setIsNotificationEnabled(false); // Keep switch off
         }
       } else {
-        await updateDoc(memberDocRef, { fcmToken: null });
+        await removeNotificationToken(currentToken, selectedMemberId);
         setIsNotificationEnabled(false);
+        setCurrentToken(null);
         toast({
           title: "Đã tắt thông báo",
           description: "Bạn sẽ không nhận được thông báo đẩy nữa.",

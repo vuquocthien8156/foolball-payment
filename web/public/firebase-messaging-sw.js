@@ -9,13 +9,13 @@ importScripts(
 // Initialize the Firebase app in the service worker
 // "Default" Firebase configuration (prevents errors)
 const firebaseConfig = {
-  apiKey: true,
-  authDomain: true,
-  projectId: true,
-  storageBucket: true,
-  messagingSenderId: true,
-  appId: true,
-  measurementId: true,
+  apiKey: "AIzaSyDn5uzZ3BgewpBcv5VHXXNm7RNKe1Pi3Yg",
+  authDomain: "foolball-payment.firebaseapp.com",
+  projectId: "foolball-payment",
+  storageBucket: "foolball-payment.appspot.com",
+  messagingSenderId: "398658240449",
+  appId: "1:398658240449:web:da59bcb3a2f7c1db2c3940",
+  measurementId: "G-TC5GWMCLL9",
 };
 
 firebase.initializeApp(firebaseConfig);

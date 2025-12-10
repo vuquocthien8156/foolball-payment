@@ -4,6 +4,10 @@ import { DollarSign, Users, TrendingUp, Loader2, Trophy, Star } from "lucide-rea
 import { collection, query, onSnapshot, getDocs, Timestamp, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/hooks/use-toast";
+import { postApiJson } from "@/lib/api";
 
 type TimeFilter = "all" | "week" | "month";
 
@@ -19,6 +23,9 @@ const Dashboard = () => {
   const [stats, setStats] = useState<StatData>({ topPayers: [], topRated: [], topMvps: [] });
   const [isLoading, setIsLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
+  const [notifyTitle, setNotifyTitle] = useState("Thông báo từ admin");
+  const [notifyBody, setNotifyBody] = useState("");
+  const [isSendingNotify, setIsSendingNotify] = useState(false);
 
   useEffect(() => {
       const fetchStats = async () => {
@@ -137,6 +144,38 @@ const Dashboard = () => {
     return () => { promise.then(unsub => unsub && unsub()) };
   }, [timeFilter]);
 
+  const handleSendBroadcast = async () => {
+    if (!notifyBody.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Thiếu nội dung",
+        description: "Vui lòng nhập nội dung thông báo.",
+      });
+      return;
+    }
+    setIsSendingNotify(true);
+    try {
+      await postApiJson("/notify/manual", {
+        title: notifyTitle.trim() || "Thông báo",
+        body: notifyBody.trim(),
+      });
+      toast({
+        title: "Đã gửi thông báo",
+        description: "Thông báo đã được push tới tất cả thành viên có đăng ký.",
+      });
+      setNotifyBody("");
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi gửi thông báo",
+        description:
+          error instanceof Error ? error.message : "Không thể gửi thông báo.",
+      });
+    } finally {
+      setIsSendingNotify(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -161,6 +200,49 @@ const Dashboard = () => {
             <LeaderboardCard title="Top 3 Trả Nhiều Nhất" data={stats.topPayers} icon={DollarSign} format={(v) => `${v.toLocaleString()} VND`} valueKey="total" />
             <LeaderboardCard title="Top 3 MVP (điểm cao)" data={stats.topRated} icon={Star} format={(v) => v.toFixed(2)} valueKey="avg" />
             <LeaderboardCard title="Top 3 Ấn tượng (vote)" data={stats.topMvps} icon={Trophy} format={(v) => `${v} phiếu`} valueKey="count" />
+        </div>
+
+        <div className="mt-8 grid gap-6 md:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="w-5 h-5" />
+                Gửi thông báo thủ công
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Bắn notify tới tất cả members đã bật push (web/PWA).
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Tiêu đề</label>
+                <Input
+                  value={notifyTitle}
+                  onChange={(e) => setNotifyTitle(e.target.value)}
+                  placeholder="Thông báo từ admin"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Nội dung</label>
+                <Textarea
+                  value={notifyBody}
+                  onChange={(e) => setNotifyBody(e.target.value)}
+                  rows={4}
+                  placeholder="Nhập thông điệp muốn gửi..."
+                />
+              </div>
+              <Button onClick={handleSendBroadcast} disabled={isSendingNotify}>
+                {isSendingNotify ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Đang gửi...
+                  </>
+                ) : (
+                  "Gửi thông báo"
+                )}
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>
