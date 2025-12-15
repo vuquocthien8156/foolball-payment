@@ -82,6 +82,7 @@ import {
   writeBatch,
   Timestamp,
   deleteField,
+  deleteDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
@@ -145,6 +146,12 @@ interface MvpData {
   mvpName: string;
   voteCount: number;
   votedBy: string[];
+}
+
+interface AttendanceRecord {
+  timestamp: Timestamp;
+  memberName: string;
+  userAgent: string;
 }
 
 interface MatchListItemProps {
@@ -344,6 +351,13 @@ const Matches = () => {
   );
   const [isLoadingLiveStats, setIsLoadingLiveStats] = useState(false);
   const [isLiveStatsDialogOpen, setIsLiveStatsDialogOpen] = useState(false);
+
+  // Attendance state
+  const [attendance, setAttendance] = useState<Map<string, AttendanceRecord>>(
+    new Map()
+  );
+  const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
+  const [isAttendanceDialogOpen, setIsAttendanceDialogOpen] = useState(false);
   const { labelMap, weights } = useActionConfigs();
   const labelFor = useCallback(
     (key: string) =>
@@ -606,6 +620,67 @@ const Matches = () => {
     return () => unsubscribeLive();
   }, [selectedMatchId, weights]);
 
+  // Attendance subscription
+  useEffect(() => {
+    if (!selectedMatchId) {
+      setAttendance(new Map());
+      return;
+    }
+
+    setIsLoadingAttendance(true);
+    const attendanceQuery = query(
+      collection(db, "matches", selectedMatchId, "attendance"),
+      orderBy("timestamp", "desc")
+    );
+
+    const unsubscribe = onSnapshot(
+      attendanceQuery,
+      (snapshot) => {
+        const newAttendance = new Map<string, AttendanceRecord>();
+        snapshot.forEach((doc) => {
+          newAttendance.set(doc.id, doc.data() as AttendanceRecord);
+        });
+        setAttendance(newAttendance);
+        setIsLoadingAttendance(false);
+      },
+      (error) => {
+        console.error("Error fetching attendance:", error);
+        setIsLoadingAttendance(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [selectedMatchId]);
+
+  const handleDeleteAttendance = async (
+    memberId: string,
+    memberName: string
+  ) => {
+    if (!selectedMatchId) return;
+
+    // Simple confirm
+    if (!window.confirm(`Bạn có chắc muốn hủy điểm danh cho ${memberName}?`)) {
+      return;
+    }
+
+    try {
+      await deleteDoc(
+        doc(db, "matches", selectedMatchId, "attendance", memberId)
+      );
+      toast({
+        title: "Thành công",
+        description: `Đã hủy điểm danh cho ${memberName}.`,
+      });
+    } catch (error) {
+      console.error("Error deleting attendance:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể hủy điểm danh.",
+      });
+    }
+  };
+
   const handleDeleteMatch = async () => {
     if (!matchIdToDelete) return;
     setIsDeleting(true);
@@ -786,8 +861,7 @@ const Matches = () => {
     const topScore = sorted[0][1].finalScore;
     return sorted
       .filter(
-        ([, ratingData]) =>
-          Math.abs(ratingData.finalScore - topScore) < 1e-9
+        ([, ratingData]) => Math.abs(ratingData.finalScore - topScore) < 1e-9
       )
       .map(([memberId, ratingData]) => {
         const shareInfo = shares.find((s) => s.memberId === memberId);
@@ -1039,6 +1113,81 @@ const Matches = () => {
             ) : (
               <div>
                 <div className="flex items-center gap-2 flex-wrap mb-4">
+                  <Dialog
+                    open={isAttendanceDialogOpen}
+                    onOpenChange={setIsAttendanceDialogOpen}
+                  >
+                    <DialogTrigger asChild>
+                      <Button variant="outline" className="border-dashed">
+                        <Users className="mr-2 h-4 w-4" />
+                        Quản lý điểm danh
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>
+                          Danh sách điểm danh ({attendance.size})
+                        </DialogTitle>
+                      </DialogHeader>
+                      <div className="max-h-[60vh] overflow-y-auto">
+                        {isLoadingAttendance ? (
+                          <div className="flex justify-center p-4">
+                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : attendance.size === 0 ? (
+                          <div className="text-center p-4 text-muted-foreground">
+                            Chưa có ai điểm danh.
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Thành viên</TableHead>
+                                <TableHead>Thời gian</TableHead>
+                                <TableHead className="w-[50px]"></TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {Array.from(attendance.entries()).map(
+                                ([memberId, record]) => (
+                                  <TableRow key={memberId}>
+                                    <TableCell className="font-medium">
+                                      {record.memberName}
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground">
+                                      {record.timestamp?.seconds
+                                        ? new Date(
+                                            record.timestamp.seconds * 1000
+                                          ).toLocaleTimeString("vi-VN", {
+                                            hour: "2-digit",
+                                            minute: "2-digit",
+                                          })
+                                        : "--:--"}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                        onClick={() =>
+                                          handleDeleteAttendance(
+                                            memberId,
+                                            record.memberName
+                                          )
+                                        }
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                )
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
                   {!isFullyPaid && (
                     <>
                       {selectedMatch?.status !== "PUBLISHED" ? (
@@ -1323,7 +1472,9 @@ const Matches = () => {
                                                           key={i}
                                                           className="flex justify-between"
                                                         >
-                                                          <span>{d.ratedBy}</span>
+                                                          <span>
+                                                            {d.ratedBy}
+                                                          </span>
                                                           <strong>
                                                             {d.score} điểm
                                                           </strong>
@@ -1671,8 +1822,8 @@ const Matches = () => {
                                   </div>
                                   <div className="space-y-1 text-sm text-white/70">
                                     <p>
-                                      Peer: {topScorers[0].peerScore.toFixed(2)} / 5
-                                      {" • "}
+                                      Peer: {topScorers[0].peerScore.toFixed(2)}{" "}
+                                      / 5{" • "}
                                       {topScorers[0].hasAdminScore
                                         ? `Admin: ${topScorers[0].adminScore.toFixed(
                                             2
@@ -1680,7 +1831,8 @@ const Matches = () => {
                                         : "Admin: Chưa chấm"}
                                     </p>
                                     <p>
-                                      {topScorers[0].ratingCount} lượt đánh giá peer
+                                      {topScorers[0].ratingCount} lượt đánh giá
+                                      peer
                                     </p>
                                   </div>
                                 </div>
