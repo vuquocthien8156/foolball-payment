@@ -116,6 +116,28 @@ const Attendance = () => {
     [members]
   );
 
+  const { closingTime, isAttendanceClosed } = useMemo(() => {
+    if (!match) return { closingTime: null, isAttendanceClosed: false };
+
+    const matchDate = new Date(match.date.seconds * 1000);
+    // Start of the match day (00:00)
+    const matchDayStart = new Date(matchDate);
+    matchDayStart.setHours(0, 0, 0, 0);
+
+    // Closing time: 12 hours before start of match day = previous day 12:00 PM
+    // This is equal to matchDayStart minus 12 hours.
+    const closingDate = new Date(matchDayStart.getTime() - 12 * 60 * 60 * 1000);
+
+    const now = new Date();
+    // For testing: Uncomment logically if needed or rely on system time
+    // const now = new Date("2025-12-19T13:00:00");
+
+    return {
+      closingTime: closingDate,
+      isAttendanceClosed: now > closingDate,
+    };
+  }, [match]);
+
   useEffect(() => {
     if (!matchId) {
       setAttendanceHistory([]); // Clear history if no match
@@ -514,6 +536,35 @@ const Attendance = () => {
               {new Date(match.date.seconds * 1000).toLocaleDateString("vi-VN")}
             </span>
           </div>
+
+          <div className="mt-4 flex flex-col gap-2 items-center">
+            {isAttendanceClosed ? (
+              <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg border border-destructive/20 max-w-lg mx-auto">
+                <p className="font-semibold">
+                  Cổng điểm danh đã đóng để chốt số lượng.
+                </p>
+                <p className="text-sm mt-1 opacity-90">
+                  Vui lòng liên hệ với admin hoặc người bạn quen biết của bạn để
+                  biết thêm thông tin.
+                </p>
+              </div>
+            ) : (
+              closingTime && (
+                <p className="text-muted-foreground">
+                  Cổng điểm danh sẽ đóng vào lúc:{" "}
+                  <span className="font-semibold text-foreground">
+                    {closingTime.toLocaleString("vi-VN", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      day: "2-digit",
+                      month: "2-digit",
+                    })}
+                  </span>
+                </p>
+              )
+            )}
+          </div>
+
           <p className="text-xl font-bold mt-4">
             Số người đã điểm danh: {attendance.size}
           </p>
@@ -624,7 +675,7 @@ const Attendance = () => {
                     onClick={() =>
                       handleAttendanceToggle(member.id, member.name)
                     }
-                    disabled={isProcessing || isAttending}
+                    disabled={isProcessing || isAttending || isAttendanceClosed}
                     className="w-full mt-auto"
                   >
                     {isProcessing ? (
@@ -634,6 +685,8 @@ const Attendance = () => {
                         <Check className="h-4 w-4 mr-2" />
                         Đã điểm danh
                       </>
+                    ) : isAttendanceClosed ? (
+                      "Đã đóng đơn"
                     ) : (
                       "Điểm danh"
                     )}
