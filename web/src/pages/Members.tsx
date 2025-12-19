@@ -79,6 +79,7 @@ interface Member {
   loginEmail?: string;
   loginRole?: string;
   adminTabs?: string[];
+  autoAttendance?: boolean;
 }
 
 interface MemberStats {
@@ -236,6 +237,7 @@ const Members = () => {
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberNickname, setNewMemberNickname] = useState("");
   const [newMemberIsExempt, setNewMemberIsExempt] = useState(false);
+  const [newMemberAutoAttendance, setNewMemberAutoAttendance] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [memberStats, setMemberStats] = useState<Map<string, MemberStats>>(
@@ -388,6 +390,7 @@ const Members = () => {
         name: newMemberName,
         nickname: newMemberNickname || "",
         isExemptFromPayment: newMemberIsExempt,
+        autoAttendance: newMemberAutoAttendance,
         createdAt: serverTimestamp(),
       });
       toast({
@@ -397,6 +400,7 @@ const Members = () => {
       setNewMemberName("");
       setNewMemberNickname("");
       setNewMemberIsExempt(false);
+      setNewMemberAutoAttendance(false);
       fetchMembersAndStats(); // Refresh the list
     } catch (error) {
       console.error("Error adding member: ", error);
@@ -665,18 +669,33 @@ const Members = () => {
                 />
               </div>
               <div className="flex flex-col sm:flex-row gap-4 justify-between items-center">
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="exempt-payment-new"
-                    checked={newMemberIsExempt}
-                    onCheckedChange={setNewMemberIsExempt}
-                  />
-                  <Label
-                    htmlFor="exempt-payment-new"
-                    className="whitespace-nowrap"
-                  >
-                    Miễn chia tiền
-                  </Label>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="exempt-payment-new"
+                      checked={newMemberIsExempt}
+                      onCheckedChange={setNewMemberIsExempt}
+                    />
+                    <Label
+                      htmlFor="exempt-payment-new"
+                      className="whitespace-nowrap"
+                    >
+                      Miễn chia tiền
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="auto-attendance-new"
+                      checked={newMemberAutoAttendance}
+                      onCheckedChange={setNewMemberAutoAttendance}
+                    />
+                    <Label
+                      htmlFor="auto-attendance-new"
+                      className="whitespace-nowrap"
+                    >
+                      Auto Điểm danh
+                    </Label>
+                  </div>
                 </div>
                 <Button
                   onClick={handleAddMember}
@@ -748,6 +767,14 @@ const Members = () => {
                             {member.nickname && (
                               <Badge variant="secondary" className="mt-1">
                                 {member.nickname}
+                              </Badge>
+                            )}
+                            {member.autoAttendance && (
+                              <Badge
+                                variant="outline"
+                                className="mt-1 ml-2 border-blue-500 text-blue-500"
+                              >
+                                Auto
                               </Badge>
                             )}
                             {member.loginEnabled && (
@@ -904,6 +931,19 @@ const Members = () => {
                   />
                   <Label htmlFor="edit-exempt">Miễn chia tiền</Label>
                 </div>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="edit-auto-attendance"
+                    checked={!!editingMember.autoAttendance}
+                    onCheckedChange={(checked) =>
+                      setEditingMember({
+                        ...editingMember,
+                        autoAttendance: checked,
+                      })
+                    }
+                  />
+                  <Label htmlFor="edit-auto-attendance">Auto Điểm danh</Label>
+                </div>
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="flex items-center space-x-2">
                     <Switch
@@ -1044,6 +1084,7 @@ const Members = () => {
                       name: editingMember.name,
                       nickname: editingMember.nickname,
                       isExemptFromPayment: editingMember.isExemptFromPayment,
+                      autoAttendance: editingMember.autoAttendance,
                       loginEnabled: editingMember.loginEnabled,
                       authUid: editingMember.authUid,
                       loginEmail: editingMember.loginEmail,

@@ -177,7 +177,9 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
     const description = `Thanh toan ${orderCode}`;
 
     // Create a payment request document to store context
-    const paymentRequestRef = db.collection("paymentRequests").doc(String(orderCode));
+    const paymentRequestRef = db
+      .collection("paymentRequests")
+      .doc(String(orderCode));
     await paymentRequestRef.set({
       orderCode,
       shareIds: fetchedShareIds,
@@ -227,11 +229,15 @@ const payosWebhookHandler = async (req, res) => {
       // Start a transaction to ensure atomicity
       await db.runTransaction(async (transaction) => {
         // 1. Get the payment request to access ratings and shareIds
-        const paymentRequestRef = db.collection("paymentRequests").doc(String(orderCode));
+        const paymentRequestRef = db
+          .collection("paymentRequests")
+          .doc(String(orderCode));
         const paymentRequestSnap = await transaction.get(paymentRequestRef);
 
         if (!paymentRequestSnap.exists) {
-          console.error(`Webhook: No payment request found for orderCode ${orderCode}`);
+          console.error(
+            `Webhook: No payment request found for orderCode ${orderCode}`
+          );
           // Don't throw, just log and exit, as PayOS might retry.
           return;
         }
@@ -249,11 +255,19 @@ const payosWebhookHandler = async (req, res) => {
         }
 
         // 3. Process ratings if they exist
-        if (paymentRequestData.ratings && Array.isArray(paymentRequestData.ratings)) {
+        if (
+          paymentRequestData.ratings &&
+          Array.isArray(paymentRequestData.ratings)
+        ) {
           for (const rating of paymentRequestData.ratings) {
-            const { matchId, ratedByMemberId, playerRatings, mvpPlayerId } = rating;
+            const { matchId, ratedByMemberId, playerRatings, mvpPlayerId } =
+              rating;
             if (matchId && ratedByMemberId && playerRatings && mvpPlayerId) {
-              const ratingRef = db.collection("matches").doc(matchId).collection("ratings").doc();
+              const ratingRef = db
+                .collection("matches")
+                .doc(matchId)
+                .collection("ratings")
+                .doc();
               transaction.set(ratingRef, {
                 ratedByMemberId,
                 playerRatings,
@@ -264,11 +278,13 @@ const payosWebhookHandler = async (req, res) => {
             }
           }
         }
-        
+
         // 4. Update share statuses and create notifications
         const memberId = paymentRequestData.memberId;
         const memberDoc = await db.collection("members").doc(memberId).get();
-        const memberName = memberDoc.exists ? memberDoc.data().name : "Một thành viên";
+        const memberName = memberDoc.exists
+          ? memberDoc.data().name
+          : "Một thành viên";
 
         sharesSnapshot.docs.forEach((doc) => {
           const shareData = doc.data();
@@ -299,11 +315,13 @@ const payosWebhookHandler = async (req, res) => {
         // 5. Update the payment request status
         transaction.update(paymentRequestRef, {
           status: "PAID",
-          paidAt: admin.firestore.FieldValue.serverTimestamp()
+          paidAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       });
 
-      console.log(`Successfully processed payment and ratings for orderCode: ${orderCode}`);
+      console.log(
+        `Successfully processed payment and ratings for orderCode: ${orderCode}`
+      );
     } else {
       console.log("Webhook received for non-successful payment:", webhookData);
     }
@@ -419,6 +437,44 @@ apiRoutes.post("/notify/attendance-created", async (req, res) => {
     const match = matchSnap.data();
     const dateLabel =
       match.date?.toDate?.().toLocaleDateString("vi-VN") || "trận mới";
+
+    // --- Auto Attendance Logic ---
+    const autoMembersQuery = db
+      .collection("members")
+      .where("autoAttendance", "==", true);
+    const autoMembersSnap = await autoMembersQuery.get();
+
+    if (!autoMembersSnap.empty) {
+      const batch = db.batch();
+      const attendanceCollectionRef = db
+        .collection("matches")
+        .doc(matchId)
+        .collection("attendance");
+
+      autoMembersSnap.forEach((doc) => {
+        const memberData = doc.data();
+        const attendanceRef = attendanceCollectionRef.doc(doc.id);
+        // Use set with merge: true or create helper to avoid overwriting timestamp if already exists?
+        // Requirements say "auto attendance", implying they haven't attended yet.
+        // We can just set it. If they already attended manually (unlikely if this is "created"), it's fine.
+        // We set timestamp to now.
+        batch.set(
+          attendanceRef,
+          {
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            memberName: memberData.name,
+            userAgent: "Auto Attendance (System)",
+          },
+          { merge: true }
+        ); // merge true ensures we don't wipe other fields if any exist in future
+      });
+
+      await batch.commit();
+      console.log(
+        `Auto-attended ${autoMembersSnap.size} members for match ${matchId}`
+      );
+    }
+    // -----------------------------
 
     const tokens = await collectAllTokens();
     if (tokens.length === 0) {

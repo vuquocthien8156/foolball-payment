@@ -47,6 +47,7 @@ import {
   where,
   limit,
   onSnapshot,
+  updateDoc,
 } from "firebase/firestore";
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
@@ -58,6 +59,7 @@ interface Member {
   id: string;
   name: string;
   nickname?: string;
+  autoAttendance?: boolean;
 }
 
 interface Match {
@@ -645,18 +647,50 @@ const Attendance = () => {
                     : "bg-card"
                 }`}
               >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-1 right-1 h-7 w-7"
-                  onClick={() => handlePinToggle(member.id)}
-                >
-                  {isPinned ? (
-                    <PinOff className="h-4 w-4 text-blue-500" />
-                  ) : (
-                    <Pin className="h-4 w-4 text-muted-foreground" />
-                  )}
-                </Button>
+                <div className="absolute top-1 right-1 flex gap-1">
+                  {/* Auto Attendance Toggle */}
+                  <div
+                    className="p-1 cursor-pointer"
+                    title={
+                      member.autoAttendance
+                        ? "Tắt tự động điểm danh"
+                        : "Bật tự động điểm danh"
+                    }
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const memberRef = doc(db, "members", member.id);
+                      await updateDoc(memberRef, {
+                        autoAttendance: !member.autoAttendance,
+                      });
+                      // Optimistic update or wait for listener?
+                      // Members list in Attendance.tsx is fetched once and then not real-time subscribed for updates usually?
+                      // Actually line 184 uses getDocs, so it is NOT real-time.
+                      // We should locally update state or refetch. refetch is cleaner.
+                      fetchMatchAndMembers();
+                    }}
+                  >
+                    <div
+                      className={`w-3 h-3 rounded-full border ${
+                        member.autoAttendance
+                          ? "bg-blue-500 border-blue-500"
+                          : "bg-transparent border-gray-300"
+                      }`}
+                    />
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => handlePinToggle(member.id)}
+                  >
+                    {isPinned ? (
+                      <PinOff className="h-4 w-4 text-blue-500" />
+                    ) : (
+                      <Pin className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </Button>
+                </div>
                 <CardContent className="p-4 flex flex-col items-center text-center h-full">
                   <div className="flex-grow pt-4">
                     <p className="font-bold text-foreground text-lg leading-tight">
