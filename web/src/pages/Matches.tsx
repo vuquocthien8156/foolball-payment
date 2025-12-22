@@ -83,6 +83,8 @@ import {
   Timestamp,
   deleteField,
   deleteDoc,
+  setDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
@@ -652,6 +654,36 @@ const Matches = () => {
     return () => unsubscribe();
   }, [selectedMatchId]);
 
+  const [manualAddMemberId, setManualAddMemberId] = useState<string>("");
+
+  const handleAddAttendance = async () => {
+    if (!selectedMatchId || !manualAddMemberId) return;
+
+    try {
+      const memberName = members.get(manualAddMemberId) || "Unknown";
+      await setDoc(
+        doc(db, "matches", selectedMatchId, "attendance", manualAddMemberId),
+        {
+          timestamp: serverTimestamp(),
+          memberName: memberName,
+          userAgent: "Admin Manual Add",
+        }
+      );
+      toast({
+        title: "Thành công",
+        description: `Đã thêm điểm danh cho ${memberName}.`,
+      });
+      setManualAddMemberId("");
+    } catch (error) {
+      console.error("Error adding attendance:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể thêm điểm danh.",
+      });
+    }
+  };
+
   const handleDeleteAttendance = async (
     memberId: string,
     memberName: string
@@ -1139,51 +1171,79 @@ const Matches = () => {
                             Chưa có ai điểm danh.
                           </div>
                         ) : (
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Thành viên</TableHead>
-                                <TableHead>Thời gian</TableHead>
-                                <TableHead className="w-[50px]"></TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {Array.from(attendance.entries()).map(
-                                ([memberId, record]) => (
-                                  <TableRow key={memberId}>
-                                    <TableCell className="font-medium">
-                                      {record.memberName}
-                                    </TableCell>
-                                    <TableCell className="text-sm text-muted-foreground">
-                                      {record.timestamp?.seconds
-                                        ? new Date(
-                                            record.timestamp.seconds * 1000
-                                          ).toLocaleTimeString("vi-VN", {
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                          })
-                                        : "--:--"}
-                                    </TableCell>
-                                    <TableCell>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                        onClick={() =>
-                                          handleDeleteAttendance(
-                                            memberId,
-                                            record.memberName
-                                          )
-                                        }
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
-                                    </TableCell>
-                                  </TableRow>
-                                )
-                              )}
-                            </TableBody>
-                          </Table>
+                          <>
+                            <div className="flex gap-2 mb-4">
+                              <Select
+                                value={manualAddMemberId}
+                                onValueChange={setManualAddMemberId}
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Chọn thành viên..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {Array.from(members.entries())
+                                    .filter(([id]) => !attendance.has(id))
+                                    .map(([id, name]) => (
+                                      <SelectItem key={id} value={id}>
+                                        {name}
+                                      </SelectItem>
+                                    ))}
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                onClick={handleAddAttendance}
+                                disabled={!manualAddMemberId}
+                              >
+                                <PlusCircle className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Thành viên</TableHead>
+                                  <TableHead>Thời gian</TableHead>
+                                  <TableHead className="w-[50px]"></TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {Array.from(attendance.entries()).map(
+                                  ([memberId, record]) => (
+                                    <TableRow key={memberId}>
+                                      <TableCell className="font-medium">
+                                        {record.memberName}
+                                      </TableCell>
+                                      <TableCell className="text-sm text-muted-foreground">
+                                        {record.timestamp?.seconds
+                                          ? new Date(
+                                              record.timestamp.seconds * 1000
+                                            ).toLocaleTimeString("vi-VN", {
+                                              hour: "2-digit",
+                                              minute: "2-digit",
+                                            })
+                                          : "--:--"}
+                                      </TableCell>
+                                      <TableCell>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                          onClick={() =>
+                                            handleDeleteAttendance(
+                                              memberId,
+                                              record.memberName
+                                            )
+                                          }
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </TableCell>
+                                    </TableRow>
+                                  )
+                                )}
+                              </TableBody>
+                            </Table>
+                          </>
                         )}
                       </div>
                     </DialogContent>
