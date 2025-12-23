@@ -175,6 +175,20 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
 
     const orderCode = Date.now();
 
+    // Fetch member name
+    const memberDoc = await db.collection("members").doc(memberId).get();
+    const memberName = memberDoc.exists ? memberDoc.data().name : "";
+
+    // Remove Vietnamese diacritics for payment description
+    const removeDiacritics = (str) => {
+      return str
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/g, "d")
+        .replace(/Đ/g, "D");
+    };
+    const cleanName = removeDiacritics(memberName).replace(/\s+/g, " ").trim();
+
     // Random fun messages to avoid boring payment descriptions
     const funMessages = [
       "Tra no tinh nghia",
@@ -210,7 +224,9 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
     ];
     const randomMessage =
       funMessages[Math.floor(Math.random() * funMessages.length)];
-    const description = `${randomMessage} ${orderCode}`;
+    const description = cleanName
+      ? `${cleanName} ${randomMessage} ${orderCode}`
+      : `${randomMessage} ${orderCode}`;
 
     // Create a payment request document to store context
     const paymentRequestRef = db
