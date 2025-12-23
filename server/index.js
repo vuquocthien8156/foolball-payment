@@ -187,46 +187,24 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
         .replace(/đ/g, "d")
         .replace(/Đ/g, "D");
     };
-    const cleanName = removeDiacritics(memberName).replace(/\s+/g, " ").trim();
+    const cleanName = removeDiacritics(memberName)
+      .replace(/[^a-zA-Z0-9\s]/g, "") // Remove special characters
+      .replace(/\s+/g, " ")
+      .trim();
 
-    // Random fun messages to avoid boring payment descriptions
-    const funMessages = [
-      "Tra no tinh nghia",
-      "Tien nuoi ga",
-      "Tien mua banh bao",
-      "Gui tien me",
-      "Tien nuoi meo",
-      "Tien mua sua",
-      "Cho con an sang",
-      "Tien cap duong",
-      "Gui nhe yeu",
-      "Miss you",
-      "Love you 3000",
-      "Tien di spa",
-      "Tien lam dep",
-      "Gui anh yeu",
-      "Tien an vat",
-      "Mua tra sua",
-      "Tien thuoc",
-      "Cho con di hoc",
-      "Tien xang",
-      "Tien thue nha",
-      "Tien dien nuoc",
-      "Tra tien an",
-      "Tien bao hiem",
-      "Yeu nhieu",
-      "Nho nhau qua",
-      "Tien di du lich",
-      "Tien mua qua",
-      "Happy birthday",
-      "Chuc mung nam moi",
-      "Tien an dem",
-    ];
-    const randomMessage =
-      funMessages[Math.floor(Math.random() * funMessages.length)];
-    const description = cleanName
-      ? `${cleanName} ${randomMessage} ${orderCode}`
-      : `${randomMessage} ${orderCode}`;
+    // Get first name only (last word in Vietnamese names is usually first name)
+    const nameParts = cleanName.split(" ");
+    const firstName = nameParts[nameParts.length - 1] || cleanName;
+
+    // Short code (last 6 digits of timestamp)
+    const shortCode = String(orderCode).slice(-6);
+
+    // PayOS description max 25 chars: "{firstName} gui {shortCode}"
+    // Truncate firstName if needed (max 12 chars to leave room)
+    const shortName = firstName.slice(0, 12);
+    const description = shortName
+      ? `${shortName} gui ${shortCode}`
+      : `TienBanh ${shortCode}`;
 
     // Create a payment request document to store context
     const paymentRequestRef = db
