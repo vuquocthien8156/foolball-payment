@@ -174,7 +174,33 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
     }
 
     const orderCode = Date.now();
-    const description = `Thanh toan ${orderCode}`;
+
+    // Random fun messages to avoid boring payment descriptions
+    const funMessages = [
+      "Cfa tra no",
+      "Tien uong nuoc",
+      "Tien an sang",
+      "Mua do an vat",
+      "Tien cafe",
+      "Tra tien com trua",
+      "Mua banh mi",
+      "Tien tra sua",
+      "Mua snack",
+      "Gui tien ban",
+      "Tien an chieu",
+      "Mua nuoc ngot",
+      "Tra tien an",
+      "Tien di choi",
+      "Mua do uong",
+      "Tien party",
+      "Gui tien nhe",
+      "Tien vui ve",
+      "Cam on ban",
+      "Love you",
+    ];
+    const randomMessage =
+      funMessages[Math.floor(Math.random() * funMessages.length)];
+    const description = `${randomMessage} ${orderCode}`;
 
     // Create a payment request document to store context
     const paymentRequestRef = db
