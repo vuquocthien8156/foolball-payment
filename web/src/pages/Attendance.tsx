@@ -35,6 +35,7 @@ import {
   PinOff,
   History,
   RotateCcw,
+  Repeat,
 } from "lucide-react";
 import {
   collection,
@@ -631,6 +632,17 @@ const Attendance = () => {
           </CardContent>
         </Card>
 
+        <div className="mb-4 p-3 bg-muted/50 rounded-lg border border-dashed">
+          <p className="text-sm text-muted-foreground flex items-center gap-2">
+            <Repeat className="h-4 w-4" />
+            <span>
+              Nhấn icon{" "}
+              <span className="font-medium text-foreground">lặp lại</span> để tự
+              động điểm danh cho các trận đấu tiếp theo.
+            </span>
+          </p>
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {filteredMembers.map((member) => {
             const isAttending = attendance.has(member.id);
@@ -649,8 +661,10 @@ const Attendance = () => {
               >
                 <div className="absolute top-1 right-1 flex gap-1">
                   {/* Auto Attendance Toggle */}
-                  <div
-                    className="p-1 cursor-pointer"
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     title={
                       member.autoAttendance
                         ? "Tắt tự động điểm danh"
@@ -662,21 +676,17 @@ const Attendance = () => {
                       await updateDoc(memberRef, {
                         autoAttendance: !member.autoAttendance,
                       });
-                      // Optimistic update or wait for listener?
-                      // Members list in Attendance.tsx is fetched once and then not real-time subscribed for updates usually?
-                      // Actually line 184 uses getDocs, so it is NOT real-time.
-                      // We should locally update state or refetch. refetch is cleaner.
                       fetchMatchAndMembers();
                     }}
                   >
-                    <div
-                      className={`w-3 h-3 rounded-full border ${
+                    <Repeat
+                      className={`h-4 w-4 ${
                         member.autoAttendance
-                          ? "bg-blue-500 border-blue-500"
-                          : "bg-transparent border-gray-300"
+                          ? "text-blue-500"
+                          : "text-muted-foreground"
                       }`}
                     />
-                  </div>
+                  </Button>
 
                   <Button
                     variant="ghost"
