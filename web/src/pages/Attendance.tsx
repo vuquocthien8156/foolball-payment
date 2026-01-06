@@ -36,6 +36,7 @@ import {
   History,
   RotateCcw,
   Repeat,
+  X,
 } from "lucide-react";
 import {
   collection,
@@ -101,6 +102,9 @@ const Attendance = () => {
   const [attendance, setAttendance] = useState<Map<string, AttendanceRecord>>(
     new Map()
   );
+  const [notAttendance, setNotAttendance] = useState<
+    Map<string, AttendanceRecord>
+  >(new Map());
   const [isSubmitting, setIsSubmitting] = useState<Set<string>>(new Set());
   const [attendanceHistory, setAttendanceHistory] = useState<
     AttendanceRecord[]
@@ -225,6 +229,20 @@ const Attendance = () => {
         attendanceMap.set(doc.id, doc.data() as AttendanceRecord);
       });
       setAttendance(attendanceMap);
+
+      // Fetch not attending for this specific match
+      const notAttendanceCollectionRef = collection(
+        db,
+        "matches",
+        latestMatch.id,
+        "not_attending"
+      );
+      const notAttendanceSnapshot = await getDocs(notAttendanceCollectionRef);
+      const notAttendanceMap = new Map<string, AttendanceRecord>();
+      notAttendanceSnapshot.forEach((doc) => {
+        notAttendanceMap.set(doc.id, doc.data() as AttendanceRecord);
+      });
+      setNotAttendance(notAttendanceMap);
     } catch (error) {
       console.error("Error fetching data: ", error);
       toast({
@@ -288,61 +306,89 @@ const Attendance = () => {
     );
   };
 
-  const handleAttendanceToggle = async (
+  const handleUpdateStatus = async (
     memberId: string,
-    memberName: string
+    memberName: string,
+    status: "attending" | "not_attending"
   ) => {
-    if (!matchId || attendance.has(memberId)) return;
+    if (!matchId) return;
+
+    if (status === "attending" && attendance.has(memberId)) return;
+    if (status === "not_attending" && notAttendance.has(memberId)) return;
 
     setIsSubmitting((prev) => new Set(prev).add(memberId));
     const attendanceRef = doc(db, "matches", matchId, "attendance", memberId);
+    const notAttendanceRef = doc(
+      db,
+      "matches",
+      matchId,
+      "not_attending",
+      memberId
+    );
 
     try {
-      // We only allow adding attendance, not removing.
       await runTransaction(db, async (transaction) => {
-        const attendanceDoc = await transaction.get(attendanceRef);
-        if (!attendanceDoc.exists()) {
-          // Check again inside transaction to be safe
-          const currentAttendanceQuery = collection(
-            db,
-            "matches",
-            matchId,
-            "attendance"
-          );
+        const record = {
+          timestamp: Timestamp.now(),
+          memberName: memberName,
+          userAgent: navigator.userAgent,
+        };
 
-          const currentAttendanceSnapshot = await getDocs(
-            currentAttendanceQuery
-          );
-          transaction.set(attendanceRef, {
-            timestamp: Timestamp.now(),
-            memberName: memberName,
-            userAgent: navigator.userAgent,
-          });
+        if (status === "attending") {
+          transaction.set(attendanceRef, record);
+          transaction.delete(notAttendanceRef);
+        } else {
+          transaction.set(notAttendanceRef, record);
+          transaction.delete(attendanceRef);
         }
       });
 
       // Optimistic UI update
-      setAttendance((prev) => {
-        const newAttendance = new Map(prev);
-        if (!newAttendance.has(memberId)) {
-          newAttendance.set(memberId, {
+      if (status === "attending") {
+        setAttendance((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(memberId, {
             timestamp: Timestamp.now(),
             memberName,
             userAgent: navigator.userAgent,
           });
-          toast({
-            title: "Điểm danh thành công!",
-            description: `Cảm ơn ${memberName} đã xác nhận.`,
+          return newMap;
+        });
+        setNotAttendance((prev) => {
+          const newMap = new Map(prev);
+          newMap.delete(memberId);
+          return newMap;
+        });
+        toast({
+          title: "Điểm danh thành công!",
+          description: `Cảm ơn ${memberName} đã xác nhận tham gia.`,
+        });
+      } else {
+        setNotAttendance((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(memberId, {
+            timestamp: Timestamp.now(),
+            memberName,
+            userAgent: navigator.userAgent,
           });
-        }
-        return newAttendance;
-      });
+          return newMap;
+        });
+        setAttendance((prev) => {
+          const newMap = new Map(prev);
+          newMap.delete(memberId);
+          return newMap;
+        });
+        toast({
+          title: "Đã xác nhận không tham gia",
+          description: `Đã ghi nhận ${memberName} vắng mặt.`,
+        });
+      }
     } catch (error) {
-      console.error("Error toggling attendance:", error);
+      console.error("Error updating status:", error);
       toast({
         variant: "destructive",
         title: "Lỗi",
-        description: "Không thể điểm danh. Vui lòng thử lại.",
+        description: "Không thể cập nhật trạng thái. Vui lòng thử lại.",
       });
     } finally {
       setIsSubmitting((prev) => {
@@ -570,6 +616,11 @@ const Attendance = () => {
 
           <p className="text-xl font-bold mt-4">
             Số người đã điểm danh: {attendance.size}
+            {notAttendance.size > 0 && (
+              <span className="text-destructive ml-4">
+                Báo vắng: {notAttendance.size}
+              </span>
+            )}
           </p>
           <div className="mt-4">
             <Dialog>
@@ -646,6 +697,7 @@ const Attendance = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {filteredMembers.map((member) => {
             const isAttending = attendance.has(member.id);
+            const isNotAttending = notAttendance.has(member.id);
             const isProcessing = isSubmitting.has(member.id);
             const isPinned = pinnedMembers.includes(member.id);
             return (
@@ -654,6 +706,8 @@ const Attendance = () => {
                 className={`shadow-card transition-all relative ${
                   isAttending
                     ? "bg-green-100/20 border-green-500"
+                    : isNotAttending
+                    ? "bg-red-100/20 border-red-500"
                     : isPinned
                     ? "bg-blue-100/20 border-blue-500"
                     : "bg-card"
@@ -714,27 +768,58 @@ const Attendance = () => {
                       )}
                     </div>
                   </div>
-                  <Button
-                    variant={isAttending ? "secondary" : "default"}
-                    onClick={() =>
-                      handleAttendanceToggle(member.id, member.name)
-                    }
-                    disabled={isProcessing || isAttending || isAttendanceClosed}
-                    className="w-full mt-auto"
-                  >
-                    {isProcessing ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : isAttending ? (
-                      <>
-                        <Check className="h-4 w-4 mr-2" />
-                        Đã điểm danh
-                      </>
-                    ) : isAttendanceClosed ? (
-                      "Đã đóng đơn"
-                    ) : (
-                      "Điểm danh"
-                    )}
-                  </Button>
+                  <div className="flex gap-2 w-full mt-auto">
+                    <Button
+                      variant={isAttending ? "secondary" : "default"}
+                      onClick={() =>
+                        handleUpdateStatus(member.id, member.name, "attending")
+                      }
+                      disabled={
+                        isProcessing ||
+                        (isAttending && !isAttendanceClosed) ||
+                        isAttendanceClosed
+                      }
+                      className="flex-1"
+                    >
+                      {isProcessing && !isNotAttending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : isAttending ? (
+                        <>
+                          <Check className="h-4 w-4 mr-1" />
+                          Có
+                        </>
+                      ) : (
+                        "Tham gia"
+                      )}
+                    </Button>
+                    <Button
+                      variant={isNotAttending ? "destructive" : "outline"}
+                      onClick={() =>
+                        handleUpdateStatus(
+                          member.id,
+                          member.name,
+                          "not_attending"
+                        )
+                      }
+                      disabled={
+                        isProcessing ||
+                        (isNotAttending && !isAttendanceClosed) ||
+                        isAttendanceClosed
+                      }
+                      className="flex-1"
+                    >
+                      {isProcessing && !isAttending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : isNotAttending ? (
+                        <>
+                          <X className="h-4 w-4 mr-1" />
+                          Vắng
+                        </>
+                      ) : (
+                        "Không"
+                      )}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             );
