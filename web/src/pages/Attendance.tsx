@@ -803,6 +803,7 @@ const Attendance = () => {
                       }
                       disabled={
                         isProcessing ||
+                        isAttending ||
                         (isNotAttending && !isAttendanceClosed) ||
                         isAttendanceClosed
                       }
