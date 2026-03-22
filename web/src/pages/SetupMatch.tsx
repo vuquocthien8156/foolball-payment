@@ -51,6 +51,8 @@ interface Member {
   isExemptFromPayment?: boolean;
   percent?: number;
   reason?: string;
+  inactive?: boolean;
+  isPriority?: boolean;
 }
 
 interface Team {
@@ -134,9 +136,9 @@ const SetupMatch = () => {
     try {
       const membersCollectionRef = collection(db, "members");
       const membersSnapshot = await getDocs(membersCollectionRef);
-      const membersList = membersSnapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() } as Member)
-      );
+      const membersList = membersSnapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() } as Member))
+        .filter((m) => !m.inactive);
       const membersMap = new Map(membersList.map((m) => [m.id, m]));
 
       let configSource: MatchConfig | null = null;

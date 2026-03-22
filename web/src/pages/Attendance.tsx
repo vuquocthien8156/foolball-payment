@@ -62,6 +62,7 @@ interface Member {
   name: string;
   nickname?: string;
   autoAttendance?: boolean;
+  inactive?: boolean;
 }
 
 interface Match {
@@ -211,9 +212,9 @@ const Attendance = () => {
         orderBy("name", "asc")
       );
       const membersSnapshot = await getDocs(membersQuery);
-      const membersList = membersSnapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() } as Member)
-      );
+      const membersList = membersSnapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() } as Member))
+        .filter((m) => !m.inactive);
       setMembers(membersList);
 
       // Fetch attendance for this specific match

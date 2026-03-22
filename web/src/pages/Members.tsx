@@ -35,6 +35,8 @@ import {
   Star,
   BadgePercent,
   Pencil,
+  ArrowUp,
+  UserX,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -80,6 +82,8 @@ interface Member {
   loginRole?: string;
   adminTabs?: string[];
   autoAttendance?: boolean;
+  inactive?: boolean;
+  isPriority?: boolean;
 }
 
 interface MemberStats {
@@ -234,6 +238,7 @@ const defaultAdminTabs = ["dashboard", "scoring", "live"];
 const Members = () => {
   const [members, setMembers] = useState<Member[]>([]);
   const [search, setSearch] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const [newMemberName, setNewMemberName] = useState("");
   const [newMemberNickname, setNewMemberNickname] = useState("");
   const [newMemberIsExempt, setNewMemberIsExempt] = useState(false);
@@ -362,17 +367,25 @@ const Members = () => {
 
   const filteredMembers = useMemo(
     () =>
-      members.filter((m) => {
-        const lowerCaseSearch = removeDiacritics(search.toLowerCase());
-        return (
-          removeDiacritics(m.name.toLowerCase()).includes(lowerCaseSearch) ||
-          (m.nickname &&
-            removeDiacritics(m.nickname.toLowerCase()).includes(
-              lowerCaseSearch
-            ))
-        );
-      }),
-    [members, search]
+      members
+        .filter((m) => {
+          if (!showInactive && m.inactive) return false;
+          const lowerCaseSearch = removeDiacritics(search.toLowerCase());
+          return (
+            removeDiacritics(m.name.toLowerCase()).includes(lowerCaseSearch) ||
+            (m.nickname &&
+              removeDiacritics(m.nickname.toLowerCase()).includes(
+                lowerCaseSearch
+              ))
+          );
+        })
+        .sort((a, b) => {
+          // Priority first, then normal, then inactive
+          const rankOf = (m: Member) =>
+            m.inactive ? 2 : m.isPriority ? 0 : 1;
+          return rankOf(a) - rankOf(b);
+        }),
+    [members, search, showInactive]
   );
 
   const handleAddMember = async () => {
@@ -717,14 +730,26 @@ const Members = () => {
         {/* Search */}
         <Card className="mb-6 shadow-card">
           <CardContent className="pt-6">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Tìm kiếm theo tên hoặc biệt danh..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10"
-              />
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Tìm kiếm theo tên hoặc biệt danh..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <div className="flex items-center space-x-2 shrink-0">
+                <Switch
+                  id="show-inactive"
+                  checked={showInactive}
+                  onCheckedChange={setShowInactive}
+                />
+                <Label htmlFor="show-inactive" className="whitespace-nowrap text-sm">
+                  Hiện inactive
+                </Label>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -752,7 +777,7 @@ const Members = () => {
                 filteredMembers.map((member) => (
                   <div
                     key={member.id}
-                    className="flex items-center justify-between p-4 rounded-lg border bg-gradient-card hover:shadow-md transition-all"
+                    className={`flex items-center justify-between p-4 rounded-lg border hover:shadow-md transition-all ${member.inactive ? 'opacity-50 bg-muted/30' : 'bg-gradient-card'}`}
                   >
                     <Dialog>
                       <DialogTrigger asChild>
@@ -769,14 +794,34 @@ const Members = () => {
                                 {member.nickname}
                               </Badge>
                             )}
-                            {member.autoAttendance && (
-                              <Badge
-                                variant="outline"
-                                className="mt-1 ml-2 border-blue-500 text-blue-500"
-                              >
-                                Auto
-                              </Badge>
-                            )}
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {member.isPriority && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-amber-500 text-amber-600"
+                                >
+                                  <ArrowUp className="h-3 w-3 mr-0.5" />
+                                  Ưu tiên
+                                </Badge>
+                              )}
+                              {member.inactive && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-slate-400 text-slate-500"
+                                >
+                                  <UserX className="h-3 w-3 mr-0.5" />
+                                  Inactive
+                                </Badge>
+                              )}
+                              {member.autoAttendance && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-blue-500 text-blue-500"
+                                >
+                                  Auto
+                                </Badge>
+                              )}
+                            </div>
                             {member.loginEnabled && (
                               <div className="flex flex-wrap gap-2">
                                 <Badge variant="outline">Login bật</Badge>
@@ -944,6 +989,32 @@ const Members = () => {
                   />
                   <Label htmlFor="edit-auto-attendance">Auto Điểm danh</Label>
                 </div>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="edit-priority"
+                    checked={!!editingMember.isPriority}
+                    onCheckedChange={(checked) =>
+                      setEditingMember({
+                        ...editingMember,
+                        isPriority: checked,
+                      })
+                    }
+                  />
+                  <Label htmlFor="edit-priority">Ưu tiên (hiện đầu danh sách)</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="edit-inactive"
+                    checked={!!editingMember.inactive}
+                    onCheckedChange={(checked) =>
+                      setEditingMember({
+                        ...editingMember,
+                        inactive: checked,
+                      })
+                    }
+                  />
+                  <Label htmlFor="edit-inactive">Inactive (ẩn khỏi điểm danh & setup)</Label>
+                </div>
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="flex items-center space-x-2">
                     <Switch
@@ -1090,6 +1161,8 @@ const Members = () => {
                       loginEmail: editingMember.loginEmail,
                       adminTabs: editingMember.adminTabs,
                       loginRole: editingMember.loginRole,
+                      inactive: editingMember.inactive,
+                      isPriority: editingMember.isPriority,
                     })
                   }
                   disabled={isUpdating}
