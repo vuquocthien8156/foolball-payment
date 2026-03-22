@@ -750,10 +750,10 @@ const LiveNotes = () => {
               </div>
             </div>
             {teamsConfig.length >= 2 && (
-              <div className="grid grid-cols-2 gap-2 mt-3">
-                {teamsConfig.slice(0, 2).map((team) => (
+              <div className={`grid gap-2 mt-3 ${teamsConfig.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                {teamsConfig.map((team) => (
                   <Card key={team.id} className="p-3 border-dashed">
-                    <div className="text-base font-semibold">{team.name}</div>
+                    <div className="text-base font-semibold truncate">{team.name}</div>
                     <div className="text-3xl font-black">
                       {teamScore.get(team.id) || 0}
                     </div>
@@ -968,7 +968,7 @@ const LiveNotes = () => {
                 </p>
               ) : teamsConfig.length >= 2 ? (
                 <div className="space-y-4">
-                  {groupedByTeam.slice(0, 2).map((group) => (
+                  {groupedByTeam.map((group) => (
                     <div key={group.id} className="space-y-2">
                       <h4 className="font-semibold text-sm flex items-center gap-2">
                         <span>{group.name}</span>
@@ -981,24 +981,6 @@ const LiveNotes = () => {
                       </div>
                     </div>
                   ))}
-                  {groupedByTeam.slice(2).length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="font-semibold text-sm flex items-center gap-2">
-                        <span>Khác</span>
-                        <Badge variant="outline" className="text-xs">
-                          {groupedByTeam
-                            .slice(2)
-                            .reduce((acc, g) => acc + g.members.length, 0)}
-                        </Badge>
-                      </h4>
-                      <div className="flex flex-wrap gap-2">
-                        {groupedByTeam
-                          .slice(2)
-                          .flatMap((g) => g.members)
-                          .map((m) => renderMemberChip(m))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-2">

@@ -1011,9 +1011,8 @@ const PublicRatings = () => {
                     </CardHeader>
                     <CardContent className="space-y-4">
                       {displayTeams.length >= 2 && (
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className={`grid gap-2 ${displayTeams.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
                           {displayTeams
-                            .slice(0, 2)
                             .map(([teamId, teamName]) => (
                               <Card key={teamId} className="p-3 border-dashed">
                                 <div className="text-base font-semibold truncate">

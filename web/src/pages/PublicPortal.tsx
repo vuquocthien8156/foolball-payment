@@ -285,13 +285,13 @@ const PublicPortal = () => {
           const sortedTotals = Array.from(totals.entries()).sort(
             (a, b) => a[1].total - b[1].total
           );
+          // Only count a win if there's a single lowest-paying team (no tie at the bottom)
           if (sortedTotals[0][1].total === sortedTotals[1][1].total) continue;
 
           const [winningId, winningInfo] = sortedTotals[0];
           const current = winsMap.get(winningId);
           if (current) {
             current.wins += 1;
-            // chỉ cập nhật tên nếu đang để trống
             if (!current.teamName || current.teamName.startsWith("Đội")) {
               current.teamName = winningInfo.teamName;
             }
@@ -303,7 +303,7 @@ const PublicPortal = () => {
           (a, b) => b.wins - a.wins
         );
 
-        setScoreboard(sortedWins.slice(0, 2));
+        setScoreboard(sortedWins);
       } catch (error) {
         console.error("Error fetching scoreboard:", error);
         setScoreboard([]);
@@ -422,9 +422,9 @@ const PublicPortal = () => {
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Đang tổng hợp dữ liệu...
               </div>
-            ) : scoreboard.length >= 2 ? (
+            ) : scoreboard.length >= 2 && scoreboard.length <= 2 ? (
               <div className="relative bg-muted/30 rounded-3xl border shadow-inner p-4 flex items-center justify-between gap-4">
-                {scoreboard.slice(0, 2).map((team, idx) => (
+                {scoreboard.map((team) => (
                   <div
                     key={team.teamId}
                     className="flex-1 text-center space-y-1"
@@ -442,6 +442,27 @@ const PublicPortal = () => {
                     VS
                   </div>
                 </div>
+              </div>
+            ) : scoreboard.length >= 3 ? (
+              <div className="bg-muted/30 rounded-3xl border shadow-inner p-4 space-y-3">
+                {scoreboard.map((team, idx) => (
+                  <div
+                    key={team.teamId}
+                    className="flex items-center justify-between px-3 py-2 rounded-xl bg-background/60"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg font-bold text-muted-foreground w-6 text-center">
+                        {idx + 1}
+                      </span>
+                      <p className="text-lg font-semibold text-foreground">
+                        {team.teamName}
+                      </p>
+                    </div>
+                    <p className="text-3xl font-extrabold text-primary">
+                      {team.wins}
+                    </p>
+                  </div>
+                ))}
               </div>
             ) : scoreboard.length === 1 ? (
               <div className="relative bg-muted/30 rounded-3xl border shadow-inner p-4 flex items-center justify-between gap-4">

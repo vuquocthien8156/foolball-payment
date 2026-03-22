@@ -761,9 +761,8 @@ const ScoringMatches = () => {
                   ) : (
                     <>
                       {Object.keys(currentTeamNames).length > 0 && (
-                        <div className="grid grid-cols-2 gap-2 mb-3">
+                        <div className={`grid gap-2 mb-3 ${Object.keys(currentTeamNames).length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
                           {Object.entries(currentTeamNames)
-                            .slice(0, 2)
                             .map(([teamId, teamName]) => (
                               <Card key={teamId} className="p-3 border-dashed">
                                 <div className="text-sm font-semibold truncate">
