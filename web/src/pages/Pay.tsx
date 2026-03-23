@@ -196,78 +196,66 @@ const Pay = () => {
     return `${trimmed}/api`;
   }, []);
 
-  const fetchTopPayers = useCallback(async () => {
-    setIsLoadingStats(true);
-    try {
-      // 1. Get all matches
-      const matchesQuery = query(collection(db, "matches"));
-      const matchesSnapshot = await getDocs(matchesQuery);
-
-      const activeMatchDocs = matchesSnapshot.docs.filter(
-        (doc) => !doc.data().isDeleted
-      );
-
-      if (activeMatchDocs.length === 0) {
-        setTopPayers([]);
-        setIsLoadingStats(false);
-        return;
-      }
-
-      // 2. Aggregate payments by member from all matches
-      const paymentsByMember = new Map<string, number>();
-
-      const shareFetchPromises = activeMatchDocs.map(async (matchDoc) => {
-        const paidSharesQuery = query(
-          collection(matchDoc.ref, "shares"),
-          where("status", "==", "PAID")
-        );
-        const sharesSnapshot = await getDocs(paidSharesQuery);
-        sharesSnapshot.forEach((shareDoc) => {
-          const share = shareDoc.data();
-          const currentTotal = paymentsByMember.get(share.memberId) || 0;
-          paymentsByMember.set(share.memberId, currentTotal + share.amount);
-        });
-      });
-
-      await Promise.all(shareFetchPromises);
-
-      if (paymentsByMember.size === 0) {
-        setTopPayers([]);
-        setIsLoadingStats(false);
-        return;
-      }
-
-      // 3. Get member names
-      const memberIds = Array.from(paymentsByMember.keys());
-      const membersQuery = query(
-        collection(db, "members"),
-        where(documentId(), "in", memberIds)
-      );
-      const membersSnapshot = await getDocs(membersQuery);
-      const membersMap = new Map(
-        membersSnapshot.docs.map((doc) => [doc.id, doc.data().name])
-      );
-
-      // 4. Create, sort, and set top payers
-      const allPayers = Array.from(paymentsByMember.entries())
-        .map(([memberId, total]) => ({
-          name: membersMap.get(memberId) || "Không rõ",
-          total,
-        }))
-        .sort((a, b) => b.total - a.total);
-
-      setTopPayers(allPayers.slice(0, 3));
-    } catch (error) {
-      console.error("Error fetching top payers:", error);
-      toast({
-        title: "Lỗi",
-        description: "Không thể tải dữ liệu thống kê.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoadingStats(false);
-    }
-  }, []);
+  // [RATING_FLOW_DISABLED] — fetchTopPayers commented out (Top Payers card hidden)
+  // const fetchTopPayers = useCallback(async () => {
+  //   setIsLoadingStats(true);
+  //   try {
+  //     const matchesQuery = query(collection(db, "matches"));
+  //     const matchesSnapshot = await getDocs(matchesQuery);
+  //     const activeMatchDocs = matchesSnapshot.docs.filter(
+  //       (doc) => !doc.data().isDeleted
+  //     );
+  //     if (activeMatchDocs.length === 0) {
+  //       setTopPayers([]);
+  //       setIsLoadingStats(false);
+  //       return;
+  //     }
+  //     const paymentsByMember = new Map<string, number>();
+  //     const shareFetchPromises = activeMatchDocs.map(async (matchDoc) => {
+  //       const paidSharesQuery = query(
+  //         collection(matchDoc.ref, "shares"),
+  //         where("status", "==", "PAID")
+  //       );
+  //       const sharesSnapshot = await getDocs(paidSharesQuery);
+  //       sharesSnapshot.forEach((shareDoc) => {
+  //         const share = shareDoc.data();
+  //         const currentTotal = paymentsByMember.get(share.memberId) || 0;
+  //         paymentsByMember.set(share.memberId, currentTotal + share.amount);
+  //       });
+  //     });
+  //     await Promise.all(shareFetchPromises);
+  //     if (paymentsByMember.size === 0) {
+  //       setTopPayers([]);
+  //       setIsLoadingStats(false);
+  //       return;
+  //     }
+  //     const memberIds = Array.from(paymentsByMember.keys());
+  //     const membersQuery = query(
+  //       collection(db, "members"),
+  //       where(documentId(), "in", memberIds)
+  //     );
+  //     const membersSnapshot = await getDocs(membersQuery);
+  //     const membersMap = new Map(
+  //       membersSnapshot.docs.map((doc) => [doc.id, doc.data().name])
+  //     );
+  //     const allPayers = Array.from(paymentsByMember.entries())
+  //       .map(([memberId, total]) => ({
+  //         name: membersMap.get(memberId) || "Không rõ",
+  //         total,
+  //       }))
+  //       .sort((a, b) => b.total - a.total);
+  //     setTopPayers(allPayers.slice(0, 3));
+  //   } catch (error) {
+  //     console.error("Error fetching top payers:", error);
+  //     toast({
+  //       title: "Lỗi",
+  //       description: "Không thể tải dữ liệu thống kê.",
+  //       variant: "destructive",
+  //     });
+  //   } finally {
+  //     setIsLoadingStats(false);
+  //   }
+  // }, []);
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -295,8 +283,8 @@ const Pay = () => {
       }
     };
     fetchMembers();
-    fetchTopPayers();
-  }, [fetchTopPayers]);
+    // [RATING_FLOW_DISABLED] — fetchTopPayers();
+  }, []);
 
   // Effect to load last selected member from localStorage
   useEffect(() => {
@@ -956,7 +944,7 @@ const Pay = () => {
                   </Button>
                 )}
 
-                {/* Top Payers Card */}
+                {/* [RATING_FLOW_DISABLED] — Top Payers Card hidden
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2">
@@ -1005,6 +993,7 @@ const Pay = () => {
                     )}
                   </CardContent>
                 </Card>
+                */}
 
                 <div className="space-y-2">
                   <Label
