@@ -671,39 +671,103 @@ const Pay = () => {
     }
   };
 
-  const handleProceedToRating = () => {
-    const payableSelectedShares = unpaidShares.filter(
-      (share) =>
-        selectedShares.includes(share.id) &&
+  // [RATING_FLOW_DISABLED] — Original handleProceedToRating commented out.
+  // To re-enable rating flow, uncomment this and revert handlePayment below.
+  // const handleProceedToRating = () => {
+  //   const payableSelectedShares = unpaidShares.filter(
+  //     (share) =>
+  //       selectedShares.includes(share.id) &&
+  //       share.status === "PENDING" &&
+  //       !share.isRatingOnly
+  //   );
+  //   const ratingOnlyShares = unpaidShares.filter(
+  //     (share) =>
+  //       selectedShares.includes(share.id) &&
+  //       (share.isRatingOnly || share.channel === "MANUAL")
+  //   );
+  //   const combinedTargetsMap = new Map<string, Share>();
+  //   [...payableSelectedShares, ...ratingOnlyShares].forEach((share) => {
+  //     combinedTargetsMap.set(share.id, share);
+  //   });
+  //   const combinedTargets = Array.from(combinedTargetsMap.values());
+  //   if (combinedTargets.length === 0) {
+  //     toast({
+  //       title: "Không có trận để đánh giá",
+  //       description:
+  //         "Bạn chưa chọn khoản thanh toán và không có trận nào được đánh dấu đã trả/miễn phí.",
+  //       variant: "destructive",
+  //     });
+  //     return;
+  //   }
+  //   setRatingTargets(combinedTargets);
+  //   setIsRating(true);
+  // };
+
+  // [RATING_FLOW_DISABLED] — Direct payment without rating step
+  const handlePayment = async () => {
+    const payableShareIds = selectedShares.filter((id) => {
+      const share = unpaidShares.find((s) => s.id === id);
+      return (
+        share &&
         share.status === "PENDING" &&
-        !share.isRatingOnly
-    );
-
-    const ratingOnlyShares = unpaidShares.filter(
-      (share) =>
-        selectedShares.includes(share.id) &&
-        (share.isRatingOnly || share.channel === "MANUAL")
-    );
-
-    const combinedTargetsMap = new Map<string, Share>();
-    [...payableSelectedShares, ...ratingOnlyShares].forEach((share) => {
-      combinedTargetsMap.set(share.id, share);
+        !share.isRatingOnly &&
+        share.amount > 0
+      );
     });
 
-    const combinedTargets = Array.from(combinedTargetsMap.values());
-
-    if (combinedTargets.length === 0) {
+    if (payableShareIds.length === 0) {
       toast({
-        title: "Không có trận để đánh giá",
-        description:
-          "Bạn chưa chọn khoản thanh toán và không có trận nào được đánh dấu đã trả/miễn phí.",
+        title: "Chưa chọn khoản thanh toán",
+        description: "Vui lòng chọn ít nhất một khoản để thanh toán.",
         variant: "destructive",
       });
       return;
     }
 
-    setRatingTargets(combinedTargets);
-    setIsRating(true);
+    setIsCreatingPayment(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/create-payment-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shareIds: payableShareIds,
+          memberId: selectedMemberId,
+          ratings: [], // [RATING_FLOW_DISABLED] — no ratings sent
+        }),
+      });
+
+      const raw = await response.text();
+      let data: any = null;
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch (err) {
+        console.error("Invalid JSON from server:", raw);
+        throw new Error(
+          "Server trả về nội dung không hợp lệ (không phải JSON). Kiểm tra lại VITE_API_URL hoặc cấu hình proxy."
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Yêu cầu thất bại.");
+      }
+
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      } else {
+        throw new Error("Không tìm thấy URL thanh toán.");
+      }
+    } catch (error) {
+      console.error("Error creating payment link:", error);
+      toast({
+        title: "Lỗi",
+        description: `Không thể tạo link thanh toán: ${
+          error instanceof Error ? error.message : "Không rõ lỗi"
+        }`,
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingPayment(false);
+    }
   };
 
   const handleRatingComplete = async (ratings: any[]) => {
@@ -872,13 +936,15 @@ const Pay = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 sm:space-y-6 px-4 pb-4 sm:px-6 sm:pb-6">
+            {/* [RATING_FLOW_DISABLED] — Rating screen commented out.
             {isRating ? (
               <Rating
                 sharesToRate={ratingTargets}
                 onRatingComplete={handleRatingComplete}
                 ratedByMemberId={selectedMemberId}
               />
-            ) : (
+            ) : ( */}
+            {(
               <>
                 {canInstall && (
                   <Button
@@ -1028,6 +1094,7 @@ const Pay = () => {
                       <p className="text-muted-foreground">
                         Bạn không có khoản nợ nào chưa thanh toán.
                       </p>
+                      {/* [RATING_FLOW_DISABLED] — Rating-only button hidden
                       {hasRatingOnlyShares && (
                         <Button
                           className="mt-4"
@@ -1039,6 +1106,7 @@ const Pay = () => {
                           Gửi đánh giá trận đã trả/miễn phí
                         </Button>
                       )}
+                      */}
                     </div>
                   )}
 
@@ -1298,7 +1366,7 @@ const Pay = () => {
                         <Button
                           size="lg"
                           className="w-full h-12 text-base sm:h-14 sm:text-lg"
-                          onClick={handleProceedToRating}
+                          onClick={handlePayment}
                           disabled={!canProceedToRating || isCreatingPayment}
                         >
                           {isCreatingPayment ? (
@@ -1308,12 +1376,9 @@ const Pay = () => {
                             </>
                           ) : (
                             <>
-                              <Star className="h-5 w-5 mr-2" />
-                              {totalAmount > 0
-                                ? `Đánh giá & Thanh toán (${selectedShares.length} trận)`
-                                : `Chỉ gửi đánh giá (${
-                                    ratingTargets.length || unpaidShares.length
-                                  } trận)`}
+                              <CreditCard className="h-5 w-5 mr-2" />
+                              {/* [RATING_FLOW_DISABLED] — Changed from "Đánh giá & Thanh toán" */}
+                              {`Thanh toán (${selectedShares.length} trận)`}
                             </>
                           )}
                         </Button>
@@ -1323,6 +1388,7 @@ const Pay = () => {
                 )}
               </>
             )}
+            {/* [RATING_FLOW_DISABLED] — end of original ternary closing was here */}
           </CardContent>
         </Card>
       </div>
