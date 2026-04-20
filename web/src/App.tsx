@@ -65,7 +65,7 @@ const AdminHomeRedirect = () => {
   const { roles, tabs, loading } = useUserRoles(user?.uid);
   if (loading) return <LoadingSplash />;
   const isSuper = roles.includes("superadmin");
-  if (isSuper) return <Navigate to="/admin/dashboard" replace />;
+  if (isSuper) return <Navigate to="/admin/matches" replace />;
   const order = ["dashboard", "scoring", "live", "matches", "members"];
   const target = order.find((t) => tabs.includes(t));
   return target ? (
@@ -130,6 +130,7 @@ const App = () => {
                   }
                 >
                   <Route index element={<AdminHomeRedirect />} />
+                  {/*
                   <Route
                     path="dashboard"
                     element={
@@ -138,6 +139,7 @@ const App = () => {
                       </TabGuard>
                     }
                   />
+                  */}
                   <Route
                     path="setup"
                     element={

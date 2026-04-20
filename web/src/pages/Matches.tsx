@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Card,
@@ -73,6 +73,9 @@ import {
 import { toast } from "@/hooks/use-toast";
 import {
   collection,
+  collectionGroup,
+  query as cq,
+  where,
   query,
   orderBy,
   onSnapshot,
@@ -91,6 +94,7 @@ import { cn } from "@/lib/utils";
 import { aggregateLiveStats, AggregatedStat } from "@/lib/liveStats";
 import { useActionConfigs } from "@/hooks/useActionConfigs";
 import { postApiJson } from "@/lib/api";
+import html2canvas from "html2canvas";
 
 interface Match {
   id: string;
@@ -200,7 +204,7 @@ const MatchListItem = ({
   }, [match.id]);
 
   const date = new Date(
-    typeof match.date === "string" ? match.date : match.date.toDate()
+    typeof match.date === "string" ? match.date : match.date.toDate(),
   ).toLocaleDateString("vi-VN");
 
   const isFullyPaid =
@@ -212,7 +216,7 @@ const MatchListItem = ({
     <div
       className={cn(
         "flex items-center justify-between p-3 rounded-lg transition-colors",
-        isSelected ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+        isSelected ? "bg-primary text-primary-foreground" : "hover:bg-muted",
       )}
     >
       <button onClick={onSelect} className="flex-grow text-left space-y-1">
@@ -236,8 +240,8 @@ const MatchListItem = ({
                   {match.status === "PUBLISHED"
                     ? "Đã công khai"
                     : match.status === "COMPLETED"
-                    ? "Đã tính tiền"
-                    : "Đang điểm danh"}
+                      ? "Đã tính tiền"
+                      : "Đang điểm danh"}
                 </p>
               </TooltipContent>
             </Tooltip>
@@ -268,7 +272,7 @@ const MatchListItem = ({
                   "rounded-full w-8 h-8",
                   isSelected
                     ? "hover:bg-primary-foreground/10 text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -291,7 +295,7 @@ const MatchListItem = ({
                     "rounded-full w-8 h-8",
                     isSelected
                       ? "hover:bg-primary-foreground/10 text-primary-foreground"
-                      : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
                   )}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -317,22 +321,22 @@ const Matches = () => {
   const [shares, setShares] = useState<Share[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "PAID" | "PENDING">(
-    "ALL"
+    "ALL",
   );
   const [isLoadingMatches, setIsLoadingMatches] = useState(true);
   const [isLoadingShares, setIsLoadingShares] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [matchIdToDelete, setMatchIdToDelete] = useState<string | null>(null);
   const [highlightedShareId, setHighlightedShareId] = useState<string | null>(
-    null
+    null,
   );
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [playerRatings, setPlayerRatings] = useState<Map<string, RatingData>>(
-    new Map()
+    new Map(),
   );
   const [adminRatings, setAdminRatings] = useState<Map<string, AdminRating>>(
-    new Map()
+    new Map(),
   );
   const [mvpData, setMvpData] = useState<MvpData[]>([]);
   const [showAllMvp, setShowAllMvp] = useState(false);
@@ -349,14 +353,31 @@ const Matches = () => {
   const [selectedRaterId, setSelectedRaterId] = useState<string | null>(null);
   const [isLoadingRatings, setIsLoadingRatings] = useState(false);
   const [liveStatsMap, setLiveStatsMap] = useState<Map<string, AggregatedStat>>(
-    new Map()
+    new Map(),
   );
   const [isLoadingLiveStats, setIsLoadingLiveStats] = useState(false);
   const [isLiveStatsDialogOpen, setIsLiveStatsDialogOpen] = useState(false);
+  const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
+  const [pendingSharesMap, setPendingSharesMap] = useState<
+    Map<
+      string,
+      {
+        shareId: string;
+        matchId: string;
+        matchDate: string;
+        memberId: string;
+        memberName: string;
+        teamName: string;
+        amount: number;
+      }[]
+    >
+  >(new Map());
+  const [isLoadingPending, setIsLoadingPending] = useState(false);
+  const debtModalContentRef = useRef<HTMLDivElement>(null);
 
   // Attendance state
   const [attendance, setAttendance] = useState<Map<string, AttendanceRecord>>(
-    new Map()
+    new Map(),
   );
   const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
   const [isAttendanceDialogOpen, setIsAttendanceDialogOpen] = useState(false);
@@ -376,7 +397,7 @@ const Matches = () => {
         note: "Ghi chú",
       }[key] ||
       key,
-    [labelMap]
+    [labelMap],
   );
 
   useEffect(() => {
@@ -395,7 +416,10 @@ const Matches = () => {
       try {
         const membersSnapshot = await getDocs(collection(db, "members"));
         const membersMap = new Map(
-          membersSnapshot.docs.map((doc) => [doc.id, doc.data().name as string])
+          membersSnapshot.docs.map((doc) => [
+            doc.id,
+            doc.data().name as string,
+          ]),
         );
         setMembers(membersMap);
       } catch (error) {
@@ -413,13 +437,13 @@ const Matches = () => {
     setIsLoadingMatches(true);
     const matchesQuery = query(
       collection(db, "matches"),
-      orderBy("date", "desc")
+      orderBy("date", "desc"),
     );
     const unsubscribe = onSnapshot(
       matchesQuery,
       (querySnapshot) => {
         const matchesList = querySnapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() } as Match))
+          .map((doc) => ({ id: doc.id, ...doc.data() }) as Match)
           .filter((m) => !m.isDeleted);
         setMatches(matchesList);
         if (
@@ -438,7 +462,7 @@ const Matches = () => {
           description: "Không thể tải danh sách trận đấu.",
         });
         setIsLoadingMatches(false);
-      }
+      },
     );
     return () => unsubscribe();
   }, [searchParams, selectedMatchId]);
@@ -449,16 +473,19 @@ const Matches = () => {
 
     const sharesQuery = query(
       collection(db, "matches", selectedMatchId, "shares"),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
     const unsubscribeShares = onSnapshot(sharesQuery, (querySnapshot) => {
       const currentMatch = matches.find((m) => m.id === selectedMatchId);
       let teamNames: { [key: string]: string } = {};
       if (currentMatch?.teamsConfig) {
-        teamNames = currentMatch.teamsConfig.reduce((acc, team) => {
-          acc[team.id] = team.name;
-          return acc;
-        }, {} as { [key: string]: string });
+        teamNames = currentMatch.teamsConfig.reduce(
+          (acc, team) => {
+            acc[team.id] = team.name;
+            return acc;
+          },
+          {} as { [key: string]: string },
+        );
       } else if (currentMatch?.teamNames) {
         teamNames = currentMatch.teamNames;
       }
@@ -470,14 +497,14 @@ const Matches = () => {
             ...doc.data(),
             teamName:
               teamNames[doc.data().teamId] || `Đội ${doc.data().teamId}`,
-          } as Share)
+          }) as Share,
       );
       setShares(sharesList);
       setIsLoadingShares(false);
     });
 
     const ratingsQuery = query(
-      collection(db, "matches", selectedMatchId, "ratings")
+      collection(db, "matches", selectedMatchId, "ratings"),
     );
     const unsubscribeRatings = onSnapshot(ratingsQuery, (ratingsSnapshot) => {
       const ratingsByPlayer = new Map<string, RatingData>();
@@ -502,7 +529,7 @@ const Matches = () => {
               score: playerRating.score,
             });
             ratingsByPlayer.set(playerRating.memberId, current);
-          }
+          },
         );
 
         if (rating.mvpPlayerId) {
@@ -560,7 +587,7 @@ const Matches = () => {
               playerRatedId: playerRating.memberId,
               score: playerRating.score,
             });
-          }
+          },
         );
       });
 
@@ -570,7 +597,7 @@ const Matches = () => {
     });
 
     const adminRatingsQuery = query(
-      collection(db, "matches", selectedMatchId, "adminRatings")
+      collection(db, "matches", selectedMatchId, "adminRatings"),
     );
     const unsubscribeAdminRatings = onSnapshot(
       adminRatingsQuery,
@@ -583,7 +610,7 @@ const Matches = () => {
           });
         });
         setAdminRatings(map);
-      }
+      },
     );
 
     return () => {
@@ -602,7 +629,7 @@ const Matches = () => {
     setIsLoadingLiveStats(true);
     const liveEventsQuery = query(
       collection(db, "matches", selectedMatchId, "liveEvents"),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
     const unsubscribeLive = onSnapshot(
       liveEventsQuery,
@@ -617,7 +644,7 @@ const Matches = () => {
         console.error("[Matches] live events load error", err);
         setLiveStatsMap(new Map());
         setIsLoadingLiveStats(false);
-      }
+      },
     );
     return () => unsubscribeLive();
   }, [selectedMatchId, weights]);
@@ -632,7 +659,7 @@ const Matches = () => {
     setIsLoadingAttendance(true);
     const attendanceQuery = query(
       collection(db, "matches", selectedMatchId, "attendance"),
-      orderBy("timestamp", "desc")
+      orderBy("timestamp", "desc"),
     );
 
     const unsubscribe = onSnapshot(
@@ -648,7 +675,7 @@ const Matches = () => {
       (error) => {
         console.error("Error fetching attendance:", error);
         setIsLoadingAttendance(false);
-      }
+      },
     );
 
     return () => unsubscribe();
@@ -667,7 +694,7 @@ const Matches = () => {
           timestamp: serverTimestamp(),
           memberName: memberName,
           userAgent: "Admin Manual Add",
-        }
+        },
       );
       toast({
         title: "Thành công",
@@ -686,7 +713,7 @@ const Matches = () => {
 
   const handleDeleteAttendance = async (
     memberId: string,
-    memberName: string
+    memberName: string,
   ) => {
     if (!selectedMatchId) return;
 
@@ -697,7 +724,7 @@ const Matches = () => {
 
     try {
       await deleteDoc(
-        doc(db, "matches", selectedMatchId, "attendance", memberId)
+        doc(db, "matches", selectedMatchId, "attendance", memberId),
       );
       toast({
         title: "Thành công",
@@ -723,12 +750,12 @@ const Matches = () => {
         postApiJson("/notify/attendance-deleted", {
           matchId: matchIdToDelete,
         }).catch((err) =>
-          console.error("Failed to send delete attendance notification", err)
+          console.error("Failed to send delete attendance notification", err),
         );
       }
       const batch = writeBatch(db);
       const sharesSnapshot = await getDocs(
-        collection(db, "matches", matchIdToDelete, "shares")
+        collection(db, "matches", matchIdToDelete, "shares"),
       );
       sharesSnapshot.forEach((shareDoc) => batch.delete(shareDoc.ref));
       batch.delete(doc(db, "matches", matchIdToDelete));
@@ -739,10 +766,10 @@ const Matches = () => {
       });
       if (selectedMatchId === matchIdToDelete) {
         const remainingMatches = matches.filter(
-          (m) => m.id !== matchIdToDelete
+          (m) => m.id !== matchIdToDelete,
         );
         setSelectedMatchId(
-          remainingMatches.length > 0 ? remainingMatches[0].id : null
+          remainingMatches.length > 0 ? remainingMatches[0].id : null,
         );
       }
     } catch (error) {
@@ -799,6 +826,152 @@ const Matches = () => {
     }
   };
 
+  const fetchPendingSharesAcrossAllMatches = useCallback(async () => {
+    setIsLoadingPending(true);
+    try {
+      const q = cq(
+        collectionGroup(db, "shares"),
+        where("status", "==", "PENDING"),
+      );
+      const snap = await getDocs(q);
+      const map = new Map<
+        string,
+        {
+          shareId: string;
+          matchId: string;
+          matchDate: string;
+          memberId: string;
+          memberName: string;
+          teamName: string;
+          amount: number;
+        }[]
+      >();
+
+      snap.forEach((docSnap) => {
+        const parentPath = docSnap.ref.parent.parent?.id;
+        if (!parentPath || parentPath === "matches") return;
+        const match = matches.find((m) => m.id === parentPath);
+        const matchDate = match
+          ? new Date(
+              match.date instanceof Timestamp
+                ? match.date.toDate()
+                : match.date,
+            ).toLocaleDateString("vi-VN")
+          : parentPath;
+        const data = docSnap.data();
+        const entry = {
+          shareId: docSnap.id,
+          matchId: parentPath,
+          matchDate,
+          memberId: data.memberId,
+          memberName: members.get(data.memberId) || "Không rõ",
+          teamName: data.teamName || `Đội ${data.teamId}`,
+          amount: data.amount,
+        };
+        const key = data.memberId;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(entry);
+      });
+
+      setPendingSharesMap(map);
+    } catch (err) {
+      console.error("fetchPendingSharesAcrossAllMatches error", err);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description:
+          "Không thể tải danh sách nợ. Có thể cần tạo Firestore index.",
+      });
+    } finally {
+      setIsLoadingPending(false);
+    }
+  }, [matches, members]);
+
+  const handleMarkPaidFromModal = async (shareId: string, matchId: string) => {
+    try {
+      await updateDoc(doc(db, "matches", matchId, "shares", shareId), {
+        status: "PAID",
+        paidAt: new Date().toISOString(),
+        channel: "MANUAL",
+      });
+      await fetchPendingSharesAcrossAllMatches();
+      toast({
+        title: "Thành công",
+        description: "Đã cập nhật trạng thái thanh toán.",
+      });
+    } catch (err) {
+      console.error("handleMarkPaidFromModal error", err);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể cập nhật trạng thái.",
+      });
+    }
+  };
+
+  const handleScreenshotDebtModal = async () => {
+    if (!debtModalContentRef.current) return;
+    try {
+      // Clone content ra container tạm bên ngoài Dialog overflow context
+      const contentEl = debtModalContentRef.current;
+      const clone = contentEl.cloneNode(true) as HTMLElement;
+      clone.style.position = "fixed";
+      clone.style.top = "-9999px";
+      clone.style.left = "-9999px";
+      clone.style.width = `${contentEl.scrollWidth}px`;
+      clone.style.maxHeight = "none";
+      clone.style.overflow = "visible";
+      clone.style.backgroundColor = "#ffffff";
+      clone.style.padding = "16px";
+      clone.style.borderRadius = "8px";
+      document.body.appendChild(clone);
+
+      const canvas = await html2canvas(clone, {
+        backgroundColor: "#ffffff",
+        scale: 2,
+        useCORS: true,
+        width: clone.scrollWidth,
+        height: clone.scrollHeight,
+        windowWidth: clone.scrollWidth,
+        windowHeight: clone.scrollHeight,
+      });
+
+      document.body.removeChild(clone);
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ "image/png": blob }),
+          ]);
+          toast({
+            title: "Thành công",
+            description: "Đã copy screenshot vào clipboard!",
+          });
+        } catch {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `debt-list-${new Date().toISOString().slice(0, 10)}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+          toast({
+            title: "Đã tải ảnh xuống",
+            description:
+              "Clipboard API không khả dụng, đã tải ảnh thay thế.",
+          });
+        }
+      }, "image/png");
+    } catch (err) {
+      console.error("handleScreenshotDebtModal error", err);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể chụp ảnh.",
+      });
+    }
+  };
+
   const filteredShares = useMemo(() => {
     return shares.filter((share) => {
       const memberName = members.get(share.memberId) || "";
@@ -842,7 +1015,7 @@ const Matches = () => {
     return new Date(
       typeof selectedMatch.date === "string"
         ? selectedMatch.date
-        : selectedMatch.date.toDate()
+        : selectedMatch.date.toDate(),
     ).toLocaleDateString("vi-VN");
   }, [selectedMatch]);
 
@@ -888,12 +1061,12 @@ const Matches = () => {
   const topScorers = useMemo(() => {
     if (combinedRatings.size === 0) return [];
     const sorted = Array.from(combinedRatings.entries()).sort(
-      ([, a], [, b]) => b.finalScore - a.finalScore
+      ([, a], [, b]) => b.finalScore - a.finalScore,
     );
     const topScore = sorted[0][1].finalScore;
     return sorted
       .filter(
-        ([, ratingData]) => Math.abs(ratingData.finalScore - topScore) < 1e-9
+        ([, ratingData]) => Math.abs(ratingData.finalScore - topScore) < 1e-9,
       )
       .map(([memberId, ratingData]) => {
         const shareInfo = shares.find((s) => s.memberId === memberId);
@@ -912,14 +1085,14 @@ const Matches = () => {
 
   const topScorerIds = useMemo(
     () => new Set(topScorers.map((s) => s.memberId)),
-    [topScorers]
+    [topScorers],
   );
 
   const liveStatsList = useMemo(() => {
     return Array.from(liveStatsMap.values())
       .filter(
         (s) =>
-          s.total > 0 || s.foul > 0 || s.yellow > 0 || s.red > 0 || s.note > 0
+          s.total > 0 || s.foul > 0 || s.yellow > 0 || s.red > 0 || s.note > 0,
       )
       .sort((a, b) => {
         if (b.primaryScore !== a.primaryScore)
@@ -944,10 +1117,13 @@ const Matches = () => {
     const found = matches.find((m) => m.id === selectedMatchId);
     if (!found) return {};
     if (found.teamsConfig) {
-      return found.teamsConfig.reduce((acc, t) => {
-        acc[t.id] = t.name;
-        return acc;
-      }, {} as Record<string, string>);
+      return found.teamsConfig.reduce(
+        (acc, t) => {
+          acc[t.id] = t.name;
+          return acc;
+        },
+        {} as Record<string, string>,
+      );
     }
     return found.teamNames || {};
   }, [matches, selectedMatchId]);
@@ -963,7 +1139,7 @@ const Matches = () => {
 
   const topMedalScores = useMemo(() => {
     const unique = Array.from(
-      new Set(liveStatsList.map((s) => s.primaryScore))
+      new Set(liveStatsList.map((s) => s.primaryScore)),
     );
     return unique.slice(0, 3);
   }, [liveStatsList]);
@@ -981,7 +1157,7 @@ const Matches = () => {
   const topByField = useCallback(
     (
       statsList: AggregatedStat[],
-      field: keyof AggregatedStat
+      field: keyof AggregatedStat,
     ): AggregatedStat[] => {
       return [...statsList].sort((a, b) => {
         const aVal = a[field];
@@ -992,7 +1168,7 @@ const Matches = () => {
         return 0;
       });
     },
-    []
+    [],
   );
 
   const topGoalLeaders = useMemo(() => {
@@ -1030,7 +1206,7 @@ const Matches = () => {
         });
       }
     },
-    [selectedMatchId]
+    [selectedMatchId],
   );
 
   const handleToggleRatingsPublished = useCallback(
@@ -1054,7 +1230,7 @@ const Matches = () => {
         });
       }
     },
-    [selectedMatchId]
+    [selectedMatchId],
   );
 
   return (
@@ -1067,6 +1243,16 @@ const Matches = () => {
           <Button onClick={() => navigate("/admin/setup")}>
             <PlusCircle className="mr-2 h-4 w-4" />
             Tạo trận đấu mới
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => {
+              setIsDebtModalOpen(true);
+              fetchPendingSharesAcrossAllMatches();
+            }}
+          >
+            <DollarSign className="mr-2 h-4 w-4" />
+            Nợ chưa trả
           </Button>
         </div>
         <div className="grid lg:grid-cols-12 gap-8">
@@ -1216,7 +1402,7 @@ const Matches = () => {
                                       <TableCell className="text-sm text-muted-foreground">
                                         {record.timestamp?.seconds
                                           ? new Date(
-                                              record.timestamp.seconds * 1000
+                                              record.timestamp.seconds * 1000,
                                             ).toLocaleTimeString("vi-VN", {
                                               hour: "2-digit",
                                               minute: "2-digit",
@@ -1231,7 +1417,7 @@ const Matches = () => {
                                           onClick={() =>
                                             handleDeleteAttendance(
                                               memberId,
-                                              record.memberName
+                                              record.memberName,
                                             )
                                           }
                                         >
@@ -1239,7 +1425,7 @@ const Matches = () => {
                                         </Button>
                                       </TableCell>
                                     </TableRow>
-                                  )
+                                  ),
                                 )}
                               </TableBody>
                             </Table>
@@ -1312,7 +1498,7 @@ const Matches = () => {
                                             className={cn(
                                               "flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md",
                                               index === 0 &&
-                                                "bg-yellow-100 dark:bg-yellow-900/50"
+                                                "bg-yellow-100 dark:bg-yellow-900/50",
                                             )}
                                           >
                                             <div className="flex items-center gap-3">
@@ -1324,7 +1510,7 @@ const Matches = () => {
                                                   "font-semibold",
                                                   index === 0
                                                     ? "text-lg text-yellow-600 dark:text-yellow-400"
-                                                    : "text-sm"
+                                                    : "text-sm",
                                                 )}
                                               >
                                                 {index + 1}. {mvp.mvpName}
@@ -1338,7 +1524,7 @@ const Matches = () => {
                                               }
                                               className={cn(
                                                 index === 0 &&
-                                                  "bg-yellow-500 text-white"
+                                                  "bg-yellow-500 text-white",
                                               )}
                                             >
                                               {mvp.voteCount} phiếu
@@ -1399,18 +1585,18 @@ const Matches = () => {
                                   {Array.from(combinedRatings.entries())
                                     .sort(
                                       ([, a], [, b]) =>
-                                        b.finalScore - a.finalScore
+                                        b.finalScore - a.finalScore,
                                     )
                                     .map(([memberId, ratingData], index) => {
                                       const shareInfo = shares.find(
-                                        (s) => s.memberId === memberId
+                                        (s) => s.memberId === memberId,
                                       );
                                       const teamName =
                                         shareInfo?.teamName || "N/A";
                                       const isTopScorer =
                                         topScorerIds.has(memberId);
                                       const peerScore = Number.isFinite(
-                                        ratingData.averageScore
+                                        ratingData.averageScore,
                                       )
                                         ? ratingData.averageScore
                                         : 0;
@@ -1421,13 +1607,13 @@ const Matches = () => {
                                               className={cn(
                                                 "cursor-pointer",
                                                 isTopScorer &&
-                                                  "bg-green-100 dark:bg-green-900/50"
+                                                  "bg-green-100 dark:bg-green-900/50",
                                               )}
                                             >
                                               <TableCell
                                                 className={cn(
                                                   isTopScorer &&
-                                                    "font-bold text-lg"
+                                                    "font-bold text-lg",
                                                 )}
                                               >
                                                 {index + 1}
@@ -1436,7 +1622,7 @@ const Matches = () => {
                                                 className={cn(
                                                   "font-medium",
                                                   isTopScorer &&
-                                                    "text-lg text-green-600 dark:text-green-400"
+                                                    "text-lg text-green-600 dark:text-green-400",
                                                 )}
                                               >
                                                 <div className="flex items-center gap-2">
@@ -1457,7 +1643,7 @@ const Matches = () => {
                                                 {ratingData.hasAdminScore ? (
                                                   <Badge variant="secondary">
                                                     {ratingData.adminScore.toFixed(
-                                                      2
+                                                      2,
                                                     )}
                                                   </Badge>
                                                 ) : (
@@ -1475,11 +1661,11 @@ const Matches = () => {
                                                   }
                                                   className={cn(
                                                     isTopScorer &&
-                                                      "bg-green-500 text-white text-base px-3 py-1"
+                                                      "bg-green-500 text-white text-base px-3 py-1",
                                                   )}
                                                 >
                                                   {ratingData.finalScore.toFixed(
-                                                    2
+                                                    2,
                                                   )}
                                                 </Badge>
                                               </TableCell>
@@ -1505,7 +1691,7 @@ const Matches = () => {
                                                 <strong>
                                                   {ratingData.hasAdminScore
                                                     ? `${ratingData.adminScore.toFixed(
-                                                        2
+                                                        2,
                                                       )} / 5`
                                                     : "Chưa chấm"}
                                                 </strong>
@@ -1514,7 +1700,7 @@ const Matches = () => {
                                                 <span>Tổng</span>
                                                 <Badge>
                                                   {ratingData.finalScore.toFixed(
-                                                    2
+                                                    2,
                                                   )}{" "}
                                                   / 10
                                                 </Badge>
@@ -1539,7 +1725,7 @@ const Matches = () => {
                                                             {d.score} điểm
                                                           </strong>
                                                         </li>
-                                                      )
+                                                      ),
                                                     )
                                                   ) : (
                                                     <li className="text-xs text-muted-foreground">
@@ -1589,7 +1775,7 @@ const Matches = () => {
                                           >
                                             {data.ratedByName}
                                           </SelectItem>
-                                        )
+                                        ),
                                       )}
                                     </SelectContent>
                                   </Select>
@@ -1622,7 +1808,7 @@ const Matches = () => {
                                           {crossRatings
                                             .get(selectedRaterId)
                                             ?.ratingsGiven.sort(
-                                              (a, b) => b.score - a.score
+                                              (a, b) => b.score - a.score,
                                             )
                                             .map(({ playerRatedId, score }) => (
                                               <TableRow key={playerRatedId}>
@@ -1678,9 +1864,11 @@ const Matches = () => {
                         ) : (
                           <>
                             {Object.keys(currentTeamNames).length > 0 && (
-                              <div className={`grid gap-2 mb-3 ${Object.keys(currentTeamNames).length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                                {Object.entries(currentTeamNames)
-                                  .map(([teamId, teamName]) => (
+                              <div
+                                className={`grid gap-2 mb-3 ${Object.keys(currentTeamNames).length >= 3 ? "grid-cols-3" : "grid-cols-2"}`}
+                              >
+                                {Object.entries(currentTeamNames).map(
+                                  ([teamId, teamName]) => (
                                     <Card
                                       key={teamId}
                                       className="p-3 border-dashed"
@@ -1692,36 +1880,37 @@ const Matches = () => {
                                         {teamScore.get(teamId) || 0}
                                       </div>
                                     </Card>
-                                  ))}
+                                  ),
+                                )}
                               </div>
                             )}
                             <div className="flex flex-wrap gap-2">
                               {liveStatsList.map((stats) => {
                                 const medal = medalClassForScore(
-                                  stats.primaryScore
+                                  stats.primaryScore,
                                 );
                                 const medalIcon =
                                   medal === "gold"
                                     ? "🥇"
                                     : medal === "silver"
-                                    ? "🥈"
-                                    : medal === "bronze"
-                                    ? "🥉"
-                                    : null;
+                                      ? "🥈"
+                                      : medal === "bronze"
+                                        ? "🥉"
+                                        : null;
                                 const medalClass =
                                   medal === "gold"
                                     ? "border-emerald-400 bg-emerald-50"
                                     : medal === "silver"
-                                    ? "border-blue-400 bg-blue-50"
-                                    : medal === "bronze"
-                                    ? "border-amber-400 bg-amber-50"
-                                    : "";
+                                      ? "border-blue-400 bg-blue-50"
+                                      : medal === "bronze"
+                                        ? "border-amber-400 bg-amber-50"
+                                        : "";
                                 return (
                                   <div
                                     key={stats.memberId}
                                     className={cn(
                                       "rounded border p-2 bg-muted/30 text-xs space-y-1 w-[48%] sm:w-[31%] lg:w-[23%]",
-                                      medalClass
+                                      medalClass,
                                     )}
                                   >
                                     <div className="font-semibold truncate flex items-center gap-1">
@@ -1885,7 +2074,7 @@ const Matches = () => {
                                       / 5{" • "}
                                       {topScorers[0].hasAdminScore
                                         ? `Admin: ${topScorers[0].adminScore.toFixed(
-                                            2
+                                            2,
                                           )} / 5`
                                         : "Admin: Chưa chấm"}
                                     </p>
@@ -1917,7 +2106,7 @@ const Matches = () => {
                                           .map(
                                             (stat) =>
                                               members.get(stat.memberId) ||
-                                              "Không rõ"
+                                              "Không rõ",
                                           )
                                           .join(", ")}
                                       </h3>
@@ -1945,7 +2134,7 @@ const Matches = () => {
                                           .map(
                                             (stat) =>
                                               members.get(stat.memberId) ||
-                                              "Không rõ"
+                                              "Không rõ",
                                           )
                                           .join(", ")}
                                       </h3>
@@ -2111,7 +2300,7 @@ const Matches = () => {
                               key={share.id}
                               className={cn(
                                 highlightedShareId === share.id &&
-                                  "bg-yellow-200/50 transition-all duration-500"
+                                  "bg-yellow-200/50 transition-all duration-500",
                               )}
                             >
                               <TableCell className="font-medium">
@@ -2163,6 +2352,117 @@ const Matches = () => {
             )}
           </div>
         </div>
+        <Dialog open={isDebtModalOpen} onOpenChange={setIsDebtModalOpen}>
+          <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0">
+            <div className="px-6 pt-6 pb-4">
+              <div className="flex items-center justify-between">
+                <DialogTitle className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-destructive" />
+                  Danh sách nợ chưa trả
+                  <Badge variant="destructive">
+                    {pendingSharesMap.size} người
+                  </Badge>
+                </DialogTitle>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleScreenshotDebtModal}
+                  disabled={isLoadingPending || pendingSharesMap.size === 0}
+                >
+                  <ClipboardList className="h-4 w-4 mr-1" />
+                  Copy ảnh
+                </Button>
+              </div>
+            </div>
+            <div ref={debtModalContentRef} className="flex-1 overflow-y-auto px-6 pb-6">
+              {isLoadingPending ? (
+                <div className="flex justify-center p-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : pendingSharesMap.size === 0 ? (
+                <div className="text-center p-8 text-muted-foreground">
+                  Không có ai nợ tiền trận nào.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {Array.from(pendingSharesMap.entries())
+                    .sort(
+                      ([, a], [, b]) =>
+                        b.reduce((s, e) => s + e.amount, 0) -
+                        a.reduce((s, e) => s + e.amount, 0),
+                    )
+                    .map(([memberId, entries]) => {
+                      const totalDebt = entries.reduce(
+                        (s, e) => s + e.amount,
+                        0,
+                      );
+                      return (
+                        <Card key={memberId} className="overflow-hidden">
+                          <div className="flex items-center justify-between px-4 py-3 bg-destructive/5 border-b">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center font-bold text-sm">
+                                {entries[0].memberName.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="font-semibold">
+                                  {entries[0].memberName}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {entries.length} trận chưa trả
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold text-destructive">
+                                {totalDebt.toLocaleString()} VND
+                              </p>
+                            </div>
+                          </div>
+                          <div className="divide-y">
+                            {entries.map((entry) => (
+                              <div
+                                key={entry.shareId}
+                                className="flex items-center justify-between px-4 py-2 hover:bg-muted/50 transition-colors"
+                              >
+                                <div className="flex items-center gap-4">
+                                  <div className="text-sm">
+                                    <p className="font-medium">
+                                      {entry.matchDate}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {entry.teamName}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-sm font-medium">
+                                    {entry.amount.toLocaleString()} VND
+                                  </span>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() =>
+                                      handleMarkPaidFromModal(
+                                        entry.shareId,
+                                        entry.matchId,
+                                      )
+                                    }
+                                  >
+                                    <CheckCircle2 className="h-4 w-4 mr-1" />
+                                    Mark đã trả
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </Card>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
