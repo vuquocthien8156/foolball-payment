@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, createPortal } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Card,
@@ -374,6 +374,7 @@ const Matches = () => {
   >(new Map());
   const [isLoadingPending, setIsLoadingPending] = useState(false);
   const debtModalContentRef = useRef<HTMLDivElement>(null);
+  const [isScreenshotMode, setIsScreenshotMode] = useState(false);
 
   // Attendance state
   const [attendance, setAttendance] = useState<Map<string, AttendanceRecord>>(
@@ -910,35 +911,29 @@ const Matches = () => {
   };
 
   const handleScreenshotDebtModal = async () => {
-    if (!debtModalContentRef.current) return;
+    if (pendingSharesMap.size === 0) return;
+    setIsScreenshotMode(true);
+    // Wait for Portal to render into body
+    await new Promise((r) => setTimeout(r, 100));
+    const screenshotEl = document.getElementById("debt-screenshot-portal");
+    if (!screenshotEl) {
+      setIsScreenshotMode(false);
+      return;
+    }
     try {
-      // Clone content ra container tạm bên ngoài Dialog overflow context
-      const contentEl = debtModalContentRef.current;
-      const clone = contentEl.cloneNode(true) as HTMLElement;
-      clone.style.position = "fixed";
-      clone.style.top = "-9999px";
-      clone.style.left = "-9999px";
-      clone.style.width = `${contentEl.scrollWidth}px`;
-      clone.style.maxHeight = "none";
-      clone.style.overflow = "visible";
-      clone.style.backgroundColor = "#ffffff";
-      clone.style.padding = "16px";
-      clone.style.borderRadius = "8px";
-      document.body.appendChild(clone);
-
-      const canvas = await html2canvas(clone, {
+      const canvas = await html2canvas(screenshotEl, {
         backgroundColor: "#ffffff",
         scale: 2,
         useCORS: true,
-        width: clone.scrollWidth,
-        height: clone.scrollHeight,
-        windowWidth: clone.scrollWidth,
-        windowHeight: clone.scrollHeight,
+        width: screenshotEl.scrollWidth,
+        height: screenshotEl.scrollHeight,
+        windowWidth: screenshotEl.scrollWidth,
+        windowHeight: screenshotEl.scrollHeight,
+        x: 0,
+        y: 0,
       });
-
-      document.body.removeChild(clone);
-
       canvas.toBlob(async (blob) => {
+        setIsScreenshotMode(false);
         if (!blob) return;
         try {
           await navigator.clipboard.write([
@@ -963,6 +958,7 @@ const Matches = () => {
         }
       }, "image/png");
     } catch (err) {
+      setIsScreenshotMode(false);
       console.error("handleScreenshotDebtModal error", err);
       toast({
         variant: "destructive",
@@ -2384,7 +2380,12 @@ const Matches = () => {
                   Không có ai nợ tiền trận nào.
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div id="debt-screenshot-portal" className="space-y-3 bg-white p-1">
+                  <div className="flex items-center gap-2 mb-4 pb-2 border-b">
+                    <DollarSign className="h-5 w-5 text-destructive" />
+                    <span className="font-bold text-base">Danh sách nợ chưa trả</span>
+                    <Badge variant="destructive">{pendingSharesMap.size} người</Badge>
+                  </div>
                   {Array.from(pendingSharesMap.entries())
                     .sort(
                       ([, a], [, b]) =>
@@ -2422,7 +2423,7 @@ const Matches = () => {
                             {entries.map((entry) => (
                               <div
                                 key={entry.shareId}
-                                className="flex items-center justify-between px-4 py-2 hover:bg-muted/50 transition-colors"
+                                className="flex items-center justify-between px-4 py-2"
                               >
                                 <div className="flex items-center gap-4">
                                   <div className="text-sm">
@@ -2438,19 +2439,6 @@ const Matches = () => {
                                   <span className="text-sm font-medium">
                                     {entry.amount.toLocaleString()} VND
                                   </span>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() =>
-                                      handleMarkPaidFromModal(
-                                        entry.shareId,
-                                        entry.matchId,
-                                      )
-                                    }
-                                  >
-                                    <CheckCircle2 className="h-4 w-4 mr-1" />
-                                    Mark đã trả
-                                  </Button>
                                 </div>
                               </div>
                             ))}
@@ -2463,6 +2451,100 @@ const Matches = () => {
             </div>
           </DialogContent>
         </Dialog>
+        {isScreenshotMode &&
+          createPortal(
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                zIndex: 99999,
+                width: "100vw",
+                height: "100vh",
+                overflow: "auto",
+                backgroundColor: "white",
+              }}
+            >
+              <div
+                className="px-8 py-6"
+                style={{
+                  minWidth: debtModalContentRef.current
+                    ? `${debtModalContentRef.current.scrollWidth}px`
+                    : "600px",
+                }}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 mb-4 pb-2 border-b">
+                    <DollarSign className="h-5 w-5 text-red-600" />
+                    <span className="font-bold text-base">Danh sách nợ chưa trả</span>
+                    <Badge variant="destructive">{pendingSharesMap.size} người</Badge>
+                  </div>
+                  {Array.from(pendingSharesMap.entries())
+                    .sort(
+                      ([, a], [, b]) =>
+                        b.reduce((s, e) => s + e.amount, 0) -
+                        a.reduce((s, e) => s + e.amount, 0),
+                    )
+                    .map(([memberId, entries]) => {
+                      const totalDebt = entries.reduce(
+                        (s, e) => s + e.amount,
+                        0,
+                      );
+                      return (
+                        <div
+                          key={memberId}
+                          className="border rounded-lg overflow-hidden"
+                        >
+                          <div className="flex items-center justify-between px-4 py-3 bg-red-50 border-b">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center font-bold text-sm">
+                                {entries[0].memberName.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="font-semibold text-sm">
+                                  {entries[0].memberName}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  {entries.length} trận chưa trả
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold text-red-600 text-sm">
+                                {totalDebt.toLocaleString()} VND
+                              </p>
+                            </div>
+                          </div>
+                          <div className="divide-y">
+                            {entries.map((entry) => (
+                              <div
+                                key={entry.shareId}
+                                className="flex items-center justify-between px-4 py-2 bg-white"
+                              >
+                                <div className="flex items-center gap-4">
+                                  <div className="text-sm">
+                                    <p className="font-medium text-gray-800">
+                                      {entry.matchDate}
+                                    </p>
+                                    <p className="text-xs text-gray-500">
+                                      {entry.teamName}
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className="text-sm font-medium text-gray-700">
+                                  {entry.amount.toLocaleString()} VND
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
       </div>
     </div>
   );
