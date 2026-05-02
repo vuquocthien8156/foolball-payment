@@ -52,9 +52,9 @@ const AdminLayout = () => {
       new Set(
         isSuperAdmin
           ? ["dashboard", "matches", "members", "scoring", "live", "public"]
-          : tabs
+          : tabs,
       ),
-    [isSuperAdmin, tabs]
+    [isSuperAdmin, tabs],
   );
   const navigate = useNavigate();
 
@@ -75,7 +75,7 @@ const AdminLayout = () => {
   useEffect(() => {
     const q = query(
       collection(db, "notifications"),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
     );
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const notifs = querySnapshot.docs.map(
@@ -83,7 +83,7 @@ const AdminLayout = () => {
           ({
             id: doc.id,
             ...doc.data(),
-          } as Notification)
+          }) as Notification,
       );
       setNotifications(notifs);
       setUnreadCount(notifs.filter((n) => !n.isRead).length);
@@ -98,7 +98,7 @@ const AdminLayout = () => {
       await updateDoc(notifRef, { isRead: true });
     }
     navigate(
-      `/admin/dashboard?matchId=${notification.matchId}&shareId=${notification.shareId}`
+      `/admin/dashboard?matchId=${notification.matchId}&shareId=${notification.shareId}`,
     );
   };
 
@@ -148,7 +148,7 @@ const AdminLayout = () => {
       ];
 
       const firstAvailableTab = tabRoutes.find(
-        (tab) => isSuperAdmin || allowedTabs.has(tab.key)
+        (tab) => isSuperAdmin || allowedTabs.has(tab.key),
       );
 
       if (firstAvailableTab) {
@@ -163,7 +163,7 @@ const AdminLayout = () => {
         "grid h-screen w-full overflow-hidden",
         isSidebarOpen
           ? "md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]"
-          : "md:grid-cols-[0px_1fr]"
+          : "md:grid-cols-[0px_1fr]",
       )}
     >
       {isSidebarOpen && (
@@ -176,7 +176,7 @@ const AdminLayout = () => {
         className={cn(
           "border-r bg-background z-40 transform transition-transform duration-200",
           isSidebarOpen ? "translate-x-0" : "-translate-x-full",
-          "fixed inset-y-0 left-0 w-64 md:static md:w-64 lg:w-72 shadow-lg md:shadow-none"
+          "fixed inset-y-0 left-0 w-64 md:static md:w-64 lg:w-72 shadow-lg md:shadow-none",
         )}
       >
         <div className="flex h-full flex-col gap-2">
@@ -229,7 +229,7 @@ const AdminLayout = () => {
                         onClick={() => handleNotificationClick(notification)}
                         className={cn(
                           "flex items-start gap-3 rounded-lg p-3 text-left text-sm transition-all hover:bg-accent",
-                          !notification.isRead && "bg-muted"
+                          !notification.isRead && "bg-muted",
                         )}
                       >
                         {!notification.isRead && (
@@ -254,7 +254,7 @@ const AdminLayout = () => {
           </div>
           <div className="flex-1">
             <nav className="grid items-start px-2 text-sm font-medium lg:px-4">
-              {(isSuperAdmin || allowedTabs.has("dashboard")) && (
+              {/* {(isSuperAdmin || allowedTabs.has("dashboard")) && (
                 <NavLink
                   to="/admin/dashboard"
                   onClick={() => setIsSidebarOpen(false)}
@@ -267,7 +267,7 @@ const AdminLayout = () => {
                   <Home className="h-4 w-4" />
                   Dashboard
                 </NavLink>
-              )}
+              )} */}
               {(isSuperAdmin || allowedTabs.has("matches")) && (
                 <>
                   <NavLink

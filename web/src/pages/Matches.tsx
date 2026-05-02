@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Card,
@@ -910,34 +911,26 @@ const Matches = () => {
   };
 
   const handleScreenshotDebtModal = async () => {
-    if (!debtModalContentRef.current) return;
+    if (pendingSharesMap.size === 0) return;
+    const screenshotEl = debtModalContentRef.current;
+    if (!screenshotEl) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không tìm thấy nội dung để chụp.",
+      });
+      return;
+    }
     try {
-      // Clone content ra container tạm bên ngoài Dialog overflow context
-      const contentEl = debtModalContentRef.current;
-      const clone = contentEl.cloneNode(true) as HTMLElement;
-      clone.style.position = "fixed";
-      clone.style.top = "-9999px";
-      clone.style.left = "-9999px";
-      clone.style.width = `${contentEl.scrollWidth}px`;
-      clone.style.maxHeight = "none";
-      clone.style.overflow = "visible";
-      clone.style.backgroundColor = "#ffffff";
-      clone.style.padding = "16px";
-      clone.style.borderRadius = "8px";
-      document.body.appendChild(clone);
-
-      const canvas = await html2canvas(clone, {
+      const canvas = await html2canvas(screenshotEl, {
         backgroundColor: "#ffffff",
         scale: 2,
         useCORS: true,
-        width: clone.scrollWidth,
-        height: clone.scrollHeight,
-        windowWidth: clone.scrollWidth,
-        windowHeight: clone.scrollHeight,
+        scrollX: 0,
+        scrollY: 0,
+        windowWidth: screenshotEl.scrollWidth,
+        windowHeight: screenshotEl.scrollHeight,
       });
-
-      document.body.removeChild(clone);
-
       canvas.toBlob(async (blob) => {
         if (!blob) return;
         try {
@@ -957,8 +950,7 @@ const Matches = () => {
           URL.revokeObjectURL(url);
           toast({
             title: "Đã tải ảnh xuống",
-            description:
-              "Clipboard API không khả dụng, đã tải ảnh thay thế.",
+            description: "Clipboard API không khả dụng, đã tải ảnh thay thế.",
           });
         }
       }, "image/png");
@@ -2374,7 +2366,10 @@ const Matches = () => {
                 </Button>
               </div>
             </div>
-            <div ref={debtModalContentRef} className="flex-1 overflow-y-auto px-6 pb-6">
+            <div
+              ref={debtModalContentRef}
+              className="flex-1 overflow-y-auto px-6 pb-6"
+            >
               {isLoadingPending ? (
                 <div className="flex justify-center p-8">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -2384,7 +2379,19 @@ const Matches = () => {
                   Không có ai nợ tiền trận nào.
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div
+                  id="debt-screenshot-portal"
+                  className="space-y-3 bg-white p-1"
+                >
+                  <div className="flex items-center gap-2 mb-4 pb-2 border-b">
+                    <DollarSign className="h-5 w-5 text-destructive" />
+                    <span className="font-bold text-base">
+                      Danh sách nợ chưa trả
+                    </span>
+                    <Badge variant="destructive">
+                      {pendingSharesMap.size} người
+                    </Badge>
+                  </div>
                   {Array.from(pendingSharesMap.entries())
                     .sort(
                       ([, a], [, b]) =>
@@ -2422,7 +2429,7 @@ const Matches = () => {
                             {entries.map((entry) => (
                               <div
                                 key={entry.shareId}
-                                className="flex items-center justify-between px-4 py-2 hover:bg-muted/50 transition-colors"
+                                className="flex items-center justify-between px-4 py-2"
                               >
                                 <div className="flex items-center gap-4">
                                   <div className="text-sm">
@@ -2438,19 +2445,6 @@ const Matches = () => {
                                   <span className="text-sm font-medium">
                                     {entry.amount.toLocaleString()} VND
                                   </span>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() =>
-                                      handleMarkPaidFromModal(
-                                        entry.shareId,
-                                        entry.matchId,
-                                      )
-                                    }
-                                  >
-                                    <CheckCircle2 className="h-4 w-4 mr-1" />
-                                    Mark đã trả
-                                  </Button>
                                 </div>
                               </div>
                             ))}
