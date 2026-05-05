@@ -375,6 +375,7 @@ const Matches = () => {
   >(new Map());
   const [isLoadingPending, setIsLoadingPending] = useState(false);
   const debtModalContentRef = useRef<HTMLDivElement>(null);
+  const debtScreenshotRef = useRef<HTMLDivElement>(null);
 
   // Attendance state
   const [attendance, setAttendance] = useState<Map<string, AttendanceRecord>>(
@@ -912,7 +913,7 @@ const Matches = () => {
 
   const handleScreenshotDebtModal = async () => {
     if (pendingSharesMap.size === 0) return;
-    const screenshotEl = debtModalContentRef.current;
+    const screenshotEl = debtScreenshotRef.current;
     if (!screenshotEl) {
       toast({
         variant: "destructive",
@@ -2380,18 +2381,10 @@ const Matches = () => {
                 </div>
               ) : (
                 <div
+                  ref={debtScreenshotRef}
                   id="debt-screenshot-portal"
                   className="space-y-3 bg-white p-1"
                 >
-                  <div className="flex items-center gap-2 mb-4 pb-2 border-b">
-                    <DollarSign className="h-5 w-5 text-destructive" />
-                    <span className="font-bold text-base">
-                      Danh sách nợ chưa trả
-                    </span>
-                    <Badge variant="destructive">
-                      {pendingSharesMap.size} người
-                    </Badge>
-                  </div>
                   {Array.from(pendingSharesMap.entries())
                     .sort(
                       ([, a], [, b]) =>
