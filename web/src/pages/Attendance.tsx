@@ -41,6 +41,8 @@ import {
   Bell,
   ChevronDown,
   ChevronUp,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import {
   collection,
@@ -682,8 +684,12 @@ const Attendance = () => {
   };
 
   const [isSendingTeams, setIsSendingTeams] = useState(false);
+  const [isPasscodeDialogOpen, setIsPasscodeDialogOpen] = useState(false);
+  const [passcode, setPasscode] = useState("");
+  const [showPasscode, setShowPasscode] = useState(false);
 
-  const handleSendTeamsToSlack = async () => {
+  // Validate teams before opening passcode dialog.
+  const handleSendTeamsClick = () => {
     if (!matchId) return;
     const teamsWithMembers = teams.filter((t) => t.members.length > 0);
     if (teamsWithMembers.length === 0) {
@@ -700,17 +706,28 @@ const Attendance = () => {
       );
       if (!proceed) return;
     }
+    setPasscode("");
+    setShowPasscode(false);
+    setIsPasscodeDialogOpen(true);
+  };
+
+  const handleSendTeamsToSlack = async () => {
+    if (!matchId || !passcode.trim()) return;
+    const teamsWithMembers = teams.filter((t) => t.members.length > 0);
 
     setIsSendingTeams(true);
     try {
       await postApiJson("/teams/propose", {
         matchId,
+        passcode: passcode.trim(),
         teamsConfig: teamsWithMembers.map((t) => ({
           id: t.id,
           name: t.name,
           members: t.members.map((m) => ({ id: m.id, name: m.name })),
         })),
       });
+      setIsPasscodeDialogOpen(false);
+      setPasscode("");
       toast({
         title: "Đã gửi đề xuất!",
         description:
@@ -1258,7 +1275,7 @@ const Attendance = () => {
                 </CardDescription>
               </div>
               <Button
-                onClick={handleSendTeamsToSlack}
+                onClick={handleSendTeamsClick}
                 disabled={isSendingTeams}
                 className="shrink-0"
               >
@@ -1269,6 +1286,64 @@ const Attendance = () => {
                 )}
                 Gửi đội hình lên Slack
               </Button>
+
+              {/* Passcode dialog */}
+              <Dialog open={isPasscodeDialogOpen} onOpenChange={setIsPasscodeDialogOpen}>
+                <DialogContent className="max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>Nhập passcode</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-2">
+                    <p className="text-sm text-muted-foreground">
+                      Vui lòng nhập passcode để gửi đội hình lên Slack.
+                    </p>
+                    <div className="relative">
+                      <Input
+                        type={showPasscode ? "text" : "password"}
+                        placeholder="Passcode..."
+                        value={passcode}
+                        onChange={(e) => setPasscode(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleSendTeamsToSlack()}
+                        className="pr-10 font-mono"
+                        autoFocus
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        type="button"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                        onClick={() => setShowPasscode((v) => !v)}
+                      >
+                        {showPasscode ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsPasscodeDialogOpen(false)}
+                        disabled={isSendingTeams}
+                      >
+                        Hủy
+                      </Button>
+                      <Button
+                        onClick={handleSendTeamsToSlack}
+                        disabled={isSendingTeams || !passcode.trim()}
+                      >
+                        {isSendingTeams ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Bell className="h-4 w-4 mr-2" />
+                        )}
+                        Gửi
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">

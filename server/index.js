@@ -933,6 +933,18 @@ apiRoutes.post("/teams/propose", async (req, res) => {
 
   try {
     const db = admin.firestore();
+
+    // Validate passcode against appConfig/publicPasscode.
+    const { passcode } = req.body;
+    const configSnap = await db.collection("appConfig").doc("publicPasscode").get();
+    const storedPasscode = configSnap.exists ? configSnap.data()?.passcode : null;
+    if (!storedPasscode) {
+      return res.status(403).json({ error: "Chưa cấu hình passcode. Liên hệ admin." });
+    }
+    if (passcode !== storedPasscode) {
+      return res.status(403).json({ error: "Passcode không đúng." });
+    }
+
     const matchRef = db.collection("matches").doc(matchId);
     const matchSnap = await matchRef.get();
     if (!matchSnap.exists) {

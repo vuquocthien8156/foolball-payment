@@ -24,7 +24,7 @@ const TeamLocked = React.lazy(() => import("./pages/TeamLocked"));
 const PublicPortal = React.lazy(() => import("./pages/PublicPortal"));
 const PublicRatings = React.lazy(() => import("./pages/PublicRatings"));
 const ScoringMatches = React.lazy(() => import("./pages/ScoringMatches"));
-const LiveNotes = React.lazy(() => import("./pages/LiveNotes"));
+const Config = React.lazy(() => import("./pages/Config"));
 
 const queryClient = new QueryClient();
 
@@ -187,6 +187,14 @@ const App = () => {
                     element={
                       <TabGuard tabKey="live">
                         <LiveNotes />
+                      </TabGuard>
+                    }
+                  />
+                  <Route
+                    path="config"
+                    element={
+                      <TabGuard tabKey="members">
+                        <Config />
                       </TabGuard>
                     }
                   />
