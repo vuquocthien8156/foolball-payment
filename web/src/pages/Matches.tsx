@@ -105,6 +105,8 @@ interface Match {
   isDeleted?: boolean;
   isTest?: boolean;
   ratingsPublished?: boolean;
+  venueName?: string;
+  paidByMemberId?: string | null;
   teamNames?: { [key: string]: string };
   teamsConfig?: {
     id: string;
@@ -1190,6 +1192,15 @@ const Matches = () => {
             newStatus === "PUBLISHED" ? "Công khai" : "Đã tính tiền"
           }.`,
         });
+
+        // Fire Slack + push notification when publishing the bill (A6).
+        if (newStatus === "PUBLISHED") {
+          postApiJson("/notify/match-published", {
+            matchId: selectedMatchId,
+          }).catch((err) =>
+            console.error("Failed to send match-published notification", err),
+          );
+        }
       } catch (error) {
         console.error("Error updating match status:", error);
         toast({
@@ -2212,6 +2223,37 @@ const Matches = () => {
                     </CardContent>
                   </Card>
                 </div>
+                {(selectedMatch?.venueName || selectedMatch?.paidByMemberId) && (
+                  <Card className="shadow-card mb-6 bg-muted/30">
+                    <CardContent className="pt-6 flex flex-wrap gap-x-8 gap-y-3">
+                      {selectedMatch.venueName && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-muted-foreground">
+                            Sân:
+                          </span>
+                          <span className="font-semibold">
+                            {selectedMatch.venueName}
+                          </span>
+                        </div>
+                      )}
+                      {selectedMatch.paidByMemberId && (
+                        <div className="flex items-center gap-2">
+                          <DollarSign className="h-4 w-4 text-amber-600" />
+                          <span className="text-sm text-muted-foreground">
+                            Người ứng tiền sân:
+                          </span>
+                          <Badge
+                            variant="secondary"
+                            className="bg-amber-100 text-amber-800 hover:bg-amber-100"
+                          >
+                            {members.get(selectedMatch.paidByMemberId) ||
+                              "Không rõ"}
+                          </Badge>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
                 <Card className="shadow-card mb-6">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <div>

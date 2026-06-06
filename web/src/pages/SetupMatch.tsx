@@ -26,7 +26,17 @@ import {
   CheckCircle2,
   Link as LinkIcon,
   RotateCcw,
+  MapPin,
+  Clock,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "@/hooks/use-toast";
 import {
   collection,
@@ -92,6 +102,11 @@ interface MatchConfig {
   date?: Timestamp;
   status?: "PENDING" | "COMPLETED";
   isTest?: boolean;
+  venueName?: string;
+  mapIframe?: string;
+  attendanceCloseHours?: number;
+  paidByMemberId?: string | null;
+  skipAutoAttendance?: boolean;
 }
 
 // Helper
@@ -108,6 +123,7 @@ const SetupMatch = () => {
   const navigate = useNavigate();
 
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [time, setTime] = useState("19:00");
   const [totalAmount, setTotalAmount] = useState("");
   const [teamCount, setTeamCount] = useState<2 | 3>(2);
   const [isLoading, setIsLoading] = useState(true);
@@ -120,6 +136,12 @@ const SetupMatch = () => {
   >("PENDING");
   const [searchQuery, setSearchQuery] = useState("");
   const [isTestMatch, setIsTestMatch] = useState(false);
+  const [skipAutoAttendance, setSkipAutoAttendance] = useState(false);
+  const [venueName, setVenueName] = useState("");
+  const [mapIframe, setMapIframe] = useState("");
+  const [attendanceCloseHours, setAttendanceCloseHours] = useState(12);
+  const [paidByMemberId, setPaidByMemberId] = useState<string>("");
+  const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [pool, setPool] = useState<Member[]>([]);
   const [attendance, setAttendance] = useState<Set<string>>(new Set());
   const [teams, setTeams] = useState<Team[]>([
@@ -140,6 +162,7 @@ const SetupMatch = () => {
         .map((doc) => ({ id: doc.id, ...doc.data() } as Member))
         .filter((m) => !m.inactive);
       const membersMap = new Map(membersList.map((m) => [m.id, m]));
+      setAllMembers(membersList);
 
       let configSource: MatchConfig | null = null;
 
@@ -247,6 +270,11 @@ const SetupMatch = () => {
         );
         setTeamCount(savedConfig.teamCount || 2);
         setIsTestMatch(savedConfig.isTest || false);
+        setVenueName(savedConfig.venueName || "");
+        setMapIframe(savedConfig.mapIframe || "");
+        setAttendanceCloseHours(savedConfig.attendanceCloseHours ?? 12);
+        setPaidByMemberId(savedConfig.paidByMemberId || "");
+        setSkipAutoAttendance(savedConfig.skipAutoAttendance || false);
         setTeams(newTeams);
         setPool(newPool);
         if (matchId && configSource.date) {
@@ -256,6 +284,12 @@ const SetupMatch = () => {
               .toString()
               .padStart(2, "0")}-${matchDate
               .getDate()
+              .toString()
+              .padStart(2, "0")}`
+          );
+          setTime(
+            `${matchDate.getHours().toString().padStart(2, "0")}:${matchDate
+              .getMinutes()
               .toString()
               .padStart(2, "0")}`
           );
@@ -430,6 +464,11 @@ const SetupMatch = () => {
       const configToSave = {
         totalAmount: totalAmount || "0",
         teamCount,
+        venueName: venueName || null,
+        mapIframe: mapIframe || null,
+        attendanceCloseHours,
+        paidByMemberId: paidByMemberId || null,
+        skipAutoAttendance,
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
           name: t.name,
@@ -463,10 +502,15 @@ const SetupMatch = () => {
     try {
       const matchRef = doc(db, "matches", matchId);
       const matchData: any = {
-        date: new Date(date),
+        date: new Date(`${date}T${time}`),
         totalAmount: parseFloat(totalAmount) || 0,
         teamCount,
         isTest: isTestMatch,
+        venueName: venueName || null,
+        mapIframe: mapIframe || null,
+        attendanceCloseHours,
+        paidByMemberId: paidByMemberId || null,
+        skipAutoAttendance,
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
           name: t.name,
@@ -505,11 +549,16 @@ const SetupMatch = () => {
     try {
       const matchRef = doc(collection(db, "matches"));
       const matchData = {
-        date: new Date(date),
+        date: new Date(`${date}T${time}`),
         totalAmount: parseFloat(totalAmount) || 0,
         teamCount,
         status: "PENDING",
         isTest: isTestMatch,
+        venueName: venueName || null,
+        mapIframe: mapIframe || null,
+        attendanceCloseHours,
+        paidByMemberId: paidByMemberId || null,
+        skipAutoAttendance,
         createdAt: serverTimestamp(),
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
@@ -658,10 +707,15 @@ const SetupMatch = () => {
       const batch = writeBatch(db);
 
       const matchData = {
-        date: new Date(date),
+        date: new Date(`${date}T${time}`),
         totalAmount: numericTotalAmount,
         teamCount,
         isTest: isTestMatch,
+        venueName: venueName || null,
+        mapIframe: mapIframe || null,
+        attendanceCloseHours,
+        paidByMemberId: paidByMemberId || null,
+        skipAutoAttendance,
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
           name: t.name,
@@ -796,7 +850,7 @@ const SetupMatch = () => {
           <CardHeader>
             <CardTitle>Thông tin trận đấu</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-5">
+          <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-7">
             <div className="space-y-2">
               <Label htmlFor="date">Ngày đá</Label>
               <div className="relative">
@@ -809,6 +863,15 @@ const SetupMatch = () => {
                   className="pl-10"
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="time">Giờ đá</Label>
+              <Input
+                id="time"
+                type="time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="teamCount">Số đội</Label>
@@ -866,6 +929,112 @@ const SetupMatch = () => {
                   Luôn hiện nút xóa
                 </span>
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="skip-auto-attend">Bỏ tự động điểm danh</Label>
+              <div className="flex items-center gap-3 h-10">
+                <Switch
+                  id="skip-auto-attend"
+                  checked={skipAutoAttendance}
+                  onCheckedChange={setSkipAutoAttendance}
+                />
+                <span className="text-sm text-muted-foreground">
+                  Mọi người tự điểm danh
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-6 shadow-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <MapPin className="h-5 w-5" />
+              Địa điểm & Cấu hình điểm danh
+            </CardTitle>
+            <CardDescription>
+              Lưu vào Cấu Hình để dùng làm mặc định cho các trận tiếp theo.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="venue-name">Tên sân</Label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="venue-name"
+                    placeholder="Sân bóng Phú Thọ"
+                    value={venueName}
+                    onChange={(e) => setVenueName(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="close-hours" className="flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  Đóng điểm danh trước ngày đá (giờ)
+                </Label>
+                <Input
+                  id="close-hours"
+                  type="number"
+                  min="1"
+                  max="72"
+                  value={attendanceCloseHours}
+                  onChange={(e) =>
+                    setAttendanceCloseHours(parseInt(e.target.value) || 12)
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Mặc định: 12 giờ (đóng lúc 12:00 ngày hôm trước)
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="paid-by" className="flex items-center gap-2">
+                  <DollarSign className="h-4 w-4" />
+                  Người ứng tiền sân
+                </Label>
+                <Select
+                  value={paidByMemberId || "__none__"}
+                  onValueChange={(v) =>
+                    setPaidByMemberId(v === "__none__" ? "" : v)
+                  }
+                >
+                  <SelectTrigger id="paid-by">
+                    <SelectValue placeholder="Chọn người ứng tiền (tùy chọn)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— Không có —</SelectItem>
+                    {allMembers.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name}
+                        {m.nickname ? ` (${m.nickname})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Người này sẽ được hiển thị trên Slack & trang chi tiết để mọi
+                  người chuyển tiền lại.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="map-iframe">
+                Google Maps iframe
+              </Label>
+              <Textarea
+                id="map-iframe"
+                placeholder='Paste iframe từ Google Maps vào đây&#10;<iframe src="https://www.google.com/maps/embed?..." ...></iframe>'
+                value={mapIframe}
+                onChange={(e) => setMapIframe(e.target.value)}
+                rows={5}
+                className="font-mono text-xs"
+              />
+              <p className="text-xs text-muted-foreground">
+                Google Maps → Chia sẻ → Nhúng bản đồ → Copy HTML
+              </p>
             </div>
           </CardContent>
         </Card>

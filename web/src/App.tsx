@@ -20,6 +20,7 @@ const Login = React.lazy(() => import("./pages/Login"));
 const NotFound = React.lazy(() => import("./pages/NotFound"));
 const Matches = React.lazy(() => import("./pages/Matches"));
 const Attendance = React.lazy(() => import("./pages/Attendance"));
+const TeamLocked = React.lazy(() => import("./pages/TeamLocked"));
 const PublicPortal = React.lazy(() => import("./pages/PublicPortal"));
 const PublicRatings = React.lazy(() => import("./pages/PublicRatings"));
 const ScoringMatches = React.lazy(() => import("./pages/ScoringMatches"));
@@ -117,6 +118,7 @@ const App = () => {
                   <Route path="payment-success" element={<PaymentSuccess />} />
                   <Route path="payment-cancel" element={<PaymentCancel />} />
                   <Route path="attendance" element={<Attendance />} />
+                  <Route path="team-locked" element={<TeamLocked />} />
                   <Route path="ratings" element={<PublicRatings />} />
                 </Route>
 

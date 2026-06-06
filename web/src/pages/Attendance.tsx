@@ -37,6 +37,10 @@ import {
   RotateCcw,
   Repeat,
   X,
+  MapPin,
+  Bell,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import {
   collection,
@@ -50,11 +54,15 @@ import {
   limit,
   onSnapshot,
   updateDoc,
+  addDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
 import { Badge } from "@/components/ui/badge";
 import useLocalStorage from "@/hooks/useLocalStorage";
+import { ensureNotificationToken } from "@/lib/notifications";
+import { postApiJson } from "@/lib/api";
 
 // Interfaces
 interface Member {
@@ -71,6 +79,9 @@ interface Match {
   totalAmount: number;
   isDeleted?: boolean;
   teamCount?: number;
+  venueName?: string;
+  mapIframe?: string;
+  attendanceCloseHours?: number;
   teamsConfig?: {
     id: string;
     name: string;
@@ -82,6 +93,16 @@ interface Match {
 interface AttendanceRecord {
   timestamp: Timestamp;
   memberName: string;
+  userAgent: string;
+}
+
+type ActionType = "ATTEND" | "NOT_ATTEND" | "CANCEL_ATTEND" | "CANCEL_NOT_ATTEND";
+
+interface AttendanceLogEntry {
+  type: ActionType;
+  memberId: string;
+  memberName: string;
+  timestamp: Timestamp;
   userAgent: string;
 }
 
@@ -108,12 +129,17 @@ const Attendance = () => {
   >(new Map());
   const [isSubmitting, setIsSubmitting] = useState<Set<string>>(new Set());
   const [attendanceHistory, setAttendanceHistory] = useState<
-    AttendanceRecord[]
+    AttendanceLogEntry[]
   >([]);
   const [pinnedMembers, setPinnedMembers] = useLocalStorage<string[]>(
     "pinnedMembers",
     []
   );
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(
+    typeof Notification !== "undefined" ? Notification.permission : "denied"
+  );
+  const [isRegisteringNotif, setIsRegisteringNotif] = useState(false);
   const [teamPool, setTeamPool] = useState<Member[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamSearch, setTeamSearch] = useState("");
@@ -127,18 +153,14 @@ const Attendance = () => {
   const { closingTime, isAttendanceClosed } = useMemo(() => {
     if (!match) return { closingTime: null, isAttendanceClosed: false };
 
+    const closeHours = match.attendanceCloseHours ?? 12;
     const matchDate = new Date(match.date.seconds * 1000);
-    // Start of the match day (00:00)
     const matchDayStart = new Date(matchDate);
     matchDayStart.setHours(0, 0, 0, 0);
 
-    // Closing time: 12 hours before start of match day = previous day 12:00 PM
-    // This is equal to matchDayStart minus 12 hours.
-    const closingDate = new Date(matchDayStart.getTime() - 12 * 60 * 60 * 1000);
+    const closingDate = new Date(matchDayStart.getTime() - closeHours * 60 * 60 * 1000);
 
     const now = new Date();
-    // For testing: Uncomment logically if needed or rely on system time
-    // const now = new Date("2025-12-19T13:00:00");
 
     return {
       closingTime: closingDate,
@@ -152,14 +174,14 @@ const Attendance = () => {
       return;
     }
 
-    const attendanceQuery = query(
-      collection(db, "matches", matchId, "attendance"),
+    const logQuery = query(
+      collection(db, "matches", matchId, "attendanceLog"),
       orderBy("timestamp", "desc")
     );
 
-    const unsubscribe = onSnapshot(attendanceQuery, (snapshot) => {
+    const unsubscribe = onSnapshot(logQuery, (snapshot) => {
       const history = snapshot.docs.map(
-        (doc) => doc.data() as AttendanceRecord
+        (doc) => doc.data() as AttendanceLogEntry
       );
       setAttendanceHistory(history);
     });
@@ -307,6 +329,37 @@ const Attendance = () => {
     );
   };
 
+  const handleRegisterNotification = async () => {
+    setIsRegisteringNotif(true);
+    try {
+      const token = await ensureNotificationToken(null);
+      if (token) {
+        setNotifPermission("granted");
+        toast({
+          title: "Đã bật thông báo!",
+          description: "Bạn sẽ nhận được thông báo về các trận đấu.",
+        });
+      } else {
+        setNotifPermission(
+          typeof Notification !== "undefined" ? Notification.permission : "denied"
+        );
+        toast({
+          variant: "destructive",
+          title: "Không thể bật thông báo",
+          description: "Vui lòng cho phép thông báo trong cài đặt trình duyệt.",
+        });
+      }
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể đăng ký thông báo.",
+      });
+    } finally {
+      setIsRegisteringNotif(false);
+    }
+  };
+
   const handleUpdateStatus = async (
     memberId: string,
     memberName: string,
@@ -314,8 +367,13 @@ const Attendance = () => {
   ) => {
     if (!matchId) return;
 
+    // Idempotent guard: if already in the requested state, skip.
     if (status === "attending" && attendance.has(memberId)) return;
     if (status === "not_attending" && notAttendance.has(memberId)) return;
+
+    // Capture prior state to determine action type for log + Slack.
+    const wasAttending = attendance.has(memberId);
+    const wasNotAttending = notAttendance.has(memberId);
 
     setIsSubmitting((prev) => new Set(prev).add(memberId));
     const attendanceRef = doc(db, "matches", matchId, "attendance", memberId);
@@ -343,6 +401,45 @@ const Attendance = () => {
           transaction.delete(attendanceRef);
         }
       });
+
+      // Build action log entries (Q1: A — record both cancel + new state).
+      const logCol = collection(db, "matches", matchId, "attendanceLog");
+      const baseLog = {
+        memberId,
+        memberName,
+        userAgent: navigator.userAgent,
+        timestamp: serverTimestamp(),
+      };
+
+      const actionsForApi: string[] = [];
+
+      if (status === "attending") {
+        if (wasNotAttending) {
+          await addDoc(logCol, { ...baseLog, type: "CANCEL_NOT_ATTEND" });
+          actionsForApi.push("CANCEL_NOT_ATTEND");
+        }
+        await addDoc(logCol, { ...baseLog, type: "ATTEND" });
+        actionsForApi.push("ATTEND");
+      } else {
+        if (wasAttending) {
+          await addDoc(logCol, { ...baseLog, type: "CANCEL_ATTEND" });
+          actionsForApi.push("CANCEL_ATTEND");
+        }
+        await addDoc(logCol, { ...baseLog, type: "NOT_ATTEND" });
+        actionsForApi.push("NOT_ATTEND");
+      }
+
+      // Fire Slack notifications (server queues / fires according to type).
+      Promise.all(
+        actionsForApi.map((action) =>
+          postApiJson("/notify/member-action", {
+            matchId,
+            memberId,
+            memberName,
+            action,
+          })
+        )
+      ).catch((err) => console.error("notify/member-action failed", err));
 
       // Optimistic UI update
       if (status === "attending") {
@@ -533,6 +630,55 @@ const Attendance = () => {
     setTeamPool(attendanceMembers);
   };
 
+  const [isSendingTeams, setIsSendingTeams] = useState(false);
+
+  const handleSendTeamsToSlack = async () => {
+    if (!matchId) return;
+    const teamsWithMembers = teams.filter((t) => t.members.length > 0);
+    if (teamsWithMembers.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Chưa có đội nào",
+        description: "Vui lòng kéo người vào ít nhất 1 đội trước khi gửi.",
+      });
+      return;
+    }
+    if (teamPool.length > 0) {
+      const proceed = window.confirm(
+        `Còn ${teamPool.length} người chưa được chia đội. Bạn vẫn muốn gửi đề xuất?`
+      );
+      if (!proceed) return;
+    }
+
+    setIsSendingTeams(true);
+    try {
+      await postApiJson("/teams/propose", {
+        matchId,
+        teamsConfig: teamsWithMembers.map((t) => ({
+          id: t.id,
+          name: t.name,
+          members: t.members.map((m) => ({ id: m.id, name: m.name })),
+        })),
+      });
+      toast({
+        title: "Đã gửi đề xuất!",
+        description:
+          "Đội hình đã được gửi lên Slack. Bấm nút trong Slack để chốt.",
+      });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description:
+          err instanceof Error
+            ? err.message
+            : "Không thể gửi đội hình lên Slack.",
+      });
+    } finally {
+      setIsSendingTeams(false);
+    }
+  };
+
   const filteredTeamPool = useMemo(() => {
     const lowerCaseSearch = removeDiacritics(teamSearch.toLowerCase());
     return teamPool.filter(
@@ -580,50 +726,136 @@ const Attendance = () => {
           <h1 className="text-4xl font-bold text-foreground tracking-tight">
             Điểm danh ra sân
           </h1>
-          <div className="flex items-center justify-center gap-2 mt-3 text-muted-foreground">
-            <CalendarIcon className="h-5 w-5" />
-            <span className="font-semibold text-lg">
-              {new Date(match.date.seconds * 1000).toLocaleDateString("vi-VN")}
-            </span>
-          </div>
-
-          <div className="mt-4 flex flex-col gap-2 items-center">
-            {isAttendanceClosed ? (
-              <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg border border-destructive/20 max-w-lg mx-auto">
-                <p className="font-semibold">
-                  Cổng điểm danh đã đóng để chốt số lượng.
-                </p>
-                <p className="text-sm mt-1 opacity-90">
-                  Vui lòng liên hệ với admin hoặc người bạn quen biết của bạn để
-                  biết thêm thông tin.
-                </p>
-              </div>
-            ) : (
-              closingTime && (
-                <p className="text-muted-foreground">
-                  Cổng điểm danh sẽ đóng vào lúc:{" "}
-                  <span className="font-semibold text-foreground">
-                    {closingTime.toLocaleString("vi-VN", {
-                      hour: "2-digit",
-                      minute: "2-digit",
+          <Card className="mt-4 max-w-2xl mx-auto bg-gradient-to-br from-primary/5 via-secondary/30 to-primary/5 border-primary/20 shadow-card">
+            <CardContent className="pt-6 space-y-4">
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <CalendarIcon className="h-5 w-5 text-primary" />
+                <span className="font-black text-2xl text-foreground">
+                  {new Date(match.date.seconds * 1000)
+                    .toLocaleDateString("vi-VN", { weekday: "long" })
+                    .replace(/^./, (c) => c.toUpperCase())}
+                </span>
+                <span className="text-lg text-muted-foreground font-medium">
+                  ·{" "}
+                  {new Date(match.date.seconds * 1000).toLocaleDateString(
+                    "vi-VN",
+                    {
                       day: "2-digit",
                       month: "2-digit",
-                    })}
-                  </span>
-                </p>
-              )
-            )}
-          </div>
+                      year: "numeric",
+                    }
+                  )}
+                </span>
+                {(() => {
+                  const d = new Date(match.date.seconds * 1000);
+                  const h = d.getHours();
+                  const m = d.getMinutes();
+                  if (h === 0 && m === 0) return null;
+                  return (
+                    <span className="text-lg font-bold text-primary">
+                      ·{" "}
+                      {d.toLocaleTimeString("vi-VN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  );
+                })()}
+              </div>
 
-          <p className="text-xl font-bold mt-4">
-            Số người đã điểm danh: {attendance.size}
-            {notAttendance.size > 0 && (
-              <span className="text-destructive ml-4">
-                Báo vắng: {notAttendance.size}
-              </span>
-            )}
-          </p>
-          <div className="mt-4">
+              {(match.venueName || match.mapIframe) && (
+                <div className="flex flex-col items-center gap-2 pt-2 border-t border-primary/10">
+                  <div className="flex items-center gap-2 flex-wrap justify-center">
+                    <MapPin className="h-4 w-4 text-primary" />
+                    {match.venueName && (
+                      <span className="font-semibold text-foreground">
+                        {match.venueName}
+                      </span>
+                    )}
+                    {match.mapIframe && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setMapExpanded((v) => !v)}
+                      >
+                        {mapExpanded ? (
+                          <ChevronUp className="h-3 w-3 mr-1" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3 mr-1" />
+                        )}
+                        {mapExpanded ? "Ẩn bản đồ" : "Xem bản đồ"}
+                      </Button>
+                    )}
+                  </div>
+                  {mapExpanded && match.mapIframe && (
+                    <div
+                      className="w-full max-w-lg mt-1 rounded-lg overflow-hidden border shadow-sm [&_iframe]:w-full [&_iframe]:h-64"
+                      dangerouslySetInnerHTML={{
+                        __html: match.mapIframe.trim().startsWith("<iframe")
+                          ? match.mapIframe
+                          : "",
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2 items-center pt-2 border-t border-primary/10">
+                {isAttendanceClosed ? (
+                  <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg border border-destructive/20 w-full">
+                    <p className="font-semibold">
+                      Cổng điểm danh đã đóng để chốt số lượng.
+                    </p>
+                    <p className="text-sm mt-1 opacity-90">
+                      Vui lòng liên hệ với admin hoặc người bạn quen biết của
+                      bạn để biết thêm thông tin.
+                    </p>
+                  </div>
+                ) : (
+                  closingTime && (
+                    <p className="text-sm text-muted-foreground">
+                      Cổng điểm danh sẽ đóng vào lúc:{" "}
+                      <span className="font-semibold text-red-600">
+                        {closingTime.toLocaleString("vi-VN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          day: "2-digit",
+                          month: "2-digit",
+                        })}
+                      </span>
+                    </p>
+                  )
+                )}
+
+                <div className="flex items-center gap-4 flex-wrap justify-center pt-1">
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="default"
+                      className="text-base px-3 py-1 bg-emerald-500 hover:bg-emerald-600"
+                    >
+                      {attendance.size}
+                    </Badge>
+                    <span className="text-sm font-medium text-foreground">
+                      đã điểm danh
+                    </span>
+                  </div>
+                  {notAttendance.size > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Badge variant="destructive" className="text-base px-3 py-1">
+                        {notAttendance.size}
+                      </Badge>
+                      <span className="text-sm font-medium text-foreground">
+                        báo vắng
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="mt-4 flex flex-wrap gap-2 justify-center">
             <Dialog>
               <DialogTrigger asChild>
                 <Button variant="outline">
@@ -631,42 +863,105 @@ const Attendance = () => {
                   Xem lịch sử điểm danh
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md sm:max-w-lg">
+              <DialogContent className="max-w-md sm:max-w-2xl">
                 <DialogHeader>
                   <DialogTitle>
                     Lịch sử điểm danh ({attendanceHistory.length})
                   </DialogTitle>
                 </DialogHeader>
                 <div className="max-h-[60vh] overflow-y-auto">
-                  <Table>
-                    <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
-                      <TableRow>
-                        <TableHead className="w-1/3">Thành viên</TableHead>
-                        <TableHead className="w-1/3">Thời gian</TableHead>
-                        <TableHead className="w-1/3">Thiết bị</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {attendanceHistory.map((record, index) => (
-                        <TableRow key={index}>
-                          <TableCell className="font-medium">
-                            {record.memberName}
-                          </TableCell>
-                          <TableCell>
-                            {new Date(
-                              record.timestamp.seconds * 1000
-                            ).toLocaleString("vi-VN")}
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {record.userAgent}
-                          </TableCell>
+                  {attendanceHistory.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-6">
+                      Chưa có hoạt động nào.
+                    </p>
+                  ) : (
+                    <Table>
+                      <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
+                        <TableRow>
+                          <TableHead className="w-[120px]">Hành động</TableHead>
+                          <TableHead>Thành viên</TableHead>
+                          <TableHead className="w-[150px]">Thời gian</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {attendanceHistory.map((entry, index) => {
+                          const actionMeta: Record<
+                            ActionType,
+                            { label: string; className: string }
+                          > = {
+                            ATTEND: {
+                              label: "✅ Điểm danh",
+                              className:
+                                "bg-emerald-100 text-emerald-700 hover:bg-emerald-100",
+                            },
+                            NOT_ATTEND: {
+                              label: "🚫 Báo vắng",
+                              className:
+                                "bg-red-100 text-red-700 hover:bg-red-100",
+                            },
+                            CANCEL_ATTEND: {
+                              label: "↩️ Hủy điểm danh",
+                              className:
+                                "bg-amber-100 text-amber-800 hover:bg-amber-100",
+                            },
+                            CANCEL_NOT_ATTEND: {
+                              label: "↩️ Hủy báo vắng",
+                              className:
+                                "bg-slate-100 text-slate-700 hover:bg-slate-100",
+                            },
+                          };
+                          const meta = actionMeta[entry.type] || {
+                            label: entry.type,
+                            className: "bg-slate-100 text-slate-700",
+                          };
+                          return (
+                            <TableRow key={index}>
+                              <TableCell>
+                                <Badge
+                                  variant="secondary"
+                                  className={meta.className}
+                                >
+                                  {meta.label}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="font-medium">
+                                {entry.memberName}
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {entry.timestamp?.seconds
+                                  ? new Date(
+                                      entry.timestamp.seconds * 1000
+                                    ).toLocaleString("vi-VN", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                      day: "2-digit",
+                                      month: "2-digit",
+                                    })
+                                  : "--"}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
                 </div>
               </DialogContent>
             </Dialog>
+            {notifPermission === "default" && (
+              <Button
+                variant="outline"
+                onClick={handleRegisterNotification}
+                disabled={isRegisteringNotif}
+              >
+                {isRegisteringNotif ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Bell className="h-4 w-4 mr-2" />
+                )}
+                Bật thông báo
+              </Button>
+            )}
           </div>
         </div>
 
@@ -804,7 +1099,6 @@ const Attendance = () => {
                       }
                       disabled={
                         isProcessing ||
-                        isAttending ||
                         (isNotAttending && !isAttendanceClosed) ||
                         isAttendanceClosed
                       }
@@ -866,6 +1160,18 @@ const Attendance = () => {
                 >
                   <RotateCcw className="h-4 w-4 mr-2" />
                   Đưa tất cả về danh sách
+                </Button>
+                <Button
+                  onClick={handleSendTeamsToSlack}
+                  disabled={isSendingTeams}
+                  className="inline-flex"
+                >
+                  {isSendingTeams ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Bell className="h-4 w-4 mr-2" />
+                  )}
+                  Gửi đội hình lên Slack
                 </Button>
               </div>
             </div>
