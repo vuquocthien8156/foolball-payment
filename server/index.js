@@ -741,13 +741,57 @@ apiRoutes.post("/notify/member-action", async (req, res) => {
       resolvedName = memberSnap.exists ? memberSnap.data().name : "Một thành viên";
     }
 
-    // All actions enqueue. CANCEL_ATTEND keeps cancelledAt for display.
+    const matchDateLabel = slack.formatMatchDate(match?.date);
+
+    // CANCEL_ATTEND is time-sensitive and high-severity — send immediately
+    // with a red attachment so it stands out from normal attendance messages.
+    if (action === "CANCEL_ATTEND") {
+      const now = new Date();
+      const timeLabel = now.toLocaleString("vi-VN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        day: "2-digit",
+        month: "2-digit",
+        timeZone: cfg.TIMEZONE,
+      });
+      await slack
+        .postToSlack({
+          text: `‼️🔴 ${resolvedName} vừa HỦY điểm danh — trận ${matchDateLabel}`,
+          attachments: [
+            {
+              color: "danger",
+              blocks: [
+                {
+                  type: "header",
+                  text: {
+                    type: "plain_text",
+                    text: "‼️ HỦY ĐIỂM DANH",
+                    emoji: true,
+                  },
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: `📅 Trận *${matchDateLabel}*\n\n🔴 *${resolvedName}* đã hủy lúc *${timeLabel}*\n\n_Liên hệ để xác nhận hoặc tìm người thay thế._`,
+                  },
+                },
+              ],
+            },
+          ],
+        })
+        .catch((e) => console.error("[slack] immediate CANCEL_ATTEND failed", e));
+
+      return res.status(200).json({ success: true, mode: "immediate" });
+    }
+
+    // All other actions enqueue for batch flush.
     await db.collection("slackQueue").add({
       type: action,
       matchId,
       memberId,
       memberName: resolvedName,
-      matchDateLabel: slack.formatMatchDate(match?.date),
+      matchDateLabel,
       enqueuedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
@@ -1333,9 +1377,9 @@ exports.flushAttendQueue = onSchedule(
 );
 
 /**
- * B2 — flush NOT_ATTEND + CANCEL_ATTEND + CANCEL_NOT_ATTEND.
+ * B2 — flush NOT_ATTEND + CANCEL_NOT_ATTEND.
  * Schedule: cfg.ATTENDANCE_CHANGE_BATCH_MINUTES.
- * CANCEL_ATTEND items hiển thị kèm timestamp hủy (quan trọng).
+ * CANCEL_ATTEND is sent immediately at the endpoint, not queued here.
  */
 exports.flushAttendanceChangeQueue = onSchedule(
   {
@@ -1349,7 +1393,7 @@ exports.flushAttendanceChangeQueue = onSchedule(
     );
     const snap = await db
       .collection("slackQueue")
-      .where("type", "in", ["NOT_ATTEND", "CANCEL_ATTEND", "CANCEL_NOT_ATTEND"])
+      .where("type", "in", ["NOT_ATTEND", "CANCEL_NOT_ATTEND"])
       .get();
     if (snap.empty) return;
 
@@ -1367,36 +1411,17 @@ exports.flushAttendanceChangeQueue = onSchedule(
         byMatch.set(key, {
           matchDateLabel: data.matchDateLabel,
           notAttend: [],
-          cancelAttend: [], // [{ name, time }]
           cancelNotAttend: [],
           docs: [],
         });
       const group = byMatch.get(key);
-      const enqueuedLabel = enqueuedAt
-        ? enqueuedAt.toLocaleString("vi-VN", {
-            hour: "2-digit",
-            minute: "2-digit",
-            day: "2-digit",
-            month: "2-digit",
-            timeZone: TZ,
-          })
-        : "";
       if (data.type === "NOT_ATTEND") group.notAttend.push(data.memberName);
-      else if (data.type === "CANCEL_ATTEND")
-        group.cancelAttend.push({ name: data.memberName, time: enqueuedLabel });
       else group.cancelNotAttend.push(data.memberName);
       group.docs.push(d.ref);
     });
 
     for (const [, group] of byMatch) {
       const sections = [];
-      if (group.cancelAttend.length > 0) {
-        sections.push(
-          `⚠️ *Đã điểm danh nhưng HỦY:*\n${group.cancelAttend
-            .map((it) => `   👤 ${it.name}${it.time ? ` _(🕐 ${it.time})_` : ""}`)
-            .join("\n")}`
-        );
-      }
       if (group.notAttend.length > 0) {
         sections.push(
           `🚫 *Báo vắng:*\n${group.notAttend.map((n) => `   👤 ${n}`).join("\n")}`
@@ -1411,11 +1436,7 @@ exports.flushAttendanceChangeQueue = onSchedule(
       }
       if (sections.length === 0) continue;
 
-      // Pick header based on highest-priority section.
-      const headerText =
-        group.cancelAttend.length > 0
-          ? "⚠️ Có người hủy điểm danh"
-          : "📝 Cập nhật báo vắng";
+      const headerText = "📝 Cập nhật báo vắng";
 
       // Delete first to avoid duplicate on retry.
       const batch = db.batch();

@@ -57,7 +57,6 @@ interface Member {
   id: string;
   name: string;
   nickname?: string;
-  isCreditor?: boolean;
   isExemptFromPayment?: boolean;
   percent?: number;
   reason?: string;

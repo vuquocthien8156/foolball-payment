@@ -71,6 +71,7 @@ interface Member {
   nickname?: string;
   autoAttendance?: boolean;
   inactive?: boolean;
+  isPriority?: boolean;
 }
 
 interface Match {
@@ -150,23 +151,67 @@ const Attendance = () => {
     [members]
   );
 
-  const { closingTime, isAttendanceClosed } = useMemo(() => {
-    if (!match) return { closingTime: null, isAttendanceClosed: false };
+  // Tick every minute so the countdown + closed status stay live without a refresh.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const { closingTime, isAttendanceClosed, timeUntilClose } = useMemo(() => {
+    if (!match) {
+      return {
+        closingTime: null,
+        isAttendanceClosed: false,
+        timeUntilClose: null,
+      };
+    }
 
     const closeHours = match.attendanceCloseHours ?? 12;
     const matchDate = new Date(match.date.seconds * 1000);
     const matchDayStart = new Date(matchDate);
     matchDayStart.setHours(0, 0, 0, 0);
 
-    const closingDate = new Date(matchDayStart.getTime() - closeHours * 60 * 60 * 1000);
+    const closingDate = new Date(
+      matchDayStart.getTime() - closeHours * 60 * 60 * 1000
+    );
 
-    const now = new Date();
+    const isClosed = now > closingDate;
+    let timeUntilClose: {
+      label: string;
+      tone: "safe" | "warning" | "danger";
+    } | null = null;
+
+    if (!isClosed) {
+      const diffMs = closingDate.getTime() - now.getTime();
+      const diffHours = diffMs / (1000 * 60 * 60);
+      const totalHours = Math.floor(diffHours);
+      const days = Math.floor(totalHours / 24);
+      const hours = totalHours % 24;
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+      let label = "";
+      if (days >= 1) {
+        label = hours > 0 ? `${days} ngày ${hours}h` : `${days} ngày`;
+      } else if (totalHours >= 1) {
+        label = `${totalHours}h ${minutes}'`;
+      } else {
+        label = `${minutes}'`;
+      }
+
+      let tone: "safe" | "warning" | "danger" = "safe";
+      if (diffHours < 12) tone = "danger";
+      else if (diffHours < 24) tone = "warning";
+
+      timeUntilClose = { label, tone };
+    }
 
     return {
       closingTime: closingDate,
-      isAttendanceClosed: now > closingDate,
+      isAttendanceClosed: isClosed,
+      timeUntilClose,
     };
-  }, [match]);
+  }, [match, now]);
 
   useEffect(() => {
     if (!matchId) {
@@ -311,12 +356,18 @@ const Attendance = () => {
           removeDiacritics(m.nickname.toLowerCase()).includes(lowerCaseSearch))
     );
 
-    // Sort pinned members to the top
+    // Sort: pinned first, then priority, then the rest. Match the ordering on Members page.
     return filtered.sort((a, b) => {
       const isAPinned = pinnedMembers.includes(a.id);
       const isBPinned = pinnedMembers.includes(b.id);
       if (isAPinned && !isBPinned) return -1;
       if (!isAPinned && isBPinned) return 1;
+
+      const isAPriority = !!a.isPriority;
+      const isBPriority = !!b.isPriority;
+      if (isAPriority && !isBPriority) return -1;
+      if (!isAPriority && isBPriority) return 1;
+
       return 0;
     });
   }, [members, search, pinnedMembers]);
@@ -719,148 +770,213 @@ const Attendance = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="mb-8 text-center">
-          <div className="inline-block p-4 bg-primary rounded-2xl shadow-card mb-4">
-            <Users className="h-8 w-8 text-white" />
-          </div>
-          <h1 className="text-4xl font-bold text-foreground tracking-tight">
-            Điểm danh ra sân
-          </h1>
-          <Card className="mt-4 max-w-2xl mx-auto bg-gradient-to-br from-primary/5 via-secondary/30 to-primary/5 border-primary/20 shadow-card">
-            <CardContent className="pt-6 space-y-4">
-              <div className="flex items-center justify-center gap-2 flex-wrap">
-                <CalendarIcon className="h-5 w-5 text-primary" />
-                <span className="font-black text-2xl text-foreground">
-                  {new Date(match.date.seconds * 1000)
-                    .toLocaleDateString("vi-VN", { weekday: "long" })
-                    .replace(/^./, (c) => c.toUpperCase())}
-                </span>
-                <span className="text-lg text-muted-foreground font-medium">
-                  ·{" "}
-                  {new Date(match.date.seconds * 1000).toLocaleDateString(
-                    "vi-VN",
-                    {
-                      day: "2-digit",
-                      month: "2-digit",
-                      year: "numeric",
-                    }
-                  )}
-                </span>
-                {(() => {
-                  const d = new Date(match.date.seconds * 1000);
-                  const h = d.getHours();
-                  const m = d.getMinutes();
-                  if (h === 0 && m === 0) return null;
-                  return (
-                    <span className="text-lg font-bold text-primary">
-                      ·{" "}
-                      {d.toLocaleTimeString("vi-VN", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  );
-                })()}
-              </div>
+        <div className="mb-8">
+          {(() => {
+            const matchDate = new Date(match.date.seconds * 1000);
+            const weekdayLabel = matchDate
+              .toLocaleDateString("vi-VN", { weekday: "long" })
+              .replace(/^./, (c) => c.toUpperCase());
+            const dayMonthYear = matchDate.toLocaleDateString("vi-VN", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+            });
+            const hasTime =
+              !(matchDate.getHours() === 0 && matchDate.getMinutes() === 0);
+            const timeLabel = hasTime
+              ? matchDate.toLocaleTimeString("vi-VN", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : null;
 
-              {(match.venueName || match.mapIframe) && (
-                <div className="flex flex-col items-center gap-2 pt-2 border-t border-primary/10">
-                  <div className="flex items-center gap-2 flex-wrap justify-center">
-                    <MapPin className="h-4 w-4 text-primary" />
-                    {match.venueName && (
-                      <span className="font-semibold text-foreground">
-                        {match.venueName}
-                      </span>
-                    )}
-                    {match.mapIframe && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => setMapExpanded((v) => !v)}
-                      >
-                        {mapExpanded ? (
-                          <ChevronUp className="h-3 w-3 mr-1" />
-                        ) : (
-                          <ChevronDown className="h-3 w-3 mr-1" />
-                        )}
-                        {mapExpanded ? "Ẩn bản đồ" : "Xem bản đồ"}
-                      </Button>
-                    )}
-                  </div>
-                  {mapExpanded && match.mapIframe && (
-                    <div
-                      className="w-full max-w-lg mt-1 rounded-lg overflow-hidden border shadow-sm [&_iframe]:w-full [&_iframe]:h-64"
-                      dangerouslySetInnerHTML={{
-                        __html: match.mapIframe.trim().startsWith("<iframe")
-                          ? match.mapIframe
-                          : "",
-                      }}
-                    />
-                  )}
-                </div>
-              )}
+            const countdownTone = timeUntilClose?.tone ?? "safe";
+            const countdownToneClass = {
+              safe: "bg-emerald-50 border-emerald-200 text-emerald-700",
+              warning: "bg-amber-50 border-amber-200 text-amber-700",
+              danger: "bg-red-50 border-red-200 text-red-700",
+            }[countdownTone];
 
-              <div className="flex flex-col gap-2 items-center pt-2 border-t border-primary/10">
-                {isAttendanceClosed ? (
-                  <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg border border-destructive/20 w-full">
-                    <p className="font-semibold">
-                      Cổng điểm danh đã đóng để chốt số lượng.
-                    </p>
-                    <p className="text-sm mt-1 opacity-90">
-                      Vui lòng liên hệ với admin hoặc người bạn quen biết của
-                      bạn để biết thêm thông tin.
-                    </p>
-                  </div>
-                ) : (
-                  closingTime && (
-                    <p className="text-sm text-muted-foreground">
-                      Cổng điểm danh sẽ đóng vào lúc:{" "}
-                      <span className="font-semibold text-red-600">
-                        {closingTime.toLocaleString("vi-VN", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          day: "2-digit",
-                          month: "2-digit",
-                        })}
-                      </span>
-                    </p>
-                  )
-                )}
-
-                <div className="flex items-center gap-4 flex-wrap justify-center pt-1">
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant="default"
-                      className="text-base px-3 py-1 bg-emerald-500 hover:bg-emerald-600"
-                    >
-                      {attendance.size}
-                    </Badge>
-                    <span className="text-sm font-medium text-foreground">
-                      đã điểm danh
-                    </span>
-                  </div>
-                  {notAttendance.size > 0 && (
-                    <div className="flex items-center gap-2">
-                      <Badge variant="destructive" className="text-base px-3 py-1">
-                        {notAttendance.size}
-                      </Badge>
-                      <span className="text-sm font-medium text-foreground">
-                        báo vắng
+            return (
+              <Card
+                className={`overflow-hidden shadow-card border-l-4 ${
+                  isAttendanceClosed
+                    ? "border-l-red-500"
+                    : "border-l-emerald-500"
+                }`}
+              >
+                <CardContent className="p-0">
+                  {/* Vùng 1: Status pill + title nhỏ */}
+                  <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Users className="h-4 w-4" />
+                      <span className="text-xs font-semibold uppercase tracking-wider">
+                        Điểm danh ra sân
                       </span>
                     </div>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                    {isAttendanceClosed ? (
+                      <Badge
+                        variant="destructive"
+                        className="gap-1 px-2.5 py-1"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                        Đã đóng cổng
+                      </Badge>
+                    ) : (
+                      <Badge className="gap-1 px-2.5 py-1 bg-emerald-500 hover:bg-emerald-600 text-white">
+                        <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+                        Đang mở
+                      </Badge>
+                    )}
+                  </div>
 
-          <div className="mt-4 flex flex-wrap gap-2 justify-center">
+                  {/* Vùng 2: Date hero */}
+                  <div className="px-5 pb-4 text-center">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary/80">
+                      {weekdayLabel}
+                    </p>
+                    <p className="mt-1 text-4xl font-black tracking-tight text-foreground tabular-nums sm:text-5xl">
+                      {dayMonthYear}
+                    </p>
+                    {timeLabel && (
+                      <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm font-bold text-primary">
+                        <CalendarIcon className="h-3.5 w-3.5" />
+                        {timeLabel}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Vùng venue */}
+                  {(match.venueName || match.mapIframe) && (
+                    <div className="border-t border-border/60 bg-muted/30 px-5 py-3">
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <MapPin className="h-4 w-4 text-primary" />
+                        {match.venueName && (
+                          <span className="font-semibold text-foreground">
+                            {match.venueName}
+                          </span>
+                        )}
+                        {match.mapIframe && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setMapExpanded((v) => !v)}
+                          >
+                            {mapExpanded ? (
+                              <ChevronUp className="h-3 w-3 mr-1" />
+                            ) : (
+                              <ChevronDown className="h-3 w-3 mr-1" />
+                            )}
+                            {mapExpanded ? "Ẩn bản đồ" : "Xem bản đồ"}
+                          </Button>
+                        )}
+                      </div>
+                      {mapExpanded && match.mapIframe && (
+                        <div
+                          className="mx-auto mt-3 w-full max-w-lg rounded-lg overflow-hidden border shadow-sm [&_iframe]:w-full [&_iframe]:h-64"
+                          dangerouslySetInnerHTML={{
+                            __html: match.mapIframe.trim().startsWith("<iframe")
+                              ? match.mapIframe
+                              : "",
+                          }}
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Vùng 3: Stats grid */}
+                  <div className="grid grid-cols-3 divide-x border-t border-border/60">
+                    <div className="flex flex-col items-center justify-center px-3 py-4">
+                      <span className="text-3xl font-black tabular-nums text-emerald-600">
+                        {attendance.size}
+                      </span>
+                      <span className="mt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Tham gia
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-3 py-4">
+                      <span
+                        className={`text-3xl font-black tabular-nums ${
+                          notAttendance.size > 0
+                            ? "text-red-500"
+                            : "text-muted-foreground/40"
+                        }`}
+                      >
+                        {notAttendance.size}
+                      </span>
+                      <span className="mt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                        Vắng
+                      </span>
+                    </div>
+                    <div className="flex flex-col items-center justify-center px-3 py-4">
+                      {isAttendanceClosed ? (
+                        <>
+                          <span className="text-xl font-black text-red-500">
+                            ✕
+                          </span>
+                          <span className="mt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                            Đã đóng
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span
+                            className={`text-2xl font-black tabular-nums ${
+                              countdownTone === "danger"
+                                ? "text-red-600"
+                                : countdownTone === "warning"
+                                ? "text-amber-600"
+                                : "text-emerald-600"
+                            }`}
+                          >
+                            {timeUntilClose?.label ?? "--"}
+                          </span>
+                          <span className="mt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                            Còn lại
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Closing time hint / closed warning */}
+                  {isAttendanceClosed ? (
+                    <div className={`border-t px-5 py-3 text-center text-sm ${countdownToneClass}`}>
+                      <p className="font-semibold">
+                        Cổng điểm danh đã đóng để chốt số lượng.
+                      </p>
+                      <p className="mt-0.5 text-xs opacity-90">
+                        Liên hệ admin nếu cần hỗ trợ.
+                      </p>
+                    </div>
+                  ) : (
+                    closingTime && (
+                      <div className={`border-t px-5 py-2 text-center text-xs ${countdownToneClass}`}>
+                        Cổng đóng lúc{" "}
+                        <span className="font-bold tabular-nums">
+                          {closingTime.toLocaleString("vi-VN", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            day: "2-digit",
+                            month: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                    )
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
+
+          {/* Action buttons row */}
+          <div className="mt-3 flex flex-wrap gap-2 justify-center">
             <Dialog>
               <DialogTrigger asChild>
-                <Button variant="outline">
+                <Button variant="outline" size="sm">
                   <History className="h-4 w-4 mr-2" />
-                  Xem lịch sử điểm danh
+                  Lịch sử điểm danh
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-md sm:max-w-2xl">
@@ -951,6 +1067,7 @@ const Attendance = () => {
             {notifPermission === "default" && (
               <Button
                 variant="outline"
+                size="sm"
                 onClick={handleRegisterNotification}
                 disabled={isRegisteringNotif}
               >

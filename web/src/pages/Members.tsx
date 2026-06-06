@@ -32,14 +32,42 @@ import {
   Users,
   Loader2,
   DollarSign,
-  Star,
   BadgePercent,
   Pencil,
   ArrowUp,
   UserX,
+  CheckSquare,
+  Square,
+  Repeat,
+  X,
+  ChevronDown,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -74,7 +102,6 @@ interface Member {
   id: string;
   name: string;
   nickname?: string;
-  isCreditor?: boolean;
   isExemptFromPayment?: boolean;
   loginEnabled?: boolean;
   authUid?: string;
@@ -253,6 +280,10 @@ const Members = () => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [loginPassword, setLoginPassword] = useState("");
   const [isLoadingUserRole, setIsLoadingUserRole] = useState(false);
+  // Multi-select state for bulk actions.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const availableAdminTabs = useMemo(
     () => [
       { key: "dashboard", label: "Dashboard" },
@@ -449,44 +480,6 @@ const Members = () => {
     }
   };
 
-  const handleSetCreditor = async (newCreditorId: string) => {
-    const currentCreditor = members.find((m) => m.isCreditor);
-
-    if (currentCreditor?.id === newCreditorId) {
-      // If clicking the same creditor, do nothing or maybe deselect?
-      // For now, let's just do nothing to enforce one creditor.
-      return;
-    }
-
-    const batch = writeBatch(db);
-
-    // 1. Unset the old creditor
-    if (currentCreditor) {
-      const oldCreditorRef = doc(db, "members", currentCreditor.id);
-      batch.update(oldCreditorRef, { isCreditor: false });
-    }
-
-    // 2. Set the new creditor
-    const newCreditorRef = doc(db, "members", newCreditorId);
-    batch.update(newCreditorRef, { isCreditor: true });
-
-    try {
-      await batch.commit();
-      toast({
-        title: "Thành công",
-        description: "Đã cập nhật chủ nợ mới.",
-      });
-      fetchMembersAndStats(); // Refresh the list with new data
-    } catch (error) {
-      console.error("Error setting creditor:", error);
-      toast({
-        variant: "destructive",
-        title: "Lỗi",
-        description: "Không thể cập nhật chủ nợ. Vui lòng thử lại.",
-      });
-    }
-  };
-
   const handleToggleExemption = async (
     memberId: string,
     currentStatus: boolean
@@ -632,6 +625,121 @@ const Members = () => {
     }
   };
 
+  // ===== Bulk actions =====
+  type BulkField =
+    | "isExemptFromPayment"
+    | "autoAttendance"
+    | "inactive"
+    | "isPriority";
+
+  const bulkLabels: Record<BulkField, string> = {
+    isExemptFromPayment: "Miễn chia tiền",
+    autoAttendance: "Auto Điểm danh",
+    inactive: "Inactive",
+    isPriority: "Ưu tiên",
+  };
+
+  const selectedCount = selectedIds.size;
+
+  const visibleSelectedIds = useMemo(
+    () => filteredMembers.filter((m) => selectedIds.has(m.id)).map((m) => m.id),
+    [filteredMembers, selectedIds]
+  );
+
+  const allVisibleSelected =
+    filteredMembers.length > 0 &&
+    visibleSelectedIds.length === filteredMembers.length;
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        filteredMembers.forEach((m) => next.delete(m.id));
+      } else {
+        filteredMembers.forEach((m) => next.add(m.id));
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkUpdate = async (field: BulkField, value: boolean) => {
+    if (selectedCount === 0) return;
+    setIsBulkProcessing(true);
+    try {
+      const batch = writeBatch(db);
+      selectedIds.forEach((id) => {
+        batch.update(doc(db, "members", id), { [field]: value });
+      });
+      await batch.commit();
+
+      // Optimistic local update so UI reflects change without a re-fetch.
+      setMembers((prev) =>
+        prev.map((m) =>
+          selectedIds.has(m.id) ? { ...m, [field]: value } : m
+        )
+      );
+
+      toast({
+        title: "Đã cập nhật",
+        description: `${value ? "Bật" : "Tắt"} "${bulkLabels[field]}" cho ${selectedCount} thành viên.`,
+      });
+      clearSelection();
+    } catch (error) {
+      console.error("Bulk update failed:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể cập nhật hàng loạt. Vui lòng thử lại.",
+      });
+      fetchMembersAndStats();
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedCount === 0) return;
+    setIsBulkProcessing(true);
+    try {
+      const batch = writeBatch(db);
+      selectedIds.forEach((id) => {
+        batch.delete(doc(db, "members", id));
+      });
+      await batch.commit();
+
+      const idsToRemove = new Set(selectedIds);
+      setMembers((prev) => prev.filter((m) => !idsToRemove.has(m.id)));
+
+      toast({
+        title: "Đã xoá",
+        description: `Đã xoá ${selectedCount} thành viên.`,
+      });
+      clearSelection();
+      setIsBulkDeleteOpen(false);
+    } catch (error) {
+      console.error("Bulk delete failed:", error);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: "Không thể xoá hàng loạt. Vui lòng thử lại.",
+      });
+      fetchMembersAndStats();
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -756,10 +864,115 @@ const Members = () => {
 
         {/* Members List */}
         <Card className="shadow-card">
-          <CardHeader>
-            <CardTitle>
-              Danh sách thành viên ({filteredMembers.length})
-            </CardTitle>
+          <CardHeader className="space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <CardTitle>
+                Danh sách thành viên ({filteredMembers.length})
+              </CardTitle>
+              {filteredMembers.length > 0 && (
+                <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+                  <Checkbox
+                    checked={allVisibleSelected}
+                    onCheckedChange={toggleSelectAllVisible}
+                    aria-label="Chọn tất cả"
+                  />
+                  Chọn tất cả
+                </label>
+              )}
+            </div>
+
+            {/* Bulk action bar — visible only when there is a selection */}
+            {selectedCount > 0 && (
+              <div className="flex items-center justify-between gap-2 flex-wrap rounded-lg border bg-primary/5 px-3 py-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <Badge variant="default" className="px-2 py-0.5">
+                    Đã chọn {selectedCount}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearSelection}
+                    className="h-7 px-2 text-xs"
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    Bỏ chọn
+                  </Button>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {(
+                    [
+                      {
+                        field: "isExemptFromPayment" as const,
+                        label: "Miễn chia",
+                        icon: BadgePercent,
+                      },
+                      {
+                        field: "autoAttendance" as const,
+                        label: "Auto",
+                        icon: Repeat,
+                      },
+                      {
+                        field: "isPriority" as const,
+                        label: "Ưu tiên",
+                        icon: ArrowUp,
+                      },
+                      {
+                        field: "inactive" as const,
+                        label: "Inactive",
+                        icon: UserX,
+                      },
+                    ]
+                  ).map(({ field, label, icon: Icon }) => (
+                    <DropdownMenu key={field}>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isBulkProcessing}
+                          className="h-8 gap-1.5"
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          {label}
+                          <ChevronDown className="h-3 w-3 opacity-60" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuLabel>
+                          {bulkLabels[field]}
+                        </DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => handleBulkUpdate(field, true)}
+                        >
+                          <CheckSquare className="h-4 w-4 mr-2 text-emerald-600" />
+                          Bật cho {selectedCount} người
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleBulkUpdate(field, false)}
+                        >
+                          <Square className="h-4 w-4 mr-2 text-muted-foreground" />
+                          Tắt cho {selectedCount} người
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ))}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsBulkDeleteOpen(true)}
+                    disabled={isBulkProcessing}
+                    className="h-8 gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    {isBulkProcessing ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                    Xoá
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
@@ -777,76 +990,90 @@ const Members = () => {
                 filteredMembers.map((member) => (
                   <div
                     key={member.id}
-                    className={`flex items-center justify-between p-4 rounded-lg border hover:shadow-md transition-all ${member.inactive ? 'opacity-50 bg-muted/30' : 'bg-gradient-card'}`}
+                    className={`flex items-center justify-between p-4 rounded-lg border hover:shadow-md transition-all ${
+                      selectedIds.has(member.id)
+                        ? "bg-primary/5 border-primary/40"
+                        : member.inactive
+                        ? "opacity-50 bg-muted/30"
+                        : "bg-gradient-card"
+                    }`}
                   >
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <div className="flex items-center gap-4 cursor-pointer flex-grow">
-                          <div className="h-12 w-12 rounded-full bg-primary flex items-center justify-center text-white font-semibold shadow-card">
-                            {member.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="space-y-1">
-                            <p className="font-semibold text-foreground">
-                              {member.name}
-                            </p>
-                            {member.nickname && (
-                              <Badge variant="secondary" className="mt-1">
-                                {member.nickname}
-                              </Badge>
-                            )}
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {member.isPriority && (
-                                <Badge
-                                  variant="outline"
-                                  className="border-amber-500 text-amber-600"
-                                >
-                                  <ArrowUp className="h-3 w-3 mr-0.5" />
-                                  Ưu tiên
-                                </Badge>
-                              )}
-                              {member.inactive && (
-                                <Badge
-                                  variant="outline"
-                                  className="border-slate-400 text-slate-500"
-                                >
-                                  <UserX className="h-3 w-3 mr-0.5" />
-                                  Inactive
-                                </Badge>
-                              )}
-                              {member.autoAttendance && (
-                                <Badge
-                                  variant="outline"
-                                  className="border-blue-500 text-blue-500"
-                                >
-                                  Auto
-                                </Badge>
-                              )}
+                    <div className="flex items-center gap-3 flex-grow min-w-0">
+                      <Checkbox
+                        checked={selectedIds.has(member.id)}
+                        onCheckedChange={() => toggleSelect(member.id)}
+                        aria-label={`Chọn ${member.name}`}
+                        className="shrink-0"
+                      />
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <div className="flex items-center gap-4 cursor-pointer flex-grow min-w-0">
+                            <div className="h-12 w-12 shrink-0 rounded-full bg-primary flex items-center justify-center text-white font-semibold shadow-card">
+                              {member.name.charAt(0).toUpperCase()}
                             </div>
-                            {member.loginEnabled && (
-                              <div className="flex flex-wrap gap-2">
-                                <Badge variant="outline">Login bật</Badge>
-                                {member.loginEmail && (
-                                  <Badge variant="secondary">
-                                    {member.loginEmail}
+                            <div className="space-y-1 min-w-0">
+                              <p className="font-semibold text-foreground truncate">
+                                {member.name}
+                              </p>
+                              {member.nickname && (
+                                <Badge variant="secondary" className="mt-1">
+                                  {member.nickname}
+                                </Badge>
+                              )}
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {member.isPriority && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-amber-500 text-amber-600"
+                                  >
+                                    <ArrowUp className="h-3 w-3 mr-0.5" />
+                                    Ưu tiên
+                                  </Badge>
+                                )}
+                                {member.inactive && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-slate-400 text-slate-500"
+                                  >
+                                    <UserX className="h-3 w-3 mr-0.5" />
+                                    Inactive
+                                  </Badge>
+                                )}
+                                {member.autoAttendance && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-blue-500 text-blue-500"
+                                  >
+                                    Auto
                                   </Badge>
                                 )}
                               </div>
-                            )}
+                              {member.loginEnabled && (
+                                <div className="flex flex-wrap gap-2">
+                                  <Badge variant="outline">Login bật</Badge>
+                                  {member.loginEmail && (
+                                    <Badge variant="secondary">
+                                      {member.loginEmail}
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-3xl">
-                        <DialogHeader>
-                          <DialogTitle>
-                            Lịch sử tham gia của {member.name}
-                          </DialogTitle>
-                          <DialogDescription>
-                            Tất cả các trận đấu đã thanh toán của thành viên.
-                          </DialogDescription>
-                        </DialogHeader>
-                        <MemberDetails memberId={member.id} />
-                      </DialogContent>
-                    </Dialog>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-3xl">
+                          <DialogHeader>
+                            <DialogTitle>
+                              Lịch sử tham gia của {member.name}
+                            </DialogTitle>
+                            <DialogDescription>
+                              Tất cả các trận đấu đã thanh toán của thành viên.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <MemberDetails memberId={member.id} />
+                        </DialogContent>
+                      </Dialog>
+                    </div>
                     <div className="flex items-center gap-6">
                       <div className="text-right">
                         <p className="text-sm text-muted-foreground">
@@ -860,65 +1087,69 @@ const Members = () => {
                         </p>
                       </div>
                       <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingMember(member);
-                            setIsEditModalOpen(true);
-                          }}
-                          className="h-8 w-8"
-                        >
-                          <Pencil className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleSetCreditor(member.id);
-                          }}
-                          className="h-8 w-8"
-                        >
-                          <Star
-                            className={`h-5 w-5 transition-colors ${
-                              member.isCreditor
-                                ? "text-yellow-400 fill-yellow-400"
-                                : "text-muted-foreground hover:text-yellow-400"
-                            }`}
-                          />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleToggleExemption(
-                              member.id,
-                              !!member.isExemptFromPayment
-                            );
-                          }}
-                          className="h-8 w-8"
-                        >
-                          <BadgePercent
-                            className={`h-5 w-5 transition-colors ${
-                              member.isExemptFromPayment
-                                ? "text-green-500 fill-green-500/20"
-                                : "text-muted-foreground hover:text-green-500"
-                            }`}
-                          />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteMember(member.id, member.name);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingMember(member);
+                                setIsEditModalOpen(true);
+                              }}
+                              className="h-8 w-8"
+                            >
+                              <Pencil className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Chỉnh sửa thành viên</TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleExemption(
+                                  member.id,
+                                  !!member.isExemptFromPayment
+                                );
+                              }}
+                              className="h-8 w-8"
+                            >
+                              <BadgePercent
+                                className={`h-5 w-5 transition-colors ${
+                                  member.isExemptFromPayment
+                                    ? "text-green-500 fill-green-500/20"
+                                    : "text-muted-foreground hover:text-green-500"
+                                }`}
+                              />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {member.isExemptFromPayment
+                              ? "Tắt miễn chia tiền"
+                              : "Bật miễn chia tiền"}
+                          </TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteMember(member.id, member.name);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Xoá thành viên</TooltipContent>
+                        </Tooltip>
                       </div>
                     </div>
                   </div>
@@ -1176,6 +1407,55 @@ const Members = () => {
             </DialogContent>
           </Dialog>
         )}
+
+        <AlertDialog open={isBulkDeleteOpen} onOpenChange={setIsBulkDeleteOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Xoá {selectedCount} thành viên?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Hành động này không thể hoàn tác. Các thành viên sau sẽ bị xoá
+                khỏi danh sách:
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="max-h-48 overflow-y-auto rounded-md border bg-muted/30 p-3 text-sm">
+              <ul className="space-y-1">
+                {members
+                  .filter((m) => selectedIds.has(m.id))
+                  .map((m) => (
+                    <li key={m.id} className="flex items-center gap-2">
+                      <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+                      {m.name}
+                      {m.nickname && (
+                        <span className="text-muted-foreground text-xs">
+                          ({m.nickname})
+                        </span>
+                      )}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isBulkProcessing}>
+                Hủy
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleBulkDelete();
+                }}
+                disabled={isBulkProcessing}
+                className="bg-destructive hover:bg-destructive/90"
+              >
+                {isBulkProcessing && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Xác nhận xoá
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

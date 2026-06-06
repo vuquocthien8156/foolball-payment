@@ -12,10 +12,10 @@ module.exports = {
   ATTEND_BATCH_MINUTES: 10,
 
   /**
-   * Gom NOT_ATTEND + CANCEL_ATTEND + CANCEL_NOT_ATTEND chung 1 job,
-   * chạy theo chu kỳ này. CANCEL_ATTEND sẽ kèm timestamp hủy.
+   * Gom NOT_ATTEND + CANCEL_NOT_ATTEND chung 1 job,
+   * chạy theo chu kỳ này. CANCEL_ATTEND được gửi ngay lập tức tại endpoint.
    */
-  ATTENDANCE_CHANGE_BATCH_MINUTES: 5,
+  ATTENDANCE_CHANGE_BATCH_MINUTES: 15,
 
   /**
    * Item trong slackQueue cũ hơn ngần này (giờ) sẽ bị xóa silent
