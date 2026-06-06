@@ -940,19 +940,10 @@ apiRoutes.post("/teams/propose", async (req, res) => {
     }
     const match = matchSnap.data();
 
-    // Token expires when attendance gate closes — sau giờ đó đội hình không còn ý nghĩa.
-    const closeHours =
-      typeof match.attendanceCloseHours === "number"
-        ? match.attendanceCloseHours
-        : cfg.DEFAULT_ATTENDANCE_CLOSE_HOURS;
+    // Token expires at match time — after kickoff the lineup is locked anyway.
     let expiresAt = null;
     if (match.date?.toDate) {
-      const matchDate = match.date.toDate();
-      const matchDayStart = new Date(matchDate);
-      matchDayStart.setHours(0, 0, 0, 0);
-      expiresAt = new Date(
-        matchDayStart.getTime() - closeHours * 60 * 60 * 1000
-      );
+      expiresAt = match.date.toDate();
     }
 
     const token = generateToken();
@@ -996,11 +987,7 @@ apiRoutes.post("/teams/propose", async (req, res) => {
         headerText: "🏃 Đội hình đề xuất",
         bodyMarkdown: `<!here>\n📅 Trận *${slack.formatMatchDate(match.date)}*${
           match.venueName ? `\n📍 ${match.venueName}` : ""
-        }\n\n${lines.join("\n\n")}${
-          expiresAt
-            ? `\n\n⏳ _Token hết hạn lúc: ${slack.formatTimestamp(expiresAt)}_`
-            : ""
-        }\n\n👇 Bấm nút bên dưới để chốt đội hình:`,
+        }\n\n${lines.join("\n\n")}\n\n👇 Bấm nút bên dưới để chốt đội hình:`,
         cta: {
           label: "Chốt đội hình",
           url: lockUrl,
