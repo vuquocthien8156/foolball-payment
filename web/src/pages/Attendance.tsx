@@ -1130,13 +1130,29 @@ const Attendance = () => {
 
         <Card className="mt-10 shadow-card">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5" />
-              Chia đội kéo thả
-            </CardTitle>
-            <CardDescription>
-              Kéo người đã điểm danh vào từng đội để tự chia sân nhanh chóng.
-            </CardDescription>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div className="space-y-1.5">
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Chia đội kéo thả
+                </CardTitle>
+                <CardDescription>
+                  Kéo người đã điểm danh vào từng đội để tự chia sân nhanh chóng.
+                </CardDescription>
+              </div>
+              <Button
+                onClick={handleSendTeamsToSlack}
+                disabled={isSendingTeams}
+                className="shrink-0"
+              >
+                {isSendingTeams ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Bell className="h-4 w-4 mr-2" />
+                )}
+                Gửi đội hình lên Slack
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1160,18 +1176,6 @@ const Attendance = () => {
                 >
                   <RotateCcw className="h-4 w-4 mr-2" />
                   Đưa tất cả về danh sách
-                </Button>
-                <Button
-                  onClick={handleSendTeamsToSlack}
-                  disabled={isSendingTeams}
-                  className="inline-flex"
-                >
-                  {isSendingTeams ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Bell className="h-4 w-4 mr-2" />
-                  )}
-                  Gửi đội hình lên Slack
                 </Button>
               </div>
             </div>

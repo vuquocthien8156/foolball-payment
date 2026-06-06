@@ -630,7 +630,7 @@ apiRoutes.post("/notify/attendance-created", async (req, res) => {
     slack
       .sendBlock({
         headerText: "⚽ Đã mở điểm danh trận mới",
-        bodyMarkdown: `📅 *${slack.formatMatchDate(match.date)}*${
+        bodyMarkdown: `<!here>\n📅 *${slack.formatMatchDate(match.date)}*${
           match.venueName ? `\n📍 ${match.venueName}` : ""
         }${autoAttendSection}`,
         fields: [
@@ -813,7 +813,7 @@ apiRoutes.post("/notify/match-published", async (req, res) => {
     slack
       .sendBlock({
         headerText: "📢 Bill trận đã công khai",
-        bodyMarkdown: `📅 *${slack.formatMatchDate(match.date)}*${
+        bodyMarkdown: `<!here>\n📅 *${slack.formatMatchDate(match.date)}*${
           match.venueName ? `\n📍 ${match.venueName}` : ""
         }${paidByName ? `\n💸 Người ứng tiền sân: *${paidByName}*` : ""}\n\n💳 Anh em vào thanh toán nhé!`,
         fields: [
@@ -950,7 +950,7 @@ apiRoutes.post("/teams/propose", async (req, res) => {
     slack
       .sendBlock({
         headerText: "🏃 Đội hình đề xuất",
-        bodyMarkdown: `📅 Trận *${slack.formatMatchDate(match.date)}*${
+        bodyMarkdown: `<!here>\n📅 Trận *${slack.formatMatchDate(match.date)}*${
           match.venueName ? `\n📍 ${match.venueName}` : ""
         }\n\n${lines.join("\n\n")}${
           expiresAt
@@ -1197,7 +1197,7 @@ exports.checkAttendanceClose = onSchedule(
         await slack
           .sendBlock({
             headerText: "⏰ Sắp đóng cổng điểm danh",
-            bodyMarkdown: `📅 Trận *${slack.formatMatchDate(data.date)}*${
+            bodyMarkdown: `<!channel>\n📅 Trận *${slack.formatMatchDate(data.date)}*${
               data.venueName ? `\n📍 ${data.venueName}` : ""
             }\n\n🚪 Cổng đóng lúc *${slack.formatTimestamp(closing)}* — ⏳ còn *${remainingLabel}*\n👥 Hiện đã có *${attCount} người* điểm danh.\n\n🏃 Ai chưa điểm danh thì vào nhanh nhé!`,
             cta: {
@@ -1538,7 +1538,7 @@ exports.debtReminder = onSchedule(
     });
 
     // Slack message char limit ~3000 per text block — chunk if needed
-    const headerMd = `💸 Còn *${sorted.length} người* nợ — tổng 💰 *${slack.formatVnd(
+    const headerMd = `<!here>\n💸 Còn *${sorted.length} người* nợ — tổng 💰 *${slack.formatVnd(
       grandTotal
     )} VND*\n\n🙏 Anh em vào thanh toán giúp nhé!`;
 
@@ -1669,6 +1669,10 @@ exports.dailyAttendanceReminder = onSchedule(
             ? "⏰ *Ngày mai*"
             : `📆 Còn *${daysUntil} ngày*`;
 
+      // Mention strategy: @channel if hôm nay, @here if ngày mai, none otherwise.
+      const mention =
+        daysUntil === 0 ? "<!channel>\n" : daysUntil === 1 ? "<!here>\n" : "";
+
       const attendeesSection =
         attSnap.size > 0
           ? `\n\n✅ *Đã điểm danh ${attSnap.size} người:*\n${attendeeNames
@@ -1684,7 +1688,7 @@ exports.dailyAttendanceReminder = onSchedule(
       await slack
         .sendBlock({
           headerText: "🔔 Nhắc nhở điểm danh",
-          bodyMarkdown: `📅 Trận *${slack.formatMatchDate(data.date)}*${
+          bodyMarkdown: `${mention}📅 Trận *${slack.formatMatchDate(data.date)}*${
             data.venueName ? `\n📍 ${data.venueName}` : ""
           }\n\n${daysLabel} đến trận.${attendeesSection}${absentSection}\n\n🏃 Anh em check nhanh giúp nhé!`,
           cta: {
