@@ -94,6 +94,7 @@ import {
 } from "firebase/firestore";
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
+import { formatMatchDateTime } from "@/lib/utils";
 import { initializeApp, deleteApp } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 
@@ -240,7 +241,7 @@ const MemberDetails = ({ memberId }: MemberDetailsProps) => {
           {history.map((item) => (
             <TableRow key={item.share.id}>
               <TableCell>
-                {item.matchDate.toLocaleDateString("vi-VN")}
+                {formatMatchDateTime(item.matchDate)}
               </TableCell>
               <TableCell>Đội {item.teamName}</TableCell>
               <TableCell className="text-right font-medium">

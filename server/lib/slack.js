@@ -3,10 +3,12 @@
 // Silent fail when not configured so the app keeps working without Slack.
 
 const axios = require("axios");
+const cfg = require("./slackConfig");
 
 const WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 const PUBLIC_WEB_URL =
   process.env.SLACK_PUBLIC_WEB_URL || "https://foolball-payment.web.app";
+const TZ = cfg.TIMEZONE;
 
 const isConfigured = () => Boolean(WEBHOOK_URL);
 
@@ -15,39 +17,66 @@ const formatVnd = (n) => {
   return n.toLocaleString("vi-VN");
 };
 
-const formatMatchDate = (dateLike) => {
-  if (!dateLike) return "Không rõ";
+// Coerce Firestore Timestamp / Date / string / millis → Date.
+const toDate = (dateLike) => {
+  if (!dateLike) return null;
   const d =
     typeof dateLike.toDate === "function" ? dateLike.toDate() : new Date(dateLike);
-  if (isNaN(d.getTime())) return "Không rõ";
+  return isNaN(d.getTime()) ? null : d;
+};
+
+// Extract wall-clock hour & minute as observed in TZ.
+// Server runs in UTC, so getHours() returns UTC hour — wrong for our users.
+const getTimePartsInTz = (d) => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  return { h, m };
+};
+
+const formatMatchDate = (dateLike) => {
+  const d = toDate(dateLike);
+  if (!d) return "Không rõ";
   const weekday = d
-    .toLocaleDateString("vi-VN", { weekday: "long" })
+    .toLocaleDateString("vi-VN", { weekday: "long", timeZone: TZ })
     .replace(/^./, (c) => c.toUpperCase());
   const date = d.toLocaleDateString("vi-VN", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone: TZ,
   });
-  const h = d.getHours();
-  const m = d.getMinutes();
+  const { h, m } = getTimePartsInTz(d);
   if (h === 0 && m === 0) return `${weekday} · ${date}`;
   const time = d.toLocaleTimeString("vi-VN", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: TZ,
   });
   return `${weekday} · ${date} · ${time}`;
 };
 
+// Date-only label (e.g. "07/06/2026") for FCM bodies & contexts where time isn't relevant.
+const formatMatchDateOnly = (dateLike) => {
+  const d = toDate(dateLike);
+  if (!d) return "Không rõ";
+  return d.toLocaleDateString("vi-VN", { timeZone: TZ });
+};
+
 const formatTimestamp = (ts) => {
-  if (!ts) return "";
-  const d =
-    typeof ts.toDate === "function" ? ts.toDate() : new Date(ts);
-  if (isNaN(d.getTime())) return "";
+  const d = toDate(ts);
+  if (!d) return "";
   return d.toLocaleString("vi-VN", {
     hour: "2-digit",
     minute: "2-digit",
     day: "2-digit",
     month: "2-digit",
+    timeZone: TZ,
   });
 };
 
@@ -140,6 +169,7 @@ module.exports = {
   sendBlock,
   formatVnd,
   formatMatchDate,
+  formatMatchDateOnly,
   formatTimestamp,
   PUBLIC_WEB_URL,
 };

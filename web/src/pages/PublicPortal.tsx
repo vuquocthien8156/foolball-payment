@@ -26,6 +26,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { ensureNotificationToken } from "@/lib/notifications";
+import { formatMatchDateTime } from "@/lib/utils";
 
 interface TopHighlight {
   mvpName: string;
@@ -213,7 +214,7 @@ const PublicPortal = () => {
             topScorerPeer: topRatingEntry ? topRatingEntry[1].peer : 0,
             topScorerAdmin: topRatingEntry ? topRatingEntry[1].admin : 0,
             hasAdminScore: topRatingEntry ? topRatingEntry[1].hasAdmin : false,
-            matchDateLabel: matchDate.toLocaleDateString("vi-VN"),
+            matchDateLabel: formatMatchDateTime(matchDate),
           };
           break;
         }

@@ -65,6 +65,7 @@ import { Badge } from "@/components/ui/badge";
 import useLocalStorage from "@/hooks/useLocalStorage";
 import { ensureNotificationToken } from "@/lib/notifications";
 import { postApiJson } from "@/lib/api";
+import { MATCH_TZ, getMatchTimeParts } from "@/lib/utils";
 
 // Interfaces
 interface Member {
@@ -791,19 +792,22 @@ const Attendance = () => {
           {(() => {
             const matchDate = new Date(match.date.seconds * 1000);
             const weekdayLabel = matchDate
-              .toLocaleDateString("vi-VN", { weekday: "long" })
+              .toLocaleDateString("vi-VN", { weekday: "long", timeZone: MATCH_TZ })
               .replace(/^./, (c) => c.toUpperCase());
             const dayMonthYear = matchDate.toLocaleDateString("vi-VN", {
               day: "2-digit",
               month: "2-digit",
               year: "numeric",
+              timeZone: MATCH_TZ,
             });
-            const hasTime =
-              !(matchDate.getHours() === 0 && matchDate.getMinutes() === 0);
+            const { hour: matchHour, minute: matchMinute } =
+              getMatchTimeParts(matchDate);
+            const hasTime = !(matchHour === 0 && matchMinute === 0);
             const timeLabel = hasTime
               ? matchDate.toLocaleTimeString("vi-VN", {
                   hour: "2-digit",
                   minute: "2-digit",
+                  timeZone: MATCH_TZ,
                 })
               : null;
 
@@ -977,6 +981,7 @@ const Attendance = () => {
                             minute: "2-digit",
                             day: "2-digit",
                             month: "2-digit",
+                            timeZone: MATCH_TZ,
                           })}
                         </span>
                       </div>
@@ -1069,6 +1074,7 @@ const Attendance = () => {
                                       minute: "2-digit",
                                       day: "2-digit",
                                       month: "2-digit",
+                                      timeZone: MATCH_TZ,
                                     })
                                   : "--"}
                               </TableCell>

@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/table";
 import { Loader2, Search, FilePenLine } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn, formatMatchDateTime } from "@/lib/utils";
 import {
   AggregatedStat,
   ActionWeights,
@@ -697,12 +697,7 @@ const ScoringMatches = () => {
                       : "hover:bg-muted"
                   )}
                 >
-                  Trận ngày{" "}
-                  {new Date(
-                    typeof match.date === "string"
-                      ? match.date
-                      : match.date.toDate()
-                  ).toLocaleDateString("vi-VN")}
+                  Trận ngày {formatMatchDateTime(match.date)}
                   <div className="text-xs opacity-80">
                     {match.status === "COMPLETED" ? "Đã tính tiền" : "Công khai"}
                   </div>

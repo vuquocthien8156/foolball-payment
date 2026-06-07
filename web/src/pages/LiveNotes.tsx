@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
+import { cn, formatMatchDateTime } from "@/lib/utils";
 import {
   Tooltip,
   TooltipContent,
@@ -655,12 +655,7 @@ const LiveNotes = () => {
             ) : (
               <div className="flex flex-col">
                 <span className="font-semibold">
-                  Trận ngày{" "}
-                  {new Date(
-                    typeof matches[0].date === "string"
-                      ? matches[0].date
-                      : matches[0].date.toDate()
-                  ).toLocaleDateString("vi-VN")}
+                  Trận ngày {formatMatchDateTime(matches[0].date)}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   Đang ghi chú cho trận gần nhất.

@@ -35,7 +35,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { cn } from "@/lib/utils";
+import { cn, MATCH_TZ, formatMatchDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -318,7 +318,7 @@ const PublicRatings = () => {
           typeof first.date === "string"
             ? new Date(first.date)
             : first.date.toDate();
-        setLatestMatchDateLabel(latestDate.toLocaleDateString("vi-VN"));
+        setLatestMatchDateLabel(formatMatchDateTime(latestDate));
       } else {
         setMatches([]);
         setSelectedMatchId(null);
@@ -337,7 +337,7 @@ const PublicRatings = () => {
         typeof matches[0].date === "string"
           ? new Date(matches[0].date)
           : matches[0].date.toDate();
-      setLatestMatchDateLabel(latestDate.toLocaleDateString("vi-VN"));
+      setLatestMatchDateLabel(formatMatchDateTime(latestDate));
     }
   }, [matches, selectedMatchId]);
 
@@ -592,9 +592,9 @@ const PublicRatings = () => {
       const startOfPrevWeek = new Date(startOfThisWeek);
       startOfPrevWeek.setDate(startOfPrevWeek.getDate() - 7);
       const endOfPrevWeek = new Date(startOfThisWeek.getTime() - 1);
-      const prevWeekLabel = `${startOfPrevWeek.toLocaleDateString(
-        "vi-VN"
-      )} - ${endOfPrevWeek.toLocaleDateString("vi-VN")}`;
+      const prevWeekLabel = `${startOfPrevWeek.toLocaleDateString("vi-VN", {
+        timeZone: MATCH_TZ,
+      })} - ${endOfPrevWeek.toLocaleDateString("vi-VN", { timeZone: MATCH_TZ })}`;
 
       const matchesQuery = query(
         collection(db, "matches"),
@@ -967,12 +967,7 @@ const PublicRatings = () => {
                           : "hover:bg-muted"
                       )}
                     >
-                      Trận ngày{" "}
-                      {new Date(
-                        typeof match.date === "string"
-                          ? match.date
-                          : match.date.toDate()
-                      ).toLocaleDateString("vi-VN")}
+                      Trận ngày {formatMatchDateTime(match.date)}
                     </button>
                   ))}
                 </CardContent>

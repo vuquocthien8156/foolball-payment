@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, CheckCircle2, XCircle, ArrowLeft } from "lucide-react";
 import { postApiJson } from "@/lib/api";
+import { MATCH_TZ } from "@/lib/utils";
 
 type Status = "loading" | "success" | "error";
 
@@ -32,9 +33,11 @@ const TeamLocked = () => {
         const ts = (data as any)?.lockedTeam?.lockedAt;
         if (ts?._seconds) {
           const d = new Date(ts._seconds * 1000);
-          setLockedAt(d.toLocaleString("vi-VN"));
+          setLockedAt(d.toLocaleString("vi-VN", { timeZone: MATCH_TZ }));
         } else if (ts) {
-          setLockedAt(new Date().toLocaleString("vi-VN"));
+          setLockedAt(
+            new Date().toLocaleString("vi-VN", { timeZone: MATCH_TZ })
+          );
         }
         setStatus("success");
       } catch (err) {

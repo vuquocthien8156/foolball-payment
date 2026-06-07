@@ -121,7 +121,17 @@ const SetupMatch = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
 
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  // Default to today in the user's local timezone.
+  // toISOString() returns UTC — between 00:00–07:00 ICT it would land on
+  // yesterday for users in GMT+7.
+  const todayLocalKey = (() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  })();
+  const [date, setDate] = useState(todayLocalKey);
   const [time, setTime] = useState("19:00");
   const [totalAmount, setTotalAmount] = useState("");
   const [teamCount, setTeamCount] = useState<2 | 3>(2);

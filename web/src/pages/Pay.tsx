@@ -92,7 +92,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { cn } from "@/lib/utils";
+import { cn, MATCH_TZ, formatMatchDateTime } from "@/lib/utils";
 import { Rating } from "@/components/Rating";
 import { Badge } from "@/components/ui/badge";
 
@@ -376,7 +376,7 @@ const Pay = () => {
           );
           const dateObj = matchData.date;
           const formattedDate = dateObj?.toDate
-            ? dateObj.toDate().toLocaleDateString("vi-VN")
+            ? formatMatchDateTime(dateObj)
             : "Không rõ";
 
           // Return a simplified but complete Share object for the main list
@@ -437,7 +437,7 @@ const Pay = () => {
             (t: { id: string }) => t.id === shareData.teamId
           );
           const formattedDate = dateObjManual?.toDate
-            ? dateObjManual.toDate().toLocaleDateString("vi-VN")
+            ? formatMatchDateTime(dateObjManual)
             : "Không rõ";
 
           manualPaidShares.push({
@@ -480,7 +480,7 @@ const Pay = () => {
 
             const dateObj = matchData.date;
             const formattedDate = dateObj?.toDate
-              ? dateObj.toDate().toLocaleDateString("vi-VN")
+              ? formatMatchDateTime(dateObj)
               : "Không rõ";
             const matchDateMs = dateObj?.toDate
               ? dateObj.toDate().getTime()

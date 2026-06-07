@@ -518,10 +518,7 @@ apiRoutes.post("/send-match-notification", async (req, res) => {
     }
 
     const dateObj = matchData.date;
-    let formattedDate = "Không rõ";
-    if (dateObj && typeof dateObj.toDate === "function") {
-      formattedDate = dateObj.toDate().toLocaleDateString("vi-VN");
-    }
+    const formattedDate = slack.formatMatchDateOnly(dateObj);
 
     const message = {
       notification: {
@@ -556,8 +553,9 @@ apiRoutes.post("/notify/attendance-created", async (req, res) => {
       return res.status(404).json({ error: "Match not found" });
     }
     const match = matchSnap.data();
-    const dateLabel =
-      match.date?.toDate?.().toLocaleDateString("vi-VN") || "trận mới";
+    const dateLabel = match.date
+      ? slack.formatMatchDateOnly(match.date)
+      : "trận mới";
 
     // --- Auto Attendance Logic ---
     // Skip when match.skipAutoAttendance === true.
@@ -676,8 +674,9 @@ apiRoutes.post("/notify/attendance-deleted", async (req, res) => {
     const db = admin.firestore();
     const matchSnap = await db.collection("matches").doc(matchId).get();
     const match = matchSnap.exists ? matchSnap.data() : null;
-    const dateLabel =
-      match?.date?.toDate?.().toLocaleDateString("vi-VN") || "trận điểm danh";
+    const dateLabel = match?.date
+      ? slack.formatMatchDateOnly(match.date)
+      : "trận điểm danh";
 
     const tokens = await collectAllTokens();
     if (tokens.length === 0) {
@@ -1171,6 +1170,42 @@ exports.api = onRequest({ invoker: "public" }, app);
 
 const TZ = cfg.TIMEZONE;
 
+// Offset of TZ at `date` in milliseconds (e.g. ICT → +25200000).
+// Robust across DST zones — VN has no DST, but keep generic so swapping
+// TIMEZONE later doesn't introduce subtle bugs.
+const getTzOffsetMs = (date, tz) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type) => Number(parts.find((p) => p.type === type).value);
+  let h = get("hour");
+  if (h === 24) h = 0;
+  const asUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    h,
+    get("minute"),
+    get("second")
+  );
+  return asUtc - date.getTime();
+};
+
+// Midnight of `date`'s day as observed in TZ, returned as a real UTC instant.
+const startOfDayInTz = (date, tz) => {
+  const offset = getTzOffsetMs(date, tz);
+  const shifted = new Date(date.getTime() + offset);
+  shifted.setUTCHours(0, 0, 0, 0);
+  return new Date(shifted.getTime() - offset);
+};
+
 const computeClosingTime = (matchDate, closeHours) => {
   if (!matchDate) return null;
   const d =
@@ -1180,8 +1215,8 @@ const computeClosingTime = (matchDate, closeHours) => {
     typeof closeHours === "number"
       ? closeHours
       : cfg.DEFAULT_ATTENDANCE_CLOSE_HOURS;
-  const matchDayStart = new Date(d);
-  matchDayStart.setHours(0, 0, 0, 0);
+  // Anchor at midnight of match day in TZ (not server's UTC midnight).
+  const matchDayStart = startOfDayInTz(d, TZ);
   return new Date(matchDayStart.getTime() - hours * 60 * 60 * 1000);
 };
 
@@ -1612,7 +1647,9 @@ exports.dailyAttendanceReminder = onSchedule(
   async () => {
     const db = admin.firestore();
     const now = new Date();
-    const todayKey = now.toLocaleDateString("en-CA"); // YYYY-MM-DD
+    // YYYY-MM-DD in TZ — cron fires at 9 AM ICT so UTC date usually matches,
+    // but we anchor on TZ explicitly to stay correct if cron timing changes.
+    const todayKey = now.toLocaleDateString("en-CA", { timeZone: TZ });
     const a3WindowMs = cfg.ATTENDANCE_WARN_HOURS_BEFORE_CLOSE * 60 * 60 * 1000;
 
     const pendingSnap = await db
@@ -1638,11 +1675,11 @@ exports.dailyAttendanceReminder = onSchedule(
       // Skip if past closing time entirely.
       if (closing && now >= closing) continue;
 
-      // Days until match (rounded up so "today" is 0, "tomorrow" is 1).
-      const matchDayStart = new Date(matchDate);
-      matchDayStart.setHours(0, 0, 0, 0);
-      const todayStart = new Date(now);
-      todayStart.setHours(0, 0, 0, 0);
+      // Days until match (rounded so "today" is 0, "tomorrow" is 1).
+      // Anchor at TZ midnight — server runs UTC, naive setHours zeros UTC and
+      // mis-counts matches that fall in the early-morning ICT hours.
+      const matchDayStart = startOfDayInTz(matchDate, TZ);
+      const todayStart = startOfDayInTz(now, TZ);
       const daysUntil = Math.round(
         (matchDayStart - todayStart) / (24 * 60 * 60 * 1000)
       );
@@ -1661,7 +1698,11 @@ exports.dailyAttendanceReminder = onSchedule(
         if (!lastReminded) {
           shouldFire = true;
         } else {
-          const lastDate = new Date(`${lastReminded}T00:00:00`);
+          // Parse stored YYYY-MM-DD as TZ midnight, then compare in same frame.
+          const lastDate = startOfDayInTz(
+            new Date(`${lastReminded}T12:00:00Z`),
+            TZ
+          );
           const daysSinceLast = Math.round(
             (todayStart - lastDate) / (24 * 60 * 60 * 1000)
           );

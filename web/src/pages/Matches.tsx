@@ -91,7 +91,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { cn } from "@/lib/utils";
+import { cn, MATCH_TZ, formatMatchDateTime } from "@/lib/utils";
 import { aggregateLiveStats, AggregatedStat } from "@/lib/liveStats";
 import { useActionConfigs } from "@/hooks/useActionConfigs";
 import { postApiJson } from "@/lib/api";
@@ -206,9 +206,7 @@ const MatchListItem = ({
     return () => unsubscribe();
   }, [match.id]);
 
-  const date = new Date(
-    typeof match.date === "string" ? match.date : match.date.toDate(),
-  ).toLocaleDateString("vi-VN");
+  const date = formatMatchDateTime(match.date);
 
   const isFullyPaid =
     !stats.isLoading &&
@@ -855,13 +853,7 @@ const Matches = () => {
         const parentPath = docSnap.ref.parent.parent?.id;
         if (!parentPath || parentPath === "matches") return;
         const match = matches.find((m) => m.id === parentPath);
-        const matchDate = match
-          ? new Date(
-              match.date instanceof Timestamp
-                ? match.date.toDate()
-                : match.date,
-            ).toLocaleDateString("vi-VN")
-          : parentPath;
+        const matchDate = match ? formatMatchDateTime(match.date) : parentPath;
         const data = docSnap.data();
         const entry = {
           shareId: docSnap.id,
@@ -1007,11 +999,7 @@ const Matches = () => {
 
   const matchDateString = useMemo(() => {
     if (!selectedMatch?.date) return "";
-    return new Date(
-      typeof selectedMatch.date === "string"
-        ? selectedMatch.date
-        : selectedMatch.date.toDate(),
-    ).toLocaleDateString("vi-VN");
+    return formatMatchDateTime(selectedMatch.date);
   }, [selectedMatch]);
 
   const combinedRatings = useMemo<Map<string, CombinedRatingData>>(() => {
@@ -1410,6 +1398,7 @@ const Matches = () => {
                                             ).toLocaleTimeString("vi-VN", {
                                               hour: "2-digit",
                                               minute: "2-digit",
+                                              timeZone: MATCH_TZ,
                                             })
                                           : "--:--"}
                                       </TableCell>
