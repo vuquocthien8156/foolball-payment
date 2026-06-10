@@ -1262,6 +1262,16 @@ exports.checkAttendanceClose = onSchedule(
           .get();
         const attCount = attSnap.size;
 
+        const sufficientCount = typeof data.sufficientPlayerCount === "number" ? data.sufficientPlayerCount : 14;
+        if (attCount >= sufficientCount) {
+          console.log(`Skipping attendance closing soon warning for match ${matchId} because attendance count ${attCount} is >= sufficientPlayerCount threshold ${sufficientCount}`);
+          await docSnap.ref.update({
+            attendanceWarnedNotified: true,
+            attendanceWarnedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          continue;
+        }
+
         // Format remaining time as "Xh Ym" or "Xm".
         const remainingMs = closing - now;
         const remainingMin = Math.round(remainingMs / 60000);
@@ -1718,6 +1728,14 @@ exports.dailyAttendanceReminder = onSchedule(
         db.collection("matches").doc(matchId).collection("attendance").get(),
         db.collection("matches").doc(matchId).collection("not_attending").get(),
       ]);
+
+      const sufficientCount = typeof data.sufficientPlayerCount === "number" ? data.sufficientPlayerCount : 14;
+      if (attSnap.size >= sufficientCount) {
+        console.log(`Skipping daily attendance reminder for match ${matchId} because attendance count ${attSnap.size} is >= sufficientPlayerCount threshold ${sufficientCount}`);
+        await docSnap.ref.update({ lastDailyReminderDate: todayKey });
+        continue;
+      }
+
       const attendeeNames = attSnap.docs
         .map((d) => d.data().memberName || "Không rõ")
         .sort((a, b) => a.localeCompare(b, "vi"));

@@ -106,6 +106,7 @@ interface MatchConfig {
   attendanceCloseHours?: number;
   paidByMemberId?: string | null;
   skipAutoAttendance?: boolean;
+  sufficientPlayerCount?: number;
 }
 
 // Helper
@@ -149,6 +150,7 @@ const SetupMatch = () => {
   const [venueName, setVenueName] = useState("");
   const [mapIframe, setMapIframe] = useState("");
   const [attendanceCloseHours, setAttendanceCloseHours] = useState(12);
+  const [sufficientPlayerCount, setSufficientPlayerCount] = useState<number | "">(14);
   const [paidByMemberId, setPaidByMemberId] = useState<string>("");
   const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [pool, setPool] = useState<Member[]>([]);
@@ -282,6 +284,7 @@ const SetupMatch = () => {
         setVenueName(savedConfig.venueName || "");
         setMapIframe(savedConfig.mapIframe || "");
         setAttendanceCloseHours(savedConfig.attendanceCloseHours ?? 12);
+        setSufficientPlayerCount(savedConfig.sufficientPlayerCount ?? 14);
         setPaidByMemberId(savedConfig.paidByMemberId || "");
         setSkipAutoAttendance(savedConfig.skipAutoAttendance || false);
         setTeams(newTeams);
@@ -476,6 +479,7 @@ const SetupMatch = () => {
         venueName: venueName || null,
         mapIframe: mapIframe || null,
         attendanceCloseHours,
+        sufficientPlayerCount: sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
         skipAutoAttendance,
         teamsConfig: activeTeams.map((t) => ({
@@ -518,6 +522,7 @@ const SetupMatch = () => {
         venueName: venueName || null,
         mapIframe: mapIframe || null,
         attendanceCloseHours,
+        sufficientPlayerCount: sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
         skipAutoAttendance,
         teamsConfig: activeTeams.map((t) => ({
@@ -566,6 +571,7 @@ const SetupMatch = () => {
         venueName: venueName || null,
         mapIframe: mapIframe || null,
         attendanceCloseHours,
+        sufficientPlayerCount: sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
         skipAutoAttendance,
         createdAt: serverTimestamp(),
@@ -723,6 +729,7 @@ const SetupMatch = () => {
         venueName: venueName || null,
         mapIframe: mapIframe || null,
         attendanceCloseHours,
+        sufficientPlayerCount: sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
         skipAutoAttendance,
         teamsConfig: activeTeams.map((t) => ({
@@ -997,6 +1004,25 @@ const SetupMatch = () => {
                 />
                 <p className="text-xs text-muted-foreground">
                   Mặc định: 12 giờ (đóng lúc 12:00 ngày hôm trước)
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sufficient-player-count" className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Số người tối thiểu để dừng nhắc nhở
+                </Label>
+                <Input
+                  id="sufficient-player-count"
+                  type="number"
+                  min="0"
+                  value={sufficientPlayerCount}
+                  onChange={(e) =>
+                    setSufficientPlayerCount(e.target.value === "" ? "" : (parseInt(e.target.value) || 0))
+                  }
+                  placeholder="Mặc định: 14"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Nếu đủ số người này điểm danh, các nhắc nhở điểm danh sẽ tự động tắt.
                 </p>
               </div>
               <div className="space-y-2">

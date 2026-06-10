@@ -469,7 +469,6 @@ const Attendance = () => {
 
       if (status === "attending") {
         if (wasNotAttending) {
-          await addDoc(logCol, { ...baseLog, type: "CANCEL_NOT_ATTEND" });
           actionsForApi.push("CANCEL_NOT_ATTEND");
         }
         await addDoc(logCol, { ...baseLog, type: "ATTEND" });
@@ -478,9 +477,10 @@ const Attendance = () => {
         if (wasAttending) {
           await addDoc(logCol, { ...baseLog, type: "CANCEL_ATTEND" });
           actionsForApi.push("CANCEL_ATTEND");
+        } else {
+          await addDoc(logCol, { ...baseLog, type: "NOT_ATTEND" });
+          actionsForApi.push("NOT_ATTEND");
         }
-        await addDoc(logCol, { ...baseLog, type: "NOT_ATTEND" });
-        actionsForApi.push("NOT_ATTEND");
       }
 
       // Fire Slack notifications (server queues / fires according to type).
