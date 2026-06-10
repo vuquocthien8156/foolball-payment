@@ -6,8 +6,14 @@ const axios = require("axios");
 const cfg = require("./slackConfig");
 
 const WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
-const PUBLIC_WEB_URL =
-  process.env.SLACK_PUBLIC_WEB_URL || "https://foolball-payment.web.app";
+let rawUrl = process.env.SLACK_PUBLIC_WEB_URL || "https://foolball-payment.web.app/public";
+if (rawUrl.endsWith("/")) {
+  rawUrl = rawUrl.slice(0, -1);
+}
+if (!rawUrl.endsWith("/public")) {
+  rawUrl = rawUrl + "/public";
+}
+const PUBLIC_WEB_URL = rawUrl;
 const TZ = cfg.TIMEZONE;
 
 const isConfigured = () => Boolean(WEBHOOK_URL);

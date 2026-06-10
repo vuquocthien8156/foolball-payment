@@ -991,7 +991,7 @@ apiRoutes.post("/teams/propose", async (req, res) => {
         return `${teamIcon} *${t.name}* (${t.members.length}):\n${names}`;
       });
 
-    const lockUrl = `${slack.PUBLIC_WEB_URL}/public/team-locked?token=${token}&matchId=${matchId}`;
+    const lockUrl = `${slack.PUBLIC_WEB_URL}/team-locked?token=${token}&matchId=${matchId}`;
 
     slack
       .sendBlock({
@@ -1151,6 +1151,11 @@ apiRoutes.post("/teams/lock", async (req, res) => {
     console.error("Error in /teams/lock:", error);
     res.status(500).json({ error: "Failed to lock teams" });
   }
+});
+
+// Dummy Slack interactions endpoint to prevent warnings on interactive buttons
+apiRoutes.post("/slack/interactions", (req, res) => {
+  return res.status(200).send("");
 });
 
 // Mount the API router under the /api prefix
