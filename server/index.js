@@ -1199,16 +1199,6 @@ exports.checkAttendanceClose = onSchedule(
           .get();
         const attCount = attSnap.size;
 
-        const sufficientCount = typeof data.sufficientPlayerCount === "number" ? data.sufficientPlayerCount : 14;
-        if (attCount >= sufficientCount) {
-          console.log(`Skipping attendance closing soon warning for match ${matchId} because attendance count ${attCount} is >= sufficientPlayerCount threshold ${sufficientCount}`);
-          await docSnap.ref.update({
-            attendanceWarnedNotified: true,
-            attendanceWarnedAt: admin.firestore.FieldValue.serverTimestamp(),
-          });
-          continue;
-        }
-
         // Format remaining time as "Xh Ym" or "Xm".
         const remainingMs = closing - now;
         const remainingMin = Math.round(remainingMs / 60000);
