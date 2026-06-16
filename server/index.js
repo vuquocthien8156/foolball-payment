@@ -195,18 +195,14 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
       .replace(/\s+/g, " ")
       .trim();
 
-    // Get first name only (last word in Vietnamese names is usually first name)
-    const nameParts = cleanName.split(" ");
-    const firstName = nameParts[nameParts.length - 1] || cleanName;
-
     // Short code (last 6 digits of timestamp)
     const shortCode = String(orderCode).slice(-6);
 
-    // PayOS description max 25 chars: "{firstName} gui {shortCode}"
-    // Truncate firstName if needed (max 12 chars to leave room)
-    const shortName = firstName.slice(0, 12);
+    // PayOS description max 25 chars: "{fullNameTruncated} {shortCode}"
+    // Truncate cleanName if needed (max 18 chars to leave room for space + 6-digit shortCode)
+    const shortName = cleanName.slice(0, 18).trim();
     const description = shortName
-      ? `${shortName} gui ${shortCode}`
+      ? `${shortName} ${shortCode}`
       : `TienBanh ${shortCode}`;
 
     // Create a payment request document to store context
@@ -367,81 +363,17 @@ const payosWebhookHandler = async (req, res) => {
         `Successfully processed payment and ratings for orderCode: ${orderCode}`
       );
 
-      // Post-transaction: fire Slack notifications.
+      // Post-transaction: enqueue Slack notifications.
       if (paidContext && paidContext.totalPaid > 0) {
-        // C1 — single message summarising this payment.
-        const matchIdsArr = Array.from(paidContext.affectedMatchIds);
-        // Compute remaining for each affected match in parallel
-        const matchSummaries = await Promise.all(
-          matchIdsArr.map(async (mId) => {
-            const matchSnap = await db.collection("matches").doc(mId).get();
-            const sharesSnap = await db
-              .collection("matches")
-              .doc(mId)
-              .collection("shares")
-              .get();
-            let pendingCount = 0;
-            let pendingAmount = 0;
-            let totalCount = 0;
-            sharesSnap.forEach((s) => {
-              const d = s.data();
-              totalCount += 1;
-              if (d.status === "PENDING") {
-                pendingCount += 1;
-                pendingAmount += d.amount || 0;
-              }
-            });
-            return {
-              matchId: mId,
-              matchData: matchSnap.exists ? matchSnap.data() : null,
-              pendingCount,
-              pendingAmount,
-              totalCount,
-              fullyPaid: totalCount > 0 && pendingCount === 0,
-            };
+        await db
+          .collection("paymentQueue")
+          .add({
+            memberName: paidContext.memberName,
+            totalPaid: paidContext.totalPaid,
+            affectedMatchIds: Array.from(paidContext.affectedMatchIds),
+            enqueuedAt: admin.firestore.FieldValue.serverTimestamp(),
           })
-        );
-
-        const c1Lines = matchSummaries.map((s) => {
-          const dateLabel = slack.formatMatchDate(s.matchData?.date);
-          if (s.fullyPaid) {
-            return `🎉 📅 *${dateLabel}*: đã thu đủ ✅`;
-          }
-          return `📅 *${dateLabel}*: còn ${s.pendingCount}/${
-            s.totalCount
-          } chưa trả (💰 *${slack.formatVnd(s.pendingAmount)} VND*)`;
-        });
-
-        slack
-          .sendBlock({
-            headerText: "💵 Có người vừa thanh toán",
-            bodyMarkdown: `👤 *${paidContext.memberName}* đã trả 💰 *${slack.formatVnd(
-              paidContext.totalPaid
-            )} VND*\n\n${c1Lines.join("\n")}`,
-            fallbackText: `${paidContext.memberName} đã trả ${slack.formatVnd(
-              paidContext.totalPaid
-            )} VND`,
-          })
-          .catch((e) => console.error("[slack] C1 failed", e));
-
-        // C2 — for each match that just became fully paid.
-        for (const s of matchSummaries) {
-          if (!s.fullyPaid) continue;
-          const matchTotal = s.matchData?.totalAmount || 0;
-          slack
-            .sendBlock({
-              headerText: "🎉 Trận đã thu đủ tiền!",
-              bodyMarkdown: `📅 *${slack.formatMatchDate(s.matchData?.date)}*${
-                s.matchData?.venueName ? `\n📍 ${s.matchData.venueName}` : ""
-              }\n\n💰 Tổng thu: *${slack.formatVnd(matchTotal)} VND*\n👥 ${
-                s.totalCount
-              } người\n\n🎊 Cảm ơn cả đội đã thanh toán đầy đủ!`,
-              fallbackText: `Trận ${slack.formatMatchDate(
-                s.matchData?.date
-              )} đã thu đủ`,
-            })
-            .catch((e) => console.error("[slack] C2 failed", e));
-        }
+          .catch((e) => console.error("[slack] Queueing payment failed", e));
       }
     } else {
       console.log("Webhook received for non-successful payment:", webhookData);
@@ -1506,6 +1438,144 @@ exports.flushAttendanceChangeQueue = onSchedule(
       staleDocs.forEach((ref) => staleBatch.delete(ref));
       await staleBatch.commit();
       console.log(`[slack] Deleted ${staleDocs.length} stale change items`);
+    }
+  }
+);
+
+/**
+ * B3 — flush payment queue. Gom các lần thanh toán trong cửa sổ thành 1 message.
+ * Schedule: cfg.PAYMENT_BATCH_MINUTES.
+ */
+exports.flushPaymentQueue = onSchedule(
+  {
+    schedule: `every ${cfg.PAYMENT_BATCH_MINUTES} minutes`,
+    timeZone: TZ,
+  },
+  async () => {
+    const db = admin.firestore();
+    const snap = await db.collection("paymentQueue").get();
+    if (snap.empty) return;
+
+    const payments = [];
+    const affectedMatchIds = new Set();
+    const docsToDelete = [];
+
+    snap.forEach((doc) => {
+      const data = doc.data();
+      payments.push({
+        memberName: data.memberName,
+        totalPaid: data.totalPaid,
+      });
+      if (Array.isArray(data.affectedMatchIds)) {
+        data.affectedMatchIds.forEach((id) => affectedMatchIds.add(id));
+      }
+      docsToDelete.push(doc.ref);
+    });
+
+    // Delete processed queue items first to prevent duplicate notifications on retry
+    const batch = db.batch();
+    docsToDelete.forEach((ref) => batch.delete(ref));
+    await batch.commit();
+
+    // Group payments by memberName and sum totalPaid
+    const paymentGroupMap = new Map();
+    payments.forEach((p) => {
+      const currentTotal = paymentGroupMap.get(p.memberName) || 0;
+      paymentGroupMap.set(p.memberName, currentTotal + p.totalPaid);
+    });
+
+    const paymentLines = Array.from(paymentGroupMap.entries()).map(
+      ([name, total]) => `👤 *${name}* đã trả 💰 *${slack.formatVnd(total)} VND*`
+    );
+
+    // Compute status for all affected matches
+    const matchIdsArr = Array.from(affectedMatchIds);
+    const matchSummaries = await Promise.all(
+      matchIdsArr.map(async (mId) => {
+        const matchSnap = await db.collection("matches").doc(mId).get();
+        const sharesSnap = await db
+          .collection("matches")
+          .doc(mId)
+          .collection("shares")
+          .get();
+
+        let pendingCount = 0;
+        let pendingAmount = 0;
+        let totalCount = 0;
+        sharesSnap.forEach((s) => {
+          const d = s.data();
+          totalCount += 1;
+          if (d.status === "PENDING") {
+            pendingCount += 1;
+            pendingAmount += d.amount || 0;
+          }
+        });
+
+        const matchData = matchSnap.exists ? matchSnap.data() : null;
+        const fullyPaid = totalCount > 0 && pendingCount === 0;
+
+        return {
+          matchId: mId,
+          matchData,
+          pendingCount,
+          pendingAmount,
+          totalCount,
+          fullyPaid,
+        };
+      })
+    );
+
+    // Build consolidated match summaries
+    const matchLines = matchSummaries.map((s) => {
+      const dateLabel = slack.formatMatchDate(s.matchData?.date);
+      if (s.fullyPaid) {
+        return `🎉 📅 *${dateLabel}*: đã thu đủ ✅`;
+      }
+      return `📅 *${dateLabel}*: còn ${s.pendingCount}/${
+        s.totalCount
+      } chưa trả (💰 *${slack.formatVnd(s.pendingAmount)} VND*)`;
+    });
+
+    // Send C1: Batched payment summary
+    await slack
+      .sendBlock({
+        headerText: "💵 Cập nhật thanh toán",
+        bodyMarkdown: `${paymentLines.join("\n")}\n\n${matchLines.join("\n")}`,
+        fallbackText: `Có ${payments.length} lượt thanh toán mới`,
+      })
+      .catch((e) => console.error("[slack] Batched C1 failed", e));
+
+    // Send C2 for each match that just became fully paid
+    for (const s of matchSummaries) {
+      if (!s.fullyPaid) continue;
+      if (s.matchData?.fullyPaidNotified) continue;
+
+      const matchTotal = s.matchData?.totalAmount || 0;
+      await slack
+        .sendBlock({
+          headerText: "🎉 Trận đã thu đủ tiền!",
+          bodyMarkdown: `📅 *${slack.formatMatchDate(s.matchData?.date)}*${
+            s.matchData?.venueName ? `\n📍 ${s.matchData.venueName}` : ""
+          }\n\n💰 Tổng thu: *${slack.formatVnd(matchTotal)} VND*\n👥 ${
+            s.totalCount
+          } người\n\n🎊 Cảm ơn cả đội đã thanh toán đầy đủ!`,
+          fallbackText: `Trận ${slack.formatMatchDate(
+            s.matchData?.date
+          )} đã thu đủ`,
+        })
+        .then(async () => {
+          await db
+            .collection("matches")
+            .doc(s.matchId)
+            .update({ fullyPaidNotified: true })
+            .catch((e) =>
+              console.error(
+                `[slack] Failed to update fullyPaidNotified for match ${s.matchId}`,
+                e
+              )
+            );
+        })
+        .catch((e) => console.error("[slack] C2 failed", e));
     }
   }
 );

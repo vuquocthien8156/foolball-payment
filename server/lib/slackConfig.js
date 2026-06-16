@@ -18,6 +18,12 @@ module.exports = {
   ATTENDANCE_CHANGE_BATCH_MINUTES: 15,
 
   /**
+   * Gom các lần thanh toán lại trong cửa sổ này rồi bắn 1 message.
+   * Cron `flushPaymentQueue` chạy theo chu kỳ này.
+   */
+  PAYMENT_BATCH_MINUTES: 30,
+
+  /**
    * Item trong slackQueue cũ hơn ngần này (giờ) sẽ bị xóa silent
    * thay vì bắn Slack — tránh "X người vừa điểm danh" khi server vừa down.
    */
