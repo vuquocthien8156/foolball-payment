@@ -126,6 +126,11 @@ interface Share {
   teamName: string;
   teamMemberCount: number;
   teamShares: TeamShareInfo[];
+  expenseBreakdown?: {
+    expenseId: string;
+    description: string;
+    amount: number;
+  }[];
   calculationDetails?: {
     memberPercent?: number;
     teamTotal: number;
@@ -393,6 +398,7 @@ const Pay = () => {
             teamName: teamConfig?.name || "Đội",
             teamMemberCount: teamConfig?.members?.length || 0,
             teamShares: [], // Temporarily disabled for debugging
+            expenseBreakdown: shareData.expenseBreakdown || [],
             calculationDetails: shareData.calculationDetails,
           } as Share;
         });
@@ -453,6 +459,7 @@ const Pay = () => {
             teamName: teamConfig?.name || "Đội",
             teamMemberCount: teamConfig?.members?.length || 0,
             teamShares: [],
+            expenseBreakdown: shareData.expenseBreakdown || [],
             calculationDetails: shareData.calculationDetails,
           });
         }
@@ -1246,6 +1253,24 @@ const Pay = () => {
                                             <span>Bạn được chia đều</span>
                                           </div>
                                         )}
+                                      </div>
+                                    )}
+
+                                    {/* Expense Breakdown */}
+                                    {share.expenseBreakdown && share.expenseBreakdown.length > 1 && (
+                                      <div>
+                                        <h4 className="font-semibold text-foreground my-2 flex items-center gap-2 text-sm sm:text-base">
+                                          <DollarSign className="h-4 w-4" />
+                                          Chi tiết chi phí
+                                        </h4>
+                                        {share.expenseBreakdown.map((expense) => (
+                                          <div key={expense.expenseId} className="flex justify-between text-xs sm:text-sm">
+                                            <span>{expense.description}:</span>
+                                            <span className="font-medium text-foreground">
+                                              {expense.amount.toLocaleString()}đ
+                                            </span>
+                                          </div>
+                                        ))}
                                       </div>
                                     )}
 

@@ -101,6 +101,12 @@ interface Match {
   id: string;
   date: Timestamp | string;
   totalAmount: number;
+  expenseItems?: {
+    id: string;
+    description: string;
+    amount: number;
+    exemptMemberIds: string[];
+  }[];
   status: "PENDING" | "COMPLETED" | "PUBLISHED";
   isDeleted?: boolean;
   isTest?: boolean;
@@ -123,6 +129,11 @@ interface Share {
   status: "PENDING" | "PAID" | "CANCELLED";
   paidAt?: string;
   createdAt?: Timestamp;
+  expenseBreakdown?: {
+    expenseId: string;
+    description: string;
+    amount: number;
+  }[];
 }
 
 interface Member {
@@ -2332,7 +2343,20 @@ const Matches = () => {
                               </TableCell>
                               <TableCell>{share.teamName}</TableCell>
                               <TableCell>
-                                {share.amount.toLocaleString()} VND
+                                <div className="space-y-1">
+                                  <div className="font-semibold">
+                                    {share.amount.toLocaleString()} VND
+                                  </div>
+                                  {share.expenseBreakdown && share.expenseBreakdown.length > 1 && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {share.expenseBreakdown.map((exp, idx) => (
+                                        <div key={idx}>
+                                          {exp.description}: {exp.amount.toLocaleString()}đ
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
                               </TableCell>
                               <TableCell>
                                 <Badge

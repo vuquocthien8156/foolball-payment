@@ -28,6 +28,9 @@ import {
   RotateCcw,
   MapPin,
   Clock,
+  Trash2,
+  Plus,
+  X,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -72,6 +75,13 @@ interface Team {
   percent: number;
 }
 
+interface ExpenseItem {
+  id: string;
+  description: string;
+  amount: number;
+  exemptMemberIds: string[];
+}
+
 interface Share {
   memberId: string;
   teamId: string;
@@ -80,6 +90,11 @@ interface Share {
   orderCode: string;
   calculationDetails?: object;
   matchId?: string;
+  expenseBreakdown?: {
+    expenseId: string;
+    description: string;
+    amount: number;
+  }[];
 }
 
 interface SavedTeamConfig {
@@ -95,7 +110,8 @@ interface SavedTeamConfig {
 }
 
 interface MatchConfig {
-  totalAmount: string | number;
+  totalAmount?: string | number; // Keep for backward compatibility
+  expenseItems?: ExpenseItem[];
   teamCount: 2 | 3;
   teamsConfig: SavedTeamConfig[];
   date?: Timestamp;
@@ -134,7 +150,9 @@ const SetupMatch = () => {
   })();
   const [date, setDate] = useState(todayLocalKey);
   const [time, setTime] = useState("19:00");
-  const [totalAmount, setTotalAmount] = useState("");
+  const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([
+    { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [] },
+  ]);
   const [teamCount, setTeamCount] = useState<2 | 3>(2);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -276,9 +294,25 @@ const SetupMatch = () => {
         );
         const newPool = membersList.filter((m) => !membersInNewTeams.has(m.id));
 
-        setTotalAmount(
-          savedConfig.totalAmount ? savedConfig.totalAmount.toString() : ""
-        );
+        // Backward compatibility: convert old totalAmount to expenseItems
+        if (savedConfig.expenseItems && savedConfig.expenseItems.length > 0) {
+          setExpenseItems(savedConfig.expenseItems);
+        } else if (savedConfig.totalAmount) {
+          // Old format: convert totalAmount to single expense item
+          setExpenseItems([
+            {
+              id: "default",
+              description: "Tiền sân",
+              amount: parseFloat(savedConfig.totalAmount.toString()) || 0,
+              exemptMemberIds: [],
+            },
+          ]);
+        } else {
+          setExpenseItems([
+            { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [] },
+          ]);
+        }
+
         setTeamCount(savedConfig.teamCount || 2);
         setIsTestMatch(savedConfig.isTest || false);
         setVenueName(savedConfig.venueName || "");
@@ -419,62 +453,109 @@ const SetupMatch = () => {
     );
   };
 
+  const handleAddExpense = () => {
+    const newExpense: ExpenseItem = {
+      id: `expense-${Date.now()}`,
+      description: "",
+      amount: 0,
+      exemptMemberIds: [],
+    };
+    setExpenseItems([...expenseItems, newExpense]);
+  };
+
+  const handleRemoveExpense = (expenseId: string) => {
+    if (expenseItems.length <= 1) {
+      toast({
+        title: "Lỗi",
+        description: "Phải có ít nhất một khoản chi phí.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setExpenseItems(expenseItems.filter((e) => e.id !== expenseId));
+  };
+
+  const handleUpdateExpense = (
+    expenseId: string,
+    field: keyof ExpenseItem,
+    value: any
+  ) => {
+    setExpenseItems((prev) =>
+      prev.map((e) => (e.id === expenseId ? { ...e, [field]: value } : e))
+    );
+  };
+
   const calculatedShares = useMemo(() => {
-    const numericTotalAmount = parseFloat(totalAmount) || 0;
-    if (numericTotalAmount <= 0) return {};
+    const totalExpenseAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
+    if (totalExpenseAmount <= 0) return {};
+
     const memberAmounts: { [key: string]: number } = {};
 
-    activeTeams.forEach((team) => {
-      if (team.members.length === 0) return;
-      const teamTotal = numericTotalAmount * (team.percent / 100);
-      const fixedPercentMembers = team.members.filter(
-        (m) =>
-          !m.isExemptFromPayment && m.percent !== undefined && m.percent > 0
-      );
-      const regularMembers = team.members.filter(
-        (m) =>
-          !m.isExemptFromPayment && (m.percent === undefined || m.percent <= 0)
-      );
-      let totalFixedAmount = 0;
+    // Loop through each expense
+    expenseItems.forEach((expense) => {
+      if (expense.amount <= 0) return;
 
-      fixedPercentMembers.forEach((member) => {
-        const memberAmount = Math.round(
-          teamTotal * ((member.percent || 0) / 100)
-        );
-        memberAmounts[member.id] = memberAmount;
-        totalFixedAmount += memberAmount;
-      });
+      activeTeams.forEach((team) => {
+        if (team.members.length === 0) return;
 
-      const remainingAmount = teamTotal - totalFixedAmount;
-      if (regularMembers.length > 0 && remainingAmount >= 0) {
-        const amountPerRegular = Math.floor(
-          remainingAmount / regularMembers.length
+        // Filter members eligible for this expense (not exempt and not globally exempt)
+        const eligibleMembers = team.members.filter(
+          (m) => !m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)
         );
-        let remainder = remainingAmount % regularMembers.length;
-        regularMembers.forEach((member) => {
-          memberAmounts[member.id] =
-            amountPerRegular + (remainder-- > 0 ? 1 : 0);
+
+        if (eligibleMembers.length === 0) return;
+
+        const teamTotal = expense.amount * (team.percent / 100);
+
+        const fixedPercentMembers = eligibleMembers.filter(
+          (m) => m.percent !== undefined && m.percent > 0
+        );
+        const regularMembers = eligibleMembers.filter(
+          (m) => m.percent === undefined || m.percent <= 0
+        );
+
+        let totalFixedAmount = 0;
+
+        fixedPercentMembers.forEach((member) => {
+          const memberAmount = Math.round(
+            teamTotal * ((member.percent || 0) / 100)
+          );
+          memberAmounts[member.id] = (memberAmounts[member.id] || 0) + memberAmount;
+          totalFixedAmount += memberAmount;
         });
-      }
+
+        const remainingAmount = teamTotal - totalFixedAmount;
+        if (regularMembers.length > 0 && remainingAmount >= 0) {
+          const amountPerRegular = Math.floor(
+            remainingAmount / regularMembers.length
+          );
+          let remainder = remainingAmount % regularMembers.length;
+          regularMembers.forEach((member) => {
+            const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
+            memberAmounts[member.id] = (memberAmounts[member.id] || 0) + memberAmount;
+          });
+        }
+      });
     });
 
+    // Adjust for rounding errors
     const calculatedTotal = Object.values(memberAmounts).reduce(
       (sum, amount) => sum + amount,
       0
     );
-    const diff = numericTotalAmount - calculatedTotal;
+    const diff = totalExpenseAmount - calculatedTotal;
     if (diff !== 0 && Object.keys(memberAmounts).length > 0) {
       const lastMemberId = Object.keys(memberAmounts).pop();
       if (lastMemberId) memberAmounts[lastMemberId] += diff;
     }
     return memberAmounts;
-  }, [activeTeams, totalAmount]);
+  }, [activeTeams, expenseItems]);
 
   const handleSaveConfigToDb = async () => {
     setIsSavingConfig(true);
     try {
       const configToSave = {
-        totalAmount: totalAmount || "0",
+        expenseItems: expenseItems,
         teamCount,
         venueName: venueName || null,
         mapIframe: mapIframe || null,
@@ -513,10 +594,12 @@ const SetupMatch = () => {
     if (!matchId) return;
     setIsUpdatingConfig(true);
     try {
+      const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
       const matchRef = doc(db, "matches", matchId);
       const matchData: any = {
         date: new Date(`${date}T${time}`),
-        totalAmount: parseFloat(totalAmount) || 0,
+        totalAmount: totalAmount,
+        expenseItems: expenseItems,
         teamCount,
         isTest: isTestMatch,
         venueName: venueName || null,
@@ -561,10 +644,12 @@ const SetupMatch = () => {
   const handleCreateMatchForAttendance = async () => {
     setIsCreating(true);
     try {
+      const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
       const matchRef = doc(collection(db, "matches"));
       const matchData = {
         date: new Date(`${date}T${time}`),
-        totalAmount: parseFloat(totalAmount) || 0,
+        totalAmount: totalAmount,
+        expenseItems: expenseItems,
         teamCount,
         status: "PENDING",
         isTest: isTestMatch,
@@ -620,11 +705,11 @@ const SetupMatch = () => {
       });
       return;
     }
-    const numericTotalAmount = parseFloat(totalAmount);
-    if (isNaN(numericTotalAmount) || numericTotalAmount <= 0) {
+    const numericTotalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
+    if (numericTotalAmount <= 0) {
       toast({
         title: "Lỗi số tiền",
-        description: "Vui lòng nhập tổng số tiền hợp lệ",
+        description: "Vui lòng nhập ít nhất một khoản chi phí có giá trị",
         variant: "destructive",
       });
       return;
@@ -646,70 +731,114 @@ const SetupMatch = () => {
         : doc(collection(db, "matches"));
 
       const shares: Share[] = [];
-      const teamNames = activeTeams.reduce(
-        (acc, t) => ({ ...acc, [t.id]: t.name }),
-        {}
-      );
 
-      activeTeams.forEach((team) => {
-        if (team.members.length === 0) return;
-        const teamTotal = numericTotalAmount * (team.percent / 100);
-        const fixedPercentMembers = team.members.filter(
-          (m) => m.percent !== undefined && m.percent > 0
-        );
-        const regularMembers = team.members.filter(
-          (m) =>
-            !m.isExemptFromPayment &&
-            (m.percent === undefined || m.percent <= 0)
-        );
-        let totalFixedAmount = 0;
+      // Calculate shares per member with expense breakdown
+      const memberSharesMap = new Map<string, {
+        memberId: string;
+        teamId: string;
+        totalAmount: number;
+        expenseBreakdown: { expenseId: string; description: string; amount: number }[];
+        calculationDetails?: object;
+      }>();
 
-        fixedPercentMembers.forEach((member) => {
-          const memberAmount = Math.round(
-            teamTotal * ((member.percent || 0) / 100)
+      expenseItems.forEach((expense) => {
+        if (expense.amount <= 0) return;
+
+        activeTeams.forEach((team) => {
+          if (team.members.length === 0) return;
+
+          const eligibleMembers = team.members.filter(
+            (m) => !m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)
           );
-          shares.push({
-            matchId: matchRef.id,
-            memberId: member.id,
-            teamId: team.id,
-            amount: memberAmount,
-            status: "PENDING",
-            orderCode: "", // Will be generated by server
-            calculationDetails: {
-              memberPercent: member.percent,
-              reason: member.reason,
-              teamTotal,
-              teamName: team.name,
-            },
-          });
-          totalFixedAmount += memberAmount;
-        });
 
-        const remainingAmount = teamTotal - totalFixedAmount;
-        if (regularMembers.length > 0 && remainingAmount >= 0) {
-          const amountPerRegular = Math.floor(
-            remainingAmount / regularMembers.length
+          if (eligibleMembers.length === 0) return;
+
+          const teamTotal = expense.amount * (team.percent / 100);
+
+          const fixedPercentMembers = eligibleMembers.filter(
+            (m) => m.percent !== undefined && m.percent > 0
           );
-          let remainder = remainingAmount % regularMembers.length;
-          regularMembers.forEach((member) => {
-            const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
-            shares.push({
-              matchId: matchRef.id,
-              memberId: member.id,
-              teamId: team.id,
+          const regularMembers = eligibleMembers.filter(
+            (m) => m.percent === undefined || m.percent <= 0
+          );
+
+          let totalFixedAmount = 0;
+
+          fixedPercentMembers.forEach((member) => {
+            const memberAmount = Math.round(
+              teamTotal * ((member.percent || 0) / 100)
+            );
+
+            if (!memberSharesMap.has(member.id)) {
+              memberSharesMap.set(member.id, {
+                memberId: member.id,
+                teamId: team.id,
+                totalAmount: 0,
+                expenseBreakdown: [],
+                calculationDetails: {
+                  memberPercent: member.percent,
+                  reason: member.reason,
+                  teamName: team.name,
+                },
+              });
+            }
+
+            const memberShare = memberSharesMap.get(member.id)!;
+            memberShare.totalAmount += memberAmount;
+            memberShare.expenseBreakdown.push({
+              expenseId: expense.id,
+              description: expense.description,
               amount: memberAmount,
-              status: "PENDING",
-              orderCode: "",
-              calculationDetails: {
-                teamTotal,
-                teamName: team.name,
-                totalFixedAmount,
-                remainingAmount,
-                regularMemberCount: regularMembers.length,
-              },
             });
+
+            totalFixedAmount += memberAmount;
           });
-        }
+
+          const remainingAmount = teamTotal - totalFixedAmount;
+          if (regularMembers.length > 0 && remainingAmount >= 0) {
+            const amountPerRegular = Math.floor(
+              remainingAmount / regularMembers.length
+            );
+            let remainder = remainingAmount % regularMembers.length;
+            regularMembers.forEach((member) => {
+              const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
+
+              if (!memberSharesMap.has(member.id)) {
+                memberSharesMap.set(member.id, {
+                  memberId: member.id,
+                  teamId: team.id,
+                  totalAmount: 0,
+                  expenseBreakdown: [],
+                  calculationDetails: {
+                    teamName: team.name,
+                  },
+                });
+              }
+
+              const memberShare = memberSharesMap.get(member.id)!;
+              memberShare.totalAmount += memberAmount;
+              memberShare.expenseBreakdown.push({
+                expenseId: expense.id,
+                description: expense.description,
+                amount: memberAmount,
+              });
+            });
+          }
+        });
+      });
+
+      // Convert map to shares array
+      memberSharesMap.forEach((memberShare) => {
+        shares.push({
+          matchId: matchRef.id,
+          memberId: memberShare.memberId,
+          teamId: memberShare.teamId,
+          amount: memberShare.totalAmount,
+          status: "PENDING",
+          orderCode: "",
+          expenseBreakdown: memberShare.expenseBreakdown,
+          calculationDetails: memberShare.calculationDetails,
+        });
       });
 
       // Recalculate total and adjust for rounding errors
@@ -724,6 +853,7 @@ const SetupMatch = () => {
       const matchData = {
         date: new Date(`${date}T${time}`),
         totalAmount: numericTotalAmount,
+        expenseItems: expenseItems,
         teamCount,
         isTest: isTestMatch,
         venueName: venueName || null,
@@ -909,20 +1039,6 @@ const SetupMatch = () => {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="total">Tổng tiền (VND)</Label>
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="total"
-                  type="number"
-                  placeholder="500000"
-                  value={totalAmount}
-                  onChange={(e) => setTotalAmount(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
               <Label>Tổng phần trăm</Label>
               <div className="flex items-center gap-2 h-10">
                 <Badge
@@ -956,6 +1072,135 @@ const SetupMatch = () => {
                 />
                 <span className="text-sm text-muted-foreground">
                   Mọi người tự điểm danh
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-6 shadow-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Chi phí trận đấu</CardTitle>
+                <CardDescription>
+                  Thêm các khoản chi phí (tiền sân, tiền nước, v.v.) và chọn ai miễn chia.
+                </CardDescription>
+              </div>
+              <Button onClick={handleAddExpense} size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                Thêm chi phí
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {expenseItems.map((expense, index) => (
+              <div key={expense.id} className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-sm">Khoản {index + 1}</h4>
+                  {expenseItems.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveExpense(expense.id)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor={`expense-desc-${expense.id}`}>Mô tả</Label>
+                    <Input
+                      id={`expense-desc-${expense.id}`}
+                      placeholder="Tiền sân, Tiền nước, ..."
+                      value={expense.description}
+                      onChange={(e) =>
+                        handleUpdateExpense(expense.id, "description", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`expense-amount-${expense.id}`}>Số tiền (VND)</Label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id={`expense-amount-${expense.id}`}
+                        type="number"
+                        placeholder="500000"
+                        value={expense.amount || ""}
+                        onChange={(e) =>
+                          handleUpdateExpense(
+                            expense.id,
+                            "amount",
+                            parseFloat(e.target.value) || 0
+                          )
+                        }
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Miễn chia (chọn members không phải trả khoản này)</Label>
+                  <Select
+                    value=""
+                    onValueChange={(memberId) => {
+                      if (expense.exemptMemberIds.includes(memberId)) return;
+                      handleUpdateExpense(expense.id, "exemptMemberIds", [
+                        ...expense.exemptMemberIds,
+                        memberId,
+                      ]);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Chọn member để miễn chia..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allMembers
+                        .filter((m) => !expense.exemptMemberIds.includes(m.id))
+                        .map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.name}
+                            {m.nickname ? ` (${m.nickname})` : ""}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  {expense.exemptMemberIds.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {expense.exemptMemberIds.map((memberId) => {
+                        const member = allMembers.find((m) => m.id === memberId);
+                        return (
+                          <Badge
+                            key={memberId}
+                            variant="secondary"
+                            className="flex items-center gap-1"
+                          >
+                            {member?.name || "Unknown"}
+                            <X
+                              className="h-3 w-3 cursor-pointer"
+                              onClick={() =>
+                                handleUpdateExpense(
+                                  expense.id,
+                                  "exemptMemberIds",
+                                  expense.exemptMemberIds.filter((id) => id !== memberId)
+                                )
+                              }
+                            />
+                          </Badge>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="pt-2 border-t">
+              <div className="flex items-center justify-between text-lg font-semibold">
+                <span>Tổng cộng:</span>
+                <span className="text-primary">
+                  {expenseItems.reduce((sum, e) => sum + e.amount, 0).toLocaleString()} VND
                 </span>
               </div>
             </div>
@@ -1199,9 +1444,9 @@ const SetupMatch = () => {
                 </CardTitle>
                 <CardDescription>
                   {team.percent}% ={" "}
-                  {totalAmount
+                  {expenseItems.length > 0
                     ? (
-                        (parseFloat(totalAmount) * team.percent) /
+                        (expenseItems.reduce((sum, e) => sum + e.amount, 0) * team.percent) /
                         100
                       ).toLocaleString()
                     : "0"}{" "}
