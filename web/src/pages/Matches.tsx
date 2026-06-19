@@ -41,6 +41,8 @@ import {
   Trophy,
   PlusCircle,
   Star,
+  Check,
+  ChevronsUpDown,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -52,6 +54,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
@@ -394,6 +409,8 @@ const Matches = () => {
   );
   const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
   const [isAttendanceDialogOpen, setIsAttendanceDialogOpen] = useState(false);
+  const [manualAddPopoverOpen, setManualAddPopoverOpen] = useState(false);
+  const [raterPopoverOpen, setRaterPopoverOpen] = useState(false);
   const { labelMap, weights } = useActionConfigs();
   const labelFor = useCallback(
     (key: string) =>
@@ -1362,23 +1379,51 @@ const Matches = () => {
                         ) : (
                           <>
                             <div className="flex gap-2 mb-4">
-                              <Select
-                                value={manualAddMemberId}
-                                onValueChange={setManualAddMemberId}
-                              >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue placeholder="Chọn thành viên..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {Array.from(members.entries())
-                                    .filter(([id]) => !attendance.has(id))
-                                    .map(([id, name]) => (
-                                      <SelectItem key={id} value={id}>
-                                        {name}
-                                      </SelectItem>
-                                    ))}
-                                </SelectContent>
-                              </Select>
+                              <Popover open={manualAddPopoverOpen} onOpenChange={setManualAddPopoverOpen}>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={manualAddPopoverOpen}
+                                    className="w-full justify-between font-normal"
+                                  >
+                                    {manualAddMemberId
+                                      ? members.get(manualAddMemberId) || "Chọn thành viên..."
+                                      : "Chọn thành viên..."}
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                                  <Command>
+                                    <CommandInput placeholder="Tìm thành viên..." />
+                                    <CommandList>
+                                      <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
+                                      <CommandGroup>
+                                        {Array.from(members.entries())
+                                          .filter(([id]) => !attendance.has(id))
+                                          .map(([id, name]) => (
+                                            <CommandItem
+                                              key={id}
+                                              value={name}
+                                              onSelect={() => {
+                                                setManualAddMemberId(id);
+                                                setManualAddPopoverOpen(false);
+                                              }}
+                                            >
+                                              <Check
+                                                className={cn(
+                                                  "mr-2 h-4 w-4",
+                                                  manualAddMemberId === id ? "opacity-100" : "opacity-0"
+                                                )}
+                                              />
+                                              {name}
+                                            </CommandItem>
+                                          ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
                               <Button
                                 onClick={handleAddAttendance}
                                 disabled={!manualAddMemberId}
@@ -1763,26 +1808,51 @@ const Matches = () => {
                             ) : (
                               <div className="space-y-4">
                                 <div>
-                                  <Select
-                                    onValueChange={setSelectedRaterId}
-                                    value={selectedRaterId || ""}
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Chọn người đánh giá để xem điểm" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {Array.from(crossRatings.entries()).map(
-                                        ([raterId, data]) => (
-                                          <SelectItem
-                                            key={raterId}
-                                            value={raterId}
-                                          >
-                                            {data.ratedByName}
-                                          </SelectItem>
-                                        ),
-                                      )}
-                                    </SelectContent>
-                                  </Select>
+                                  <Popover open={raterPopoverOpen} onOpenChange={setRaterPopoverOpen}>
+                                    <PopoverTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        role="combobox"
+                                        aria-expanded={raterPopoverOpen}
+                                        className="w-full justify-between font-normal"
+                                      >
+                                        {selectedRaterId
+                                          ? crossRatings.get(selectedRaterId)?.ratedByName || "Chọn người đánh giá để xem điểm"
+                                          : "Chọn người đánh giá để xem điểm"}
+                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                      </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                                      <Command>
+                                        <CommandInput placeholder="Tìm người đánh giá..." />
+                                        <CommandList>
+                                          <CommandEmpty>Không tìm thấy người đánh giá.</CommandEmpty>
+                                          <CommandGroup>
+                                            {Array.from(crossRatings.entries()).map(
+                                              ([raterId, data]) => (
+                                                <CommandItem
+                                                  key={raterId}
+                                                  value={data.ratedByName}
+                                                  onSelect={() => {
+                                                    setSelectedRaterId(raterId);
+                                                    setRaterPopoverOpen(false);
+                                                  }}
+                                                >
+                                                  <Check
+                                                    className={cn(
+                                                      "mr-2 h-4 w-4",
+                                                      selectedRaterId === raterId ? "opacity-100" : "opacity-0"
+                                                    )}
+                                                  />
+                                                  {data.ratedByName}
+                                                </CommandItem>
+                                              ),
+                                            )}
+                                          </CommandGroup>
+                                        </CommandList>
+                                      </Command>
+                                    </PopoverContent>
+                                  </Popover>
                                 </div>
                                 {selectedRaterId && (
                                   <Card>
@@ -2347,7 +2417,7 @@ const Matches = () => {
                                   <div className="font-semibold">
                                     {share.amount.toLocaleString()} VND
                                   </div>
-                                  {share.expenseBreakdown && share.expenseBreakdown.length > 1 && (
+                                  {share.expenseBreakdown && share.expenseBreakdown.length > 0 && (
                                     <div className="text-xs text-muted-foreground">
                                       {share.expenseBreakdown.map((exp, idx) => (
                                         <div key={idx}>

@@ -11,18 +11,25 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, Check, ChevronsUpDown } from "lucide-react";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { db } from "@/lib/firebase";
 import { doc, getDoc, collection, getDocs } from "firebase/firestore";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -32,6 +39,7 @@ const Login = () => {
     { id: string; name: string; loginEmail?: string }[]
   >([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>("");
+  const [popoverOpen, setPopoverOpen] = useState(false);
   const [isLoadingMembers, setIsLoadingMembers] = useState(true);
   const navigate = useNavigate();
 
@@ -131,39 +139,57 @@ const Login = () => {
           <CardContent className="grid gap-4">
             <div className="grid gap-2">
               <Label>Chọn thành viên</Label>
-              <Select
-                value={selectedMemberId}
-                onValueChange={(value) => {
-                  setSelectedMemberId(value);
-                  const member = members.find((m) => m.id === value);
-                  setEmail(member?.loginEmail || "");
-                }}
-                disabled={isLoadingMembers || members.length === 0}
-              >
-                <SelectTrigger>
-                  <SelectValue
-                    placeholder={
-                      isLoadingMembers
-                        ? "Đang tải..."
-                        : members.length === 0
-                        ? "Chưa có member bật login - nhập email thủ công"
-                        : "Chọn thành viên được bật đăng nhập"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {members.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name}
-                    </SelectItem>
-                  ))}
-                  {members.length === 0 && !isLoadingMembers && (
-                    <SelectItem value="none" disabled>
-                      Chưa bật đăng nhập cho thành viên nào
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
+              <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={popoverOpen}
+                    className="w-full justify-between font-normal"
+                    disabled={isLoadingMembers || members.length === 0}
+                  >
+                    {selectedMemberId
+                      ? members.find((m) => m.id === selectedMemberId)?.name
+                      : isLoadingMembers
+                      ? "Đang tải..."
+                      : members.length === 0
+                      ? "Chưa có member bật login - nhập email thủ công"
+                      : "Chọn thành viên được bật đăng nhập"}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Tìm thành viên..." />
+                    <CommandList>
+                      <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
+                      <CommandGroup>
+                        {members.map((m) => (
+                          <CommandItem
+                            key={m.id}
+                            value={m.name}
+                            onSelect={() => {
+                              setSelectedMemberId(m.id);
+                              setEmail(m.loginEmail || "");
+                              setPopoverOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                selectedMemberId === m.id
+                                  ? "opacity-100"
+                                  : "opacity-0"
+                              )}
+                            />
+                            {m.name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">Mật khẩu</Label>

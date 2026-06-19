@@ -54,6 +54,27 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { postApiJson } from "@/lib/api";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { Check, ChevronsUpDown } from "lucide-react";
 
 // Interfaces
 interface Member {
@@ -80,6 +101,9 @@ interface ExpenseItem {
   description: string;
   amount: number;
   exemptMemberIds: string[];
+  teamPercents?: { [teamId: string]: number };
+  type?: "SHARED" | "INDIVIDUAL" | "EQUAL";
+  targetMemberId?: string;
 }
 
 interface Share {
@@ -151,7 +175,7 @@ const SetupMatch = () => {
   const [date, setDate] = useState(todayLocalKey);
   const [time, setTime] = useState("19:00");
   const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([
-    { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [] },
+    { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [], teamPercents: { A: 50, B: 50, C: 0 }, type: "SHARED" },
   ]);
   const [teamCount, setTeamCount] = useState<2 | 3>(2);
   const [isLoading, setIsLoading] = useState(true);
@@ -170,6 +194,8 @@ const SetupMatch = () => {
   const [attendanceCloseHours, setAttendanceCloseHours] = useState(12);
   const [sufficientPlayerCount, setSufficientPlayerCount] = useState<number | "">(14);
   const [paidByMemberId, setPaidByMemberId] = useState<string>("");
+  const [paidByPopoverOpen, setPaidByPopoverOpen] = useState(false);
+  const [activePopoverId, setActivePopoverId] = useState<string | null>(null);
   const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [pool, setPool] = useState<Member[]>([]);
   const [attendance, setAttendance] = useState<Set<string>>(new Set());
@@ -181,6 +207,20 @@ const SetupMatch = () => {
 
   const activeTeams = teams.slice(0, teamCount);
   const totalPercent = activeTeams.reduce((sum, t) => sum + t.percent, 0);
+
+  const getTeamEffectivePercent = (teamId: string) => {
+    const totalExpenseAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
+    if (totalExpenseAmount <= 0) return teamId === "C" ? 0 : 50;
+
+    const teamTotalAmount = expenseItems.reduce((sum, expense) => {
+      if (expense.amount <= 0) return sum;
+      if (expense.type === "INDIVIDUAL") return sum;
+      const teamPercent = expense.teamPercents?.[teamId] ?? (teams.find(t => t.id === teamId)?.percent ?? 0);
+      return sum + (expense.amount * teamPercent) / 100;
+    }, 0);
+
+    return Math.round((teamTotalAmount / totalExpenseAmount) * 100);
+  };
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -294,9 +334,20 @@ const SetupMatch = () => {
         );
         const newPool = membersList.filter((m) => !membersInNewTeams.has(m.id));
 
+        const initialTeamPercents = savedConfig.teamsConfig?.reduce((acc, team) => {
+          acc[team.id] = team.percent;
+          return acc;
+        }, {} as { [teamId: string]: number }) || { A: 50, B: 50, C: 0 };
+
         // Backward compatibility: convert old totalAmount to expenseItems
         if (savedConfig.expenseItems && savedConfig.expenseItems.length > 0) {
-          setExpenseItems(savedConfig.expenseItems);
+          setExpenseItems(
+            savedConfig.expenseItems.map((item) => ({
+              ...item,
+              type: item.type || "SHARED",
+              teamPercents: item.teamPercents || { ...initialTeamPercents },
+            }))
+          );
         } else if (savedConfig.totalAmount) {
           // Old format: convert totalAmount to single expense item
           setExpenseItems([
@@ -305,11 +356,13 @@ const SetupMatch = () => {
               description: "Tiền sân",
               amount: parseFloat(savedConfig.totalAmount.toString()) || 0,
               exemptMemberIds: [],
+              type: "SHARED",
+              teamPercents: { ...initialTeamPercents },
             },
           ]);
         } else {
           setExpenseItems([
-            { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [] },
+            { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [], type: "SHARED", teamPercents: { ...initialTeamPercents } },
           ]);
         }
 
@@ -454,11 +507,23 @@ const SetupMatch = () => {
   };
 
   const handleAddExpense = () => {
+    const defaultPercents: { [teamId: string]: number } = {};
+    if (teamCount === 2) {
+      defaultPercents["A"] = 50;
+      defaultPercents["B"] = 50;
+      defaultPercents["C"] = 0;
+    } else {
+      defaultPercents["A"] = 34;
+      defaultPercents["B"] = 33;
+      defaultPercents["C"] = 33;
+    }
     const newExpense: ExpenseItem = {
       id: `expense-${Date.now()}`,
       description: "",
       amount: 0,
       exemptMemberIds: [],
+      type: "SHARED",
+      teamPercents: defaultPercents,
     };
     setExpenseItems([...expenseItems, newExpense]);
   };
@@ -487,13 +552,56 @@ const SetupMatch = () => {
 
   const calculatedShares = useMemo(() => {
     const totalExpenseAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
-    if (totalExpenseAmount <= 0) return {};
+    const memberAmounts: { [key: string]: { totalAmount: number; details: { description: string; amount: number }[] } } = {};
 
-    const memberAmounts: { [key: string]: number } = {};
+    if (totalExpenseAmount <= 0) return memberAmounts;
 
     // Loop through each expense
     expenseItems.forEach((expense) => {
       if (expense.amount <= 0) return;
+
+      if (expense.type === "INDIVIDUAL") {
+        if (expense.targetMemberId) {
+          if (!memberAmounts[expense.targetMemberId]) {
+            memberAmounts[expense.targetMemberId] = { totalAmount: 0, details: [] };
+          }
+          memberAmounts[expense.targetMemberId].totalAmount += expense.amount;
+          memberAmounts[expense.targetMemberId].details.push({
+            description: (expense.description || "Đòi riêng") + " (Đòi riêng)",
+            amount: expense.amount,
+          });
+        }
+        return;
+      }
+
+      if (expense.type === "EQUAL") {
+        const eligibleMembers: Member[] = [];
+        activeTeams.forEach((team) => {
+          team.members.forEach((m) => {
+            if (!m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)) {
+              eligibleMembers.push(m);
+            }
+          });
+        });
+
+        if (eligibleMembers.length > 0) {
+          const amountPerMember = Math.floor(expense.amount / eligibleMembers.length);
+          let remainder = expense.amount % eligibleMembers.length;
+
+          eligibleMembers.forEach((member) => {
+            const memberAmount = amountPerMember + (remainder-- > 0 ? 1 : 0);
+            if (!memberAmounts[member.id]) {
+              memberAmounts[member.id] = { totalAmount: 0, details: [] };
+            }
+            memberAmounts[member.id].totalAmount += memberAmount;
+            memberAmounts[member.id].details.push({
+              description: expense.description || "Chia đều",
+              amount: memberAmount,
+            });
+          });
+        }
+        return;
+      }
 
       activeTeams.forEach((team) => {
         if (team.members.length === 0) return;
@@ -505,7 +613,8 @@ const SetupMatch = () => {
 
         if (eligibleMembers.length === 0) return;
 
-        const teamTotal = expense.amount * (team.percent / 100);
+        const teamPercent = expense.teamPercents?.[team.id] ?? team.percent;
+        const teamTotal = expense.amount * (teamPercent / 100);
 
         const fixedPercentMembers = eligibleMembers.filter(
           (m) => m.percent !== undefined && m.percent > 0
@@ -520,7 +629,14 @@ const SetupMatch = () => {
           const memberAmount = Math.round(
             teamTotal * ((member.percent || 0) / 100)
           );
-          memberAmounts[member.id] = (memberAmounts[member.id] || 0) + memberAmount;
+          if (!memberAmounts[member.id]) {
+            memberAmounts[member.id] = { totalAmount: 0, details: [] };
+          }
+          memberAmounts[member.id].totalAmount += memberAmount;
+          memberAmounts[member.id].details.push({
+            description: expense.description || "Tiền sân",
+            amount: memberAmount,
+          });
           totalFixedAmount += memberAmount;
         });
 
@@ -532,7 +648,14 @@ const SetupMatch = () => {
           let remainder = remainingAmount % regularMembers.length;
           regularMembers.forEach((member) => {
             const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
-            memberAmounts[member.id] = (memberAmounts[member.id] || 0) + memberAmount;
+            if (!memberAmounts[member.id]) {
+              memberAmounts[member.id] = { totalAmount: 0, details: [] };
+            }
+            memberAmounts[member.id].totalAmount += memberAmount;
+            memberAmounts[member.id].details.push({
+              description: expense.description || "Tiền sân",
+              amount: memberAmount,
+            });
           });
         }
       });
@@ -540,16 +663,53 @@ const SetupMatch = () => {
 
     // Adjust for rounding errors
     const calculatedTotal = Object.values(memberAmounts).reduce(
-      (sum, amount) => sum + amount,
+      (sum, item) => sum + item.totalAmount,
       0
     );
     const diff = totalExpenseAmount - calculatedTotal;
     if (diff !== 0 && Object.keys(memberAmounts).length > 0) {
       const lastMemberId = Object.keys(memberAmounts).pop();
-      if (lastMemberId) memberAmounts[lastMemberId] += diff;
+      if (lastMemberId) {
+        memberAmounts[lastMemberId].totalAmount += diff;
+        const lastDetail = memberAmounts[lastMemberId].details[memberAmounts[lastMemberId].details.length - 1];
+        if (lastDetail) {
+          lastDetail.amount += diff;
+        }
+      }
     }
     return memberAmounts;
-  }, [activeTeams, expenseItems]);
+  }, [activeTeams, expenseItems, teams]);
+
+  const matchDivisionDetails = useMemo(() => {
+    const teamShares = activeTeams.map((team) => {
+      const amount = team.members.reduce(
+        (sum, m) => sum + (calculatedShares[m.id]?.totalAmount || 0),
+        0
+      );
+      return { name: team.name, amount };
+    });
+
+    const activeMemberIds = new Set(activeTeams.flatMap((t) => t.members.map((m) => m.id)));
+    const otherShares: { name: string; amount: number }[] = [];
+    
+    Object.entries(calculatedShares).forEach(([memberId, share]) => {
+      if (!activeMemberIds.has(memberId) && share.totalAmount > 0) {
+        const member = allMembers.find((m) => m.id === memberId);
+        otherShares.push({
+          name: `${member?.name || "Unknown"} (Đòi riêng ngoài đội)`,
+          amount: share.totalAmount,
+        });
+      }
+    });
+
+    const totalDivided = Object.values(calculatedShares).reduce((sum, s) => sum + s.totalAmount, 0);
+
+    return {
+      teamShares,
+      otherShares,
+      totalDivided,
+    };
+  }, [activeTeams, calculatedShares, allMembers]);
 
   const handleSaveConfigToDb = async () => {
     setIsSavingConfig(true);
@@ -566,7 +726,7 @@ const SetupMatch = () => {
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
           name: t.name,
-          percent: t.percent,
+          percent: getTeamEffectivePercent(t.id),
           members: t.members.map((m) => ({
             id: m.id,
             percent: m.percent === undefined ? null : m.percent,
@@ -611,7 +771,7 @@ const SetupMatch = () => {
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
           name: t.name,
-          percent: t.percent,
+          percent: getTeamEffectivePercent(t.id),
           members: t.members.map((m) => ({
             id: m.id,
             percent: m.percent === undefined ? null : m.percent,
@@ -663,7 +823,7 @@ const SetupMatch = () => {
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
           name: t.name,
-          percent: t.percent,
+          percent: getTeamEffectivePercent(t.id),
           members: t.members.map((m) => ({
             id: m.id,
             percent: m.percent === undefined ? null : m.percent,
@@ -697,13 +857,40 @@ const SetupMatch = () => {
   };
 
   const handleSave = async () => {
-    if (totalPercent !== 100) {
-      toast({
-        title: "Lỗi phân chia",
-        description: "Tổng phần trăm các đội phải bằng 100%",
-        variant: "destructive",
-      });
-      return;
+    // Validate từng chi phí
+    for (let i = 0; i < expenseItems.length; i++) {
+      const expense = expenseItems[i];
+      if (!expense.type || expense.type === "SHARED") {
+        const sum = activeTeams.reduce((acc, team) => {
+          const p = expense.teamPercents?.[team.id] ?? team.percent;
+          return acc + p;
+        }, 0);
+        if (sum !== 100) {
+          toast({
+            title: `Lỗi phân chia ở Khoản ${i + 1}`,
+            description: `Tổng phần trăm các đội cho "${expense.description || "Khoản chi phí"}" phải bằng 100% (hiện tại là ${sum}%)`,
+            variant: "destructive",
+          });
+          return;
+        }
+      } else if (expense.type === "INDIVIDUAL" && !expense.targetMemberId) {
+        toast({
+          title: `Lỗi thông tin ở Khoản ${i + 1}`,
+          description: `Vui lòng chọn thành viên cần đòi tiền cho "${expense.description || "Khoản chi phí"}"`,
+          variant: "destructive",
+        });
+        return;
+      } else if (expense.type === "EQUAL") {
+        const totalMembers = activeTeams.reduce((sum, t) => sum + t.members.length, 0);
+        if (totalMembers === 0) {
+          toast({
+            title: `Lỗi phân chia ở Khoản ${i + 1}`,
+            description: `Không thể chia đều "${expense.description || "Khoản chi phí"}" vì các đội chưa có thành viên nào`,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
     }
     const numericTotalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
     if (numericTotalAmount <= 0) {
@@ -715,7 +902,7 @@ const SetupMatch = () => {
       return;
     }
     await handleSaveConfigToDb();
-    if (activeTeams.some((t) => t.percent > 0 && t.members.length === 0)) {
+    if (activeTeams.some((t) => getTeamEffectivePercent(t.id) > 0 && t.members.length === 0)) {
       toast({
         title: "Lỗi đội hình",
         description: "Đội có phần trăm > 0 phải có thành viên",
@@ -744,6 +931,79 @@ const SetupMatch = () => {
       expenseItems.forEach((expense) => {
         if (expense.amount <= 0) return;
 
+        if (expense.type === "INDIVIDUAL") {
+          if (expense.targetMemberId) {
+            let memberTeamId = "pool";
+            activeTeams.forEach((t) => {
+              if (t.members.some((m) => m.id === expense.targetMemberId)) {
+                memberTeamId = t.id;
+              }
+            });
+
+            if (!memberSharesMap.has(expense.targetMemberId)) {
+              memberSharesMap.set(expense.targetMemberId, {
+                memberId: expense.targetMemberId,
+                teamId: memberTeamId,
+                totalAmount: 0,
+                expenseBreakdown: [],
+                calculationDetails: {
+                  isIndividual: true,
+                },
+              });
+            }
+
+            const memberShare = memberSharesMap.get(expense.targetMemberId)!;
+            memberShare.totalAmount += expense.amount;
+            memberShare.expenseBreakdown.push({
+              expenseId: expense.id,
+              description: (expense.description || "Đòi riêng") + " (Đòi riêng)",
+              amount: expense.amount,
+            });
+          }
+          return;
+        }
+
+        if (expense.type === "EQUAL") {
+          const eligibleMembers: { member: Member; teamId: string }[] = [];
+          activeTeams.forEach((team) => {
+            team.members.forEach((m) => {
+              if (!m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)) {
+                eligibleMembers.push({ member: m, teamId: team.id });
+              }
+            });
+          });
+
+          if (eligibleMembers.length > 0) {
+            const amountPerMember = Math.floor(expense.amount / eligibleMembers.length);
+            let remainder = expense.amount % eligibleMembers.length;
+
+            eligibleMembers.forEach(({ member, teamId }) => {
+              const memberAmount = amountPerMember + (remainder-- > 0 ? 1 : 0);
+
+              if (!memberSharesMap.has(member.id)) {
+                memberSharesMap.set(member.id, {
+                  memberId: member.id,
+                  teamId: teamId,
+                  totalAmount: 0,
+                  expenseBreakdown: [],
+                  calculationDetails: {
+                    isEqual: true,
+                  },
+                });
+              }
+
+              const memberShare = memberSharesMap.get(member.id)!;
+              memberShare.totalAmount += memberAmount;
+              memberShare.expenseBreakdown.push({
+                expenseId: expense.id,
+                description: expense.description || "Chia đều",
+                amount: memberAmount,
+              });
+            });
+          }
+          return;
+        }
+
         activeTeams.forEach((team) => {
           if (team.members.length === 0) return;
 
@@ -753,7 +1013,8 @@ const SetupMatch = () => {
 
           if (eligibleMembers.length === 0) return;
 
-          const teamTotal = expense.amount * (team.percent / 100);
+          const teamPercent = expense.teamPercents?.[team.id] ?? team.percent;
+          const teamTotal = expense.amount * (teamPercent / 100);
 
           const fixedPercentMembers = eligibleMembers.filter(
             (m) => m.percent !== undefined && m.percent > 0
@@ -865,7 +1126,7 @@ const SetupMatch = () => {
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
           name: t.name,
-          percent: t.percent,
+          percent: getTeamEffectivePercent(t.id),
           members: t.members.map((m) => ({
             id: m.id,
             percent: m.percent === undefined ? null : m.percent,
@@ -1039,17 +1300,6 @@ const SetupMatch = () => {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Tổng phần trăm</Label>
-              <div className="flex items-center gap-2 h-10">
-                <Badge
-                  variant={totalPercent === 100 ? "default" : "destructive"}
-                  className="text-lg px-4 py-2"
-                >
-                  {totalPercent}%
-                </Badge>
-              </div>
-            </div>
-            <div className="space-y-2">
               <Label htmlFor="is-test-match">Trận test</Label>
               <div className="flex items-center gap-3 h-10">
                 <Switch
@@ -1084,7 +1334,7 @@ const SetupMatch = () => {
               <div>
                 <CardTitle>Chi phí trận đấu</CardTitle>
                 <CardDescription>
-                  Thêm các khoản chi phí (tiền sân, tiền nước, v.v.) và chọn ai miễn chia.
+                  Thêm các khoản chi phí (tiền sân, tiền nước, v.v.), cấu hình tỷ lệ chia cho từng mục hoặc đòi tiền riêng.
                 </CardDescription>
               </div>
               <Button onClick={handleAddExpense} size="sm">
@@ -1141,67 +1391,259 @@ const SetupMatch = () => {
                     </div>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Miễn chia (chọn members không phải trả khoản này)</Label>
-                  <Select
-                    value=""
-                    onValueChange={(memberId) => {
-                      if (expense.exemptMemberIds.includes(memberId)) return;
-                      handleUpdateExpense(expense.id, "exemptMemberIds", [
-                        ...expense.exemptMemberIds,
-                        memberId,
-                      ]);
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Chọn member để miễn chia..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {allMembers
-                        .filter((m) => !expense.exemptMemberIds.includes(m.id))
-                        .map((m) => (
-                          <SelectItem key={m.id} value={m.id}>
-                            {m.name}
-                            {m.nickname ? ` (${m.nickname})` : ""}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                  {expense.exemptMemberIds.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {expense.exemptMemberIds.map((memberId) => {
-                        const member = allMembers.find((m) => m.id === memberId);
+
+                <div className="flex items-center gap-4 py-1 flex-wrap">
+                  <span className="text-sm font-medium">Hình thức chia:</span>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button
+                      type="button"
+                      variant={(!expense.type || expense.type === "SHARED") ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => handleUpdateExpense(expense.id, "type", "SHARED")}
+                    >
+                      Chia theo đội
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={expense.type === "EQUAL" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => handleUpdateExpense(expense.id, "type", "EQUAL")}
+                    >
+                      Chia đều tất cả
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={expense.type === "INDIVIDUAL" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => handleUpdateExpense(expense.id, "type", "INDIVIDUAL")}
+                    >
+                      Đòi riêng member
+                    </Button>
+                  </div>
+                </div>
+
+                {(!expense.type || expense.type === "SHARED") && (
+                  <div className="space-y-3 pt-2">
+                    <Label>Tỷ lệ chia giữa các đội (%)</Label>
+                    <div className="flex flex-wrap gap-4 items-center">
+                      {activeTeams.map((team) => {
+                        const currentPercent = expense.teamPercents?.[team.id] ?? (teams.find(t => t.id === team.id)?.percent ?? 0);
                         return (
-                          <Badge
-                            key={memberId}
-                            variant="secondary"
-                            className="flex items-center gap-1"
-                          >
-                            {member?.name || "Unknown"}
-                            <X
-                              className="h-3 w-3 cursor-pointer"
-                              onClick={() =>
-                                handleUpdateExpense(
-                                  expense.id,
-                                  "exemptMemberIds",
-                                  expense.exemptMemberIds.filter((id) => id !== memberId)
-                                )
-                              }
-                            />
-                          </Badge>
+                          <div key={team.id} className="flex items-center gap-2">
+                            <span className="text-xs font-semibold">{team.name}:</span>
+                            <div className="relative w-20">
+                              <Input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={currentPercent}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value) || 0;
+                                  const updatedPercents = {
+                                    ...(expense.teamPercents || {}),
+                                    [team.id]: val
+                                  };
+                                  activeTeams.forEach(t => {
+                                    if (updatedPercents[t.id] === undefined) {
+                                      updatedPercents[t.id] = t.percent;
+                                    }
+                                  });
+                                  handleUpdateExpense(expense.id, "teamPercents", updatedPercents);
+                                }}
+                                className="pr-5 h-8 text-xs"
+                              />
+                              <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
+                            </div>
+                          </div>
                         );
                       })}
+                      {(() => {
+                        const sum = activeTeams.reduce((acc, team) => {
+                          const p = expense.teamPercents?.[team.id] ?? (teams.find(t => t.id === team.id)?.percent ?? 0);
+                          return acc + p;
+                        }, 0);
+                        return (
+                          <Badge variant={sum === 100 ? "outline" : "destructive"} className="text-xs">
+                            Tổng: {sum}%
+                          </Badge>
+                        );
+                      })()}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
+
+                {(!expense.type || expense.type === "SHARED" || expense.type === "EQUAL") && (
+                  <div className="space-y-2 pt-2">
+                    <Label>Miễn chia (chọn members không phải trả khoản này)</Label>
+                    <Popover
+                      open={activePopoverId === `exempt-${expense.id}`}
+                      onOpenChange={(open) =>
+                        setActivePopoverId(open ? `exempt-${expense.id}` : null)
+                      }
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={activePopoverId === `exempt-${expense.id}`}
+                          className="w-full justify-between font-normal"
+                        >
+                          Chọn member để miễn chia...
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Tìm thành viên..." />
+                          <CommandList>
+                            <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
+                            <CommandGroup>
+                              {allMembers
+                                .filter((m) => !expense.exemptMemberIds.includes(m.id))
+                                .map((m) => (
+                                  <CommandItem
+                                    key={m.id}
+                                    value={`${m.name} ${m.nickname || ""}`}
+                                    onSelect={() => {
+                                      handleUpdateExpense(expense.id, "exemptMemberIds", [
+                                        ...expense.exemptMemberIds,
+                                        m.id,
+                                      ]);
+                                      setActivePopoverId(null);
+                                    }}
+                                  >
+                                    <Check className="mr-2 h-4 w-4 opacity-0" />
+                                    {m.name}
+                                    {m.nickname ? ` (${m.nickname})` : ""}
+                                  </CommandItem>
+                                ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    {expense.exemptMemberIds.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {expense.exemptMemberIds.map((memberId) => {
+                          const member = allMembers.find((m) => m.id === memberId);
+                          return (
+                            <Badge
+                              key={memberId}
+                              variant="secondary"
+                              className="flex items-center gap-1"
+                            >
+                              {member?.name || "Unknown"}
+                              <X
+                                className="h-3 w-3 cursor-pointer"
+                                onClick={() =>
+                                  handleUpdateExpense(
+                                    expense.id,
+                                    "exemptMemberIds",
+                                    expense.exemptMemberIds.filter((id) => id !== memberId)
+                                  )
+                                }
+                              />
+                            </Badge>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {expense.type === "INDIVIDUAL" && (
+                  <div className="space-y-2 pt-2">
+                    <Label htmlFor={`expense-target-${expense.id}`}>Chọn thành viên cần đòi tiền</Label>
+                    <Popover
+                      open={activePopoverId === `target-${expense.id}`}
+                      onOpenChange={(open) =>
+                        setActivePopoverId(open ? `target-${expense.id}` : null)
+                      }
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          id={`expense-target-${expense.id}`}
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={activePopoverId === `target-${expense.id}`}
+                          className="w-full justify-between font-normal"
+                        >
+                          {expense.targetMemberId
+                            ? (() => {
+                                const m = allMembers.find((member) => member.id === expense.targetMemberId);
+                                return m ? `${m.name}${m.nickname ? ` (${m.nickname})` : ""}` : "Chọn thành viên...";
+                              })()
+                            : "Chọn thành viên..."}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Tìm thành viên..." />
+                          <CommandList>
+                            <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
+                            <CommandGroup>
+                              {allMembers.map((m) => (
+                                <CommandItem
+                                  key={m.id}
+                                  value={`${m.name} ${m.nickname || ""}`}
+                                  onSelect={() => {
+                                    handleUpdateExpense(expense.id, "targetMemberId", m.id);
+                                    setActivePopoverId(null);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      expense.targetMemberId === m.id ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  {m.name}
+                                  {m.nickname ? ` (${m.nickname})` : ""}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                )}
               </div>
             ))}
             <div className="pt-2 border-t">
               <div className="flex items-center justify-between text-lg font-semibold">
                 <span>Tổng cộng:</span>
-                <span className="text-primary">
-                  {expenseItems.reduce((sum, e) => sum + e.amount, 0).toLocaleString()} VND
-                </span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-primary cursor-help border-b border-dashed border-primary">
+                        {expenseItems.reduce((sum, e) => sum + e.amount, 0).toLocaleString()} VND
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="p-3 max-w-[280px]">
+                      <div className="space-y-2 text-xs">
+                        <p className="font-bold border-b pb-1">Chi tiết phân chia:</p>
+                        {matchDivisionDetails.teamShares.map((ts, idx) => (
+                          <div key={idx} className="flex justify-between gap-4">
+                            <span>{ts.name}:</span>
+                            <span className="font-semibold">{Math.round(ts.amount).toLocaleString()}đ</span>
+                          </div>
+                        ))}
+                        {matchDivisionDetails.otherShares.map((os, idx) => (
+                          <div key={idx} className="flex justify-between gap-4 text-destructive">
+                            <span>{os.name}:</span>
+                            <span className="font-semibold">{Math.round(os.amount).toLocaleString()}đ</span>
+                          </div>
+                        ))}
+                        <div className="border-t pt-1 mt-1 flex justify-between font-bold text-primary">
+                          <span>Tổng đã chia:</span>
+                          <span>{Math.round(matchDivisionDetails.totalDivided).toLocaleString()}đ</span>
+                        </div>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
             </div>
           </CardContent>
@@ -1275,25 +1717,69 @@ const SetupMatch = () => {
                   <DollarSign className="h-4 w-4" />
                   Người ứng tiền sân
                 </Label>
-                <Select
-                  value={paidByMemberId || "__none__"}
-                  onValueChange={(v) =>
-                    setPaidByMemberId(v === "__none__" ? "" : v)
-                  }
-                >
-                  <SelectTrigger id="paid-by">
-                    <SelectValue placeholder="Chọn người ứng tiền (tùy chọn)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— Không có —</SelectItem>
-                    {allMembers.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.name}
-                        {m.nickname ? ` (${m.nickname})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover open={paidByPopoverOpen} onOpenChange={setPaidByPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="paid-by"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={paidByPopoverOpen}
+                      className="w-full justify-between font-normal"
+                    >
+                      {paidByMemberId
+                        ? (() => {
+                            const m = allMembers.find((member) => member.id === paidByMemberId);
+                            return m ? `${m.name}${m.nickname ? ` (${m.nickname})` : ""}` : "Chọn người ứng tiền...";
+                          })()
+                        : "Chọn người ứng tiền (tùy chọn)"}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Tìm thành viên..." />
+                      <CommandList>
+                        <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem
+                            value="__none__"
+                            onSelect={() => {
+                              setPaidByMemberId("");
+                              setPaidByPopoverOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                !paidByMemberId ? "opacity-100" : "opacity-0"
+                              )}
+                            />
+                            — Không có —
+                          </CommandItem>
+                          {allMembers.map((m) => (
+                            <CommandItem
+                              key={m.id}
+                              value={`${m.name} ${m.nickname || ""}`}
+                              onSelect={() => {
+                                setPaidByMemberId(m.id);
+                                setPaidByPopoverOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  paidByMemberId === m.id ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              {m.name}
+                              {m.nickname ? ` (${m.nickname})` : ""}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
                 <p className="text-xs text-muted-foreground">
                   Người này sẽ được hiển thị trên Slack & trang chi tiết để mọi
                   người chuyển tiền lại.
@@ -1322,11 +1808,11 @@ const SetupMatch = () => {
         <Card className="mb-6 shadow-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Percent className="h-5 w-5" />
-              Phân chia tỷ lệ
+              <Users className="h-5 w-5" />
+              Tên các đội
             </CardTitle>
             <CardDescription>
-              Điều chỉnh tên và tỷ lệ chia tiền cho mỗi đội.
+              Điều chỉnh tên hiển thị cho mỗi đội.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-6 md:grid-cols-3">
@@ -1339,22 +1825,6 @@ const SetupMatch = () => {
                     value={team.name}
                     onChange={(e) =>
                       handleTeamNameChange(team.id, e.target.value)
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor={`percent-${team.id}`}>Tỷ lệ (%)</Label>
-                  <Input
-                    id={`percent-${team.id}`}
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={team.percent}
-                    onChange={(e) =>
-                      handlePercentChange(
-                        team.id,
-                        parseInt(e.target.value) || 0
-                      )
                     }
                   />
                 </div>
@@ -1442,15 +1912,143 @@ const SetupMatch = () => {
                   <div className={`h-4 w-4 rounded-full ${team.color}`} />
                   {team.name} ({team.members.length})
                 </CardTitle>
-                <CardDescription>
-                  {team.percent}% ={" "}
-                  {expenseItems.length > 0
-                    ? (
-                        (expenseItems.reduce((sum, e) => sum + e.amount, 0) * team.percent) /
-                        100
-                      ).toLocaleString()
-                    : "0"}{" "}
-                  VND
+                <CardDescription className="space-y-2">
+                  {(() => {
+                    const teamTotalAmount = team.members.reduce(
+                      (sum, m) => sum + (calculatedShares[m.id]?.totalAmount || 0),
+                      0
+                    );
+
+                    // Gom các chi tiết khoản tiền của các thành viên trong đội dựa trên cấu hình chi phí và đính kèm %
+                    const teamDetails: { description: string; amount: number }[] = [];
+                    
+                    expenseItems.forEach((expense) => {
+                      if (expense.amount <= 0) return;
+
+                      if (expense.type === "INDIVIDUAL") {
+                        const teamIndividualAmount = team.members.reduce((sum, m) => {
+                          if (expense.targetMemberId === m.id) {
+                            return sum + expense.amount;
+                          }
+                          return sum;
+                        }, 0);
+                        if (teamIndividualAmount > 0) {
+                          teamDetails.push({
+                            description: `${expense.description || "Đòi riêng"} (Đòi riêng cá nhân)`,
+                            amount: teamIndividualAmount,
+                          });
+                        }
+                        return;
+                      }
+
+                      if (expense.type === "EQUAL") {
+                        const eligibleMembersCount = activeTeams.reduce((sum, t) => {
+                          return sum + t.members.filter(
+                            (m) => !m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)
+                          ).length;
+                        }, 0);
+
+                        if (eligibleMembersCount > 0) {
+                          const amountPerMember = Math.floor(expense.amount / eligibleMembersCount);
+                          let remainder = expense.amount % eligibleMembersCount;
+                          
+                          let teamEqualAmount = 0;
+                          
+                          const allEligibleMembers: string[] = [];
+                          activeTeams.forEach((t) => {
+                            t.members.forEach((m) => {
+                              if (!m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)) {
+                                allEligibleMembers.push(m.id);
+                              }
+                            });
+                          });
+
+                          team.members.forEach((m) => {
+                            if (!m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)) {
+                              const idx = allEligibleMembers.indexOf(m.id);
+                              const memberAmount = amountPerMember + (idx < remainder ? 1 : 0);
+                              teamEqualAmount += memberAmount;
+                            }
+                          });
+
+                          if (teamEqualAmount > 0) {
+                            teamDetails.push({
+                              description: `${expense.description || "Chia đều"} (Chia đều)`,
+                              amount: teamEqualAmount,
+                            });
+                          }
+                        }
+                        return;
+                      }
+
+                      // SHARED / default
+                      const teamPercent = expense.teamPercents?.[team.id] ?? (teams.find(t => t.id === team.id)?.percent ?? 0);
+                      const teamTotal = expense.amount * (teamPercent / 100);
+                      
+                      let teamSharedAmount = 0;
+                      const eligibleMembers = team.members.filter(
+                        (m) => !m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)
+                      );
+                      
+                      if (eligibleMembers.length > 0) {
+                        const fixedPercentMembers = eligibleMembers.filter(
+                          (m) => m.percent !== undefined && m.percent > 0
+                        );
+                        const regularMembers = eligibleMembers.filter(
+                          (m) => m.percent === undefined || m.percent <= 0
+                        );
+
+                        let totalFixedAmount = 0;
+                        fixedPercentMembers.forEach((member) => {
+                          const memberAmount = Math.round(
+                            teamTotal * ((member.percent || 0) / 100)
+                          );
+                          teamSharedAmount += memberAmount;
+                          totalFixedAmount += memberAmount;
+                        });
+
+                        const remainingAmount = teamTotal - totalFixedAmount;
+                        if (regularMembers.length > 0 && remainingAmount >= 0) {
+                          const amountPerRegular = Math.floor(
+                            remainingAmount / regularMembers.length
+                          );
+                          let remainder = remainingAmount % regularMembers.length;
+                          regularMembers.forEach((member) => {
+                            const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
+                            teamSharedAmount += memberAmount;
+                          });
+                        }
+                      }
+
+                      if (teamSharedAmount > 0) {
+                        teamDetails.push({
+                          description: `${expense.description || "Tiền sân"} (${teamPercent}%)`,
+                          amount: teamSharedAmount,
+                        });
+                      }
+                    });
+
+                    return (
+                      <>
+                        <div className="flex justify-between items-center text-sm font-semibold">
+                          <span>Tổng tiền đội:</span>
+                          <span className="text-primary font-bold">
+                            {teamTotalAmount.toLocaleString()} VND
+                          </span>
+                        </div>
+                        {teamDetails.length > 0 && (
+                          <div className="text-xs text-muted-foreground border-t pt-1.5 space-y-1">
+                            {teamDetails.map((detail, idx) => (
+                              <div key={idx} className="flex justify-between">
+                                <span>{detail.description}:</span>
+                                <span>{Math.round(detail.amount).toLocaleString()}đ</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2 min-h-[300px]">
@@ -1474,11 +2072,32 @@ const SetupMatch = () => {
                         <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
                       )}
                       <div className="font-semibold text-primary">
-                        {calculatedShares[member.id]
-                          ? `${Math.round(
-                              calculatedShares[member.id]
-                            ).toLocaleString()}đ`
-                          : "0đ"}
+                        {calculatedShares[member.id] ? (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="cursor-help border-b border-dashed border-primary">
+                                  {Math.round(
+                                    calculatedShares[member.id].totalAmount
+                                  ).toLocaleString()}đ
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <div className="space-y-1 text-xs">
+                                  <p className="font-bold border-b pb-1">Chi tiết tiền:</p>
+                                  {calculatedShares[member.id].details.map((detail, idx) => (
+                                    <div key={idx} className="flex justify-between gap-4">
+                                      <span>{detail.description}:</span>
+                                      <span className="font-semibold">{Math.round(detail.amount).toLocaleString()}đ</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          "0đ"
+                        )}
                       </div>
                     </div>
                     {member.isExemptFromPayment ? (

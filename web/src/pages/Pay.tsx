@@ -1257,7 +1257,7 @@ const Pay = () => {
                                     )}
 
                                     {/* Expense Breakdown */}
-                                    {share.expenseBreakdown && share.expenseBreakdown.length > 1 && (
+                                    {share.expenseBreakdown && share.expenseBreakdown.length > 0 && (
                                       <div>
                                         <h4 className="font-semibold text-foreground my-2 flex items-center gap-2 text-sm sm:text-base">
                                           <DollarSign className="h-4 w-4" />
