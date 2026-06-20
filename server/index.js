@@ -231,9 +231,31 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
       description,
       returnUrl: process.env.PAYOS_RETURN_URL,
       cancelUrl: process.env.PAYOS_CANCEL_URL,
+      // Removed bank: "ACB" - let PayOS auto-select based on merchant account
     };
 
-    const paymentLink = await payos.paymentRequests.create(paymentData);
+    let paymentLink;
+    try {
+      paymentLink = await payos.paymentRequests.create(paymentData);
+    } catch (payosError) {
+      console.error("PayOS API Error:", {
+        message: payosError.message,
+        code: payosError.code,
+        data: payosError.data,
+        orderCode,
+        amount: totalAmount,
+      });
+
+      // Return user-friendly error message
+      return res.status(400).json({
+        error: "Không thể tạo link thanh toán",
+        details: payosError.message || "Lỗi từ cổng thanh toán PayOS",
+        payosError: {
+          message: payosError.message,
+          code: payosError.code,
+        },
+      });
+    }
 
     // Return the entire payment link object for the embedded checkout
     res.json(paymentLink);

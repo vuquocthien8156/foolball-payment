@@ -67,11 +67,11 @@ import {
   where,
   documentId,
   collectionGroup,
-  doc,
   updateDoc,
   getDoc,
   addDoc,
   serverTimestamp,
+  Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
@@ -355,27 +355,52 @@ const Pay = () => {
         );
         const sharesSnapshot = await getDocs(sharesQuery);
 
-        // 2. Process each share individually to fetch its match details
-        const sharesPromises = sharesSnapshot.docs.map(async (shareDoc) => {
+        // 2. Extract unique matchIds from PENDING shares
+        const matchIds = new Set<string>();
+        sharesSnapshot.docs.forEach((shareDoc) => {
+          const shareData = shareDoc.data();
+          const matchId = shareData.matchId || shareDoc.ref.parent.parent?.id;
+          if (matchId && !ratedMatchSet.has(matchId)) {
+            matchIds.add(matchId);
+          }
+        });
+
+        // 3. Helper: Chunk array for Firestore 'in' query limit (max 30)
+        const chunkArray = <T,>(arr: T[], size: number): T[][] =>
+          Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+            arr.slice(i * size, i * size + size)
+          );
+
+        // 4. Batch fetch matches (PENDING)
+        const matchIdsArray = Array.from(matchIds);
+        const matchesMap = new Map<string, any>();
+
+        for (const chunk of chunkArray(matchIdsArray, 30)) {
+          const matchesQuery = query(
+            collection(db, "matches"),
+            where(documentId(), "in", chunk)
+          );
+          const matchesSnapshot = await getDocs(matchesQuery);
+          matchesSnapshot.docs.forEach((doc) => {
+            const data = doc.data();
+            // Only include PUBLISHED and not deleted
+            if (data.status === "PUBLISHED" && !data.isDeleted) {
+              matchesMap.set(doc.id, data);
+            }
+          });
+        }
+
+        // 5. Map PENDING shares to match data
+        const pendingShares: Share[] = [];
+        sharesSnapshot.docs.forEach((shareDoc) => {
           const shareData = shareDoc.data();
           const matchId = shareData.matchId || shareDoc.ref.parent.parent?.id;
 
-          if (!matchId) return null;
-          if (ratedMatchSet.has(matchId)) return null;
+          if (!matchId || ratedMatchSet.has(matchId)) return;
 
-          const matchRef = doc(db, "matches", matchId);
-          const matchSnap = await getDoc(matchRef);
+          const matchData = matchesMap.get(matchId);
+          if (!matchData) return; // Match not found or not published
 
-          // Filter out if match doesn't exist, deleted, or not published
-          if (
-            !matchSnap.exists() ||
-            matchSnap.data().isDeleted ||
-            matchSnap.data().status !== "PUBLISHED"
-          ) {
-            return null;
-          }
-
-          const matchData = matchSnap.data();
           const teamConfig = matchData.teamsConfig?.find(
             (t: { id: string }) => t.id === shareData.teamId
           );
@@ -384,8 +409,7 @@ const Pay = () => {
             ? formatMatchDateTime(dateObj)
             : "Không rõ";
 
-          // Return a simplified but complete Share object for the main list
-          return {
+          pendingShares.push({
             id: shareDoc.id,
             matchId: matchId,
             amount: shareData.amount,
@@ -397,18 +421,13 @@ const Pay = () => {
             teamPercent: teamConfig?.percent || 0,
             teamName: teamConfig?.name || "Đội",
             teamMemberCount: teamConfig?.members?.length || 0,
-            teamShares: [], // Temporarily disabled for debugging
+            teamShares: [],
             expenseBreakdown: shareData.expenseBreakdown || [],
             calculationDetails: shareData.calculationDetails,
-          } as Share;
+          });
         });
 
-        const resolvedPendingShares = await Promise.all(sharesPromises);
-        const pendingShares = resolvedPendingShares.filter(
-          (share): share is Share => share !== null
-        );
-
-        // Shares already marked paid manually but still need rating
+        // 6. Fetch MANUAL paid shares (within last 3 days)
         const manualPaidQuery = query(
           collectionGroup(db, "shares"),
           where("memberId", "==", selectedMemberId),
@@ -416,34 +435,58 @@ const Pay = () => {
           where("channel", "==", "MANUAL")
         );
         const manualPaidSnapshot = await getDocs(manualPaidQuery);
-        const manualPaidShares: Share[] = [];
-        for (const shareDoc of manualPaidSnapshot.docs) {
+
+        // Extract unique matchIds from MANUAL shares
+        const manualMatchIds = new Set<string>();
+        manualPaidSnapshot.docs.forEach((shareDoc) => {
           const shareData = shareDoc.data();
           const matchId = shareData.matchId || shareDoc.ref.parent.parent?.id;
-          if (!matchId) continue;
-          if (ratedMatchSet.has(matchId)) continue;
-
-          const matchRef = doc(db, "matches", matchId);
-          const matchSnap = await getDoc(matchRef);
-          if (
-            !matchSnap.exists() ||
-            matchSnap.data().isDeleted ||
-            matchSnap.data().status !== "PUBLISHED"
-          ) {
-            continue;
+          if (matchId && !ratedMatchSet.has(matchId)) {
+            manualMatchIds.add(matchId);
           }
-          const matchData = matchSnap.data();
-          const dateObjManual = matchData.date;
-          const matchDateMs = dateObjManual?.toDate
-            ? dateObjManual.toDate().getTime()
-            : new Date(dateObjManual).getTime();
-          const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
-          if (isNaN(matchDateMs) || matchDateMs < threeDaysAgo) continue;
+        });
+
+        // Batch fetch matches for MANUAL shares (reuse matchesMap)
+        const manualMatchIdsArray = Array.from(manualMatchIds);
+        for (const chunk of chunkArray(manualMatchIdsArray, 30)) {
+          const matchesQuery = query(
+            collection(db, "matches"),
+            where(documentId(), "in", chunk)
+          );
+          const matchesSnapshot = await getDocs(matchesQuery);
+          matchesSnapshot.docs.forEach((doc) => {
+            const data = doc.data();
+            if (data.status === "PUBLISHED" && !data.isDeleted) {
+              matchesMap.set(doc.id, data);
+            }
+          });
+        }
+
+        // Map MANUAL shares
+        const manualPaidShares: Share[] = [];
+        const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+
+        manualPaidSnapshot.docs.forEach((shareDoc) => {
+          const shareData = shareDoc.data();
+          const matchId = shareData.matchId || shareDoc.ref.parent.parent?.id;
+
+          if (!matchId || ratedMatchSet.has(matchId)) return;
+
+          const matchData = matchesMap.get(matchId);
+          if (!matchData) return;
+
+          const dateObj = matchData.date;
+          const matchDateMs = dateObj?.toDate
+            ? dateObj.toDate().getTime()
+            : new Date(dateObj).getTime();
+
+          if (isNaN(matchDateMs) || matchDateMs < threeDaysAgo) return;
+
           const teamConfig = matchData.teamsConfig?.find(
             (t: { id: string }) => t.id === shareData.teamId
           );
-          const formattedDate = dateObjManual?.toDate
-            ? formatMatchDateTime(dateObjManual)
+          const formattedDate = dateObj?.toDate
+            ? formatMatchDateTime(dateObj)
             : "Không rõ";
 
           manualPaidShares.push({
@@ -462,38 +505,50 @@ const Pay = () => {
             expenseBreakdown: shareData.expenseBreakdown || [],
             calculationDetails: shareData.calculationDetails,
           });
-        }
+        });
 
-        // Add rating-only entries for exempt members (no payment needed)
+        // 7. Add rating-only entries for exempt members (optimize query)
         const ratingOnlyShares: Share[] = [];
         const selectedMember = members.find((m) => m.id === selectedMemberId);
+
         if (selectedMember?.isExemptFromPayment) {
-          const matchesSnapshot = await getDocs(collection(db, "matches"));
           const existingMatchIds = new Set(
             [...pendingShares, ...manualPaidShares].map((s) => s.matchId)
           );
 
+          const threeDaysAgoTimestamp = Timestamp.fromMillis(threeDaysAgo);
+
+          // Query only PUBLISHED matches from last 3 days
+          const recentMatchesQuery = query(
+            collection(db, "matches"),
+            where("status", "==", "PUBLISHED"),
+            where("date", ">=", threeDaysAgoTimestamp)
+          );
+          const matchesSnapshot = await getDocs(recentMatchesQuery);
+
           matchesSnapshot.docs.forEach((matchDoc) => {
             const matchData = matchDoc.data();
-            if (matchData.isDeleted || matchData.status !== "PUBLISHED")
+
+            if (
+              matchData.isDeleted ||
+              existingMatchIds.has(matchDoc.id) ||
+              ratedMatchSet.has(matchDoc.id)
+            ) {
               return;
+            }
+
             const teamFound = (matchData.teamsConfig || []).find((team: any) =>
               (team.members || []).some(
                 (member: any) => member.id === selectedMemberId
               )
             );
-            if (!teamFound || existingMatchIds.has(matchDoc.id)) return;
-            if (ratedMatchSet.has(matchDoc.id)) return;
+
+            if (!teamFound) return;
 
             const dateObj = matchData.date;
             const formattedDate = dateObj?.toDate
               ? formatMatchDateTime(dateObj)
               : "Không rõ";
-            const matchDateMs = dateObj?.toDate
-              ? dateObj.toDate().getTime()
-              : new Date(dateObj).getTime();
-            const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
-            if (isNaN(matchDateMs) || matchDateMs < threeDaysAgo) return;
 
             ratingOnlyShares.push({
               id: `${matchDoc.id}-rating-${selectedMemberId}`,
@@ -544,7 +599,7 @@ const Pay = () => {
     };
 
     fetchUnpaidShares();
-  }, [selectedMemberId]);
+  }, [selectedMemberId, members]);
 
   const handleMemberChange = (memberId: string) => {
     setSelectedMemberId(memberId);
@@ -1198,7 +1253,7 @@ const Pay = () => {
                                         Tóm tắt trận đấu
                                       </h4>
                                       <div className="flex justify-between">
-                                        <span>Tổng tiền sân:</span>
+                                        <span>Tổng chi phí:</span>
                                         <span className="font-medium text-foreground">
                                           {share.matchTotalAmount.toLocaleString()}
                                           đ
@@ -1219,49 +1274,84 @@ const Pay = () => {
                                           đ
                                         </span>
                                       </div>
+                                      <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                                        <span>Số người chia trong đội:</span>
+                                        <span>{share.teamMemberCount} người</span>
+                                      </div>
                                     </div>
 
-                                    {/* Calculation Details */}
+                                    {/* Enhanced Calculation Details */}
                                     {share.calculationDetails && (
                                       <div>
                                         <h4 className="font-semibold text-foreground my-2 flex items-center gap-2 text-sm sm:text-base">
                                           <Users className="h-4 w-4" />
-                                          Chi tiết chia tiền
+                                          Phương thức chia tiền
                                         </h4>
+
+                                        {/* Type Badge */}
+                                        <div className="flex gap-2 mb-2">
+                                          {share.calculationDetails.memberPercent ? (
+                                            <Badge variant="default" className="bg-green-600">
+                                              Đặt riêng {share.calculationDetails.memberPercent}%
+                                            </Badge>
+                                          ) : (
+                                            <Badge variant="secondary">Chia đều</Badge>
+                                          )}
+                                        </div>
+
+                                        {/* Team Context */}
+                                        {share.calculationDetails.teamTotal !== undefined && (
+                                          <div className="space-y-1 text-xs sm:text-sm">
+                                            <div className="flex justify-between">
+                                              <span>Tổng tiền đội:</span>
+                                              <span className="font-medium">
+                                                {share.calculationDetails.teamTotal.toLocaleString()}đ
+                                              </span>
+                                            </div>
+
+                                            {share.calculationDetails.totalFixedAmount !== undefined &&
+                                              share.calculationDetails.totalFixedAmount > 0 && (
+                                                <>
+                                                  <div className="flex justify-between text-amber-600">
+                                                    <span>Tiền cho người đặt riêng:</span>
+                                                    <span className="font-medium">
+                                                      {share.calculationDetails.totalFixedAmount.toLocaleString()}đ
+                                                    </span>
+                                                  </div>
+                                                  <div className="flex justify-between">
+                                                    <span>
+                                                      Còn lại chia đều (
+                                                      {share.calculationDetails.regularMemberCount || 0}{" "}
+                                                      người):
+                                                    </span>
+                                                    <span className="font-medium">
+                                                      {(
+                                                        share.calculationDetails.remainingAmount || 0
+                                                      ).toLocaleString()}đ
+                                                    </span>
+                                                  </div>
+                                                </>
+                                              )}
+                                          </div>
+                                        )}
+
                                         {share.calculationDetails.reason && (
-                                          <div className="flex justify-between text-amber-600 italic">
-                                            <span>Lý do set riêng:</span>
+                                          <div className="flex justify-between text-amber-600 italic mt-2 text-xs sm:text-sm">
+                                            <span>Lý do:</span>
                                             <span className="font-medium">
                                               {share.calculationDetails.reason}
                                             </span>
                                           </div>
                                         )}
-                                        {share.calculationDetails
-                                          .memberPercent ? (
-                                          <div className="flex justify-between text-green-600">
-                                            <span>Bạn được set:</span>
-                                            <span className="font-medium">
-                                              {
-                                                share.calculationDetails
-                                                  .memberPercent
-                                              }
-                                              %
-                                            </span>
-                                          </div>
-                                        ) : (
-                                          <div className="flex justify-between">
-                                            <span>Bạn được chia đều</span>
-                                          </div>
-                                        )}
                                       </div>
                                     )}
 
-                                    {/* Expense Breakdown */}
+                                    {/* Expense Breakdown - Always show */}
                                     {share.expenseBreakdown && share.expenseBreakdown.length > 0 && (
                                       <div>
                                         <h4 className="font-semibold text-foreground my-2 flex items-center gap-2 text-sm sm:text-base">
                                           <DollarSign className="h-4 w-4" />
-                                          Chi tiết chi phí
+                                          Chi tiết số tiền của bạn
                                         </h4>
                                         {share.expenseBreakdown.map((expense) => (
                                           <div key={expense.expenseId} className="flex justify-between text-xs sm:text-sm">
@@ -1271,19 +1361,18 @@ const Pay = () => {
                                             </span>
                                           </div>
                                         ))}
+                                        <hr className="my-2 border-dashed" />
+                                        <div className="flex justify-between text-sm sm:text-base font-semibold">
+                                          <span>Tổng cộng:</span>
+                                          <span className="text-primary">
+                                            {share.amount.toLocaleString()}đ
+                                          </span>
+                                        </div>
                                       </div>
                                     )}
 
-                                    {/* Final Amount & Team Sheet Button */}
+                                    {/* Team Sheet Button */}
                                     <hr className="my-1 sm:my-2 border-dashed" />
-                                    <div className="flex justify-between items-center text-sm sm:text-base">
-                                      <span className="font-semibold">
-                                        Số tiền của bạn:
-                                      </span>
-                                      <span className="font-bold text-primary">
-                                        {share.amount.toLocaleString()} VND
-                                      </span>
-                                    </div>
                                     <Dialog>
                                       <DialogTrigger asChild>
                                         <Button

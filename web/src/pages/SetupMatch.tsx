@@ -112,7 +112,15 @@ interface Share {
   amount: number;
   status: "PENDING" | "PAID" | "CANCELLED";
   orderCode: string;
-  calculationDetails?: object;
+  calculationDetails?: {
+    memberPercent?: number;
+    reason?: string;
+    teamName?: string;
+    teamTotal?: number;
+    totalFixedAmount?: number;
+    remainingAmount?: number;
+    regularMemberCount?: number;
+  };
   matchId?: string;
   expenseBreakdown?: {
     expenseId: string;
@@ -1040,6 +1048,10 @@ const SetupMatch = () => {
                   memberPercent: member.percent,
                   reason: member.reason,
                   teamName: team.name,
+                  teamTotal: Math.round(teamTotal),
+                  totalFixedAmount: 0, // Will be updated after loop
+                  remainingAmount: 0, // Will be calculated
+                  regularMemberCount: regularMembers.length,
                 },
               });
             }
@@ -1056,6 +1068,16 @@ const SetupMatch = () => {
           });
 
           const remainingAmount = teamTotal - totalFixedAmount;
+
+          // Update totalFixedAmount and remainingAmount for fixed percent members
+          fixedPercentMembers.forEach((member) => {
+            const memberShare = memberSharesMap.get(member.id);
+            if (memberShare && memberShare.calculationDetails) {
+              memberShare.calculationDetails.totalFixedAmount = Math.round(totalFixedAmount);
+              memberShare.calculationDetails.remainingAmount = Math.round(remainingAmount);
+            }
+          });
+
           if (regularMembers.length > 0 && remainingAmount >= 0) {
             const amountPerRegular = Math.floor(
               remainingAmount / regularMembers.length
@@ -1072,6 +1094,10 @@ const SetupMatch = () => {
                   expenseBreakdown: [],
                   calculationDetails: {
                     teamName: team.name,
+                    teamTotal: Math.round(teamTotal),
+                    totalFixedAmount: Math.round(totalFixedAmount),
+                    remainingAmount: Math.round(remainingAmount),
+                    regularMemberCount: regularMembers.length,
                   },
                 });
               }
