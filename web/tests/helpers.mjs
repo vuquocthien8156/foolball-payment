@@ -9,10 +9,10 @@ const require = createRequire(import.meta.url);
 // notification code; an unexpected dependency or network request fails closed.
 export function loadSource(relativePath, mocks = {}, context = {}, transformers) {
   const filename = new URL(relativePath, import.meta.url);
-  const source = fs.readFileSync(filename, "utf8");
+  const source = fs.readFileSync(filename, "utf8").replaceAll("import.meta.env", "({})");
   const { outputText } = ts.transpileModule(source, {
     fileName: filename.pathname,
-    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+    compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
     transformers,
   });
   const sandbox = {

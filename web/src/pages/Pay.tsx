@@ -62,6 +62,7 @@ import {
 import { toast } from "@/hooks/use-toast";
 import {
   collection,
+  doc,
   getDocs,
   query,
   where,
@@ -110,8 +111,10 @@ interface TeamShareInfo {
   isCurrentUser: boolean;
 }
 
-interface Share {
+export interface Share {
   id: string;
+  memberId?: string;
+  memberName?: string;
   matchId: string;
   matchDate: string;
   amount: number;
@@ -173,6 +176,8 @@ const Pay = () => {
   const { canInstall, installPWA } = usePWAInstall();
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>("");
+  const [isGroupPayment, setIsGroupPayment] = useState(false);
+  const [groupMemberIds, setGroupMemberIds] = useState<string[]>([]);
   const [unpaidShares, setUnpaidShares] = useState<Share[]>([]);
   const [selectedShares, setSelectedShares] = useState<string[]>([]);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
@@ -322,7 +327,61 @@ const Pay = () => {
   }, [selectedMemberId, members]);
 
   useEffect(() => {
+    if (!isGroupPayment) return;
+    let cancelled = false;
+    setUnpaidShares([]);
+    setSelectedShares([]);
+    setExpandedItems([]);
+    setIsLoadingShares(groupMemberIds.length > 0);
+    if (groupMemberIds.length === 0) return;
+
+    const fetchGroupShares = async () => {
+      try {
+        const snapshots = await Promise.all(groupMemberIds.map((memberId) => getDocs(query(
+          collectionGroup(db, "shares"), where("memberId", "==", memberId), where("status", "==", "PENDING")
+        ))));
+        const shareDocs = snapshots.flatMap((snapshot) => snapshot.docs);
+        const matchIds = [...new Set(shareDocs.map((snapshot) => snapshot.ref.parent.parent?.id).filter(Boolean))];
+        const matches = await Promise.all(matchIds.map((id) => getDoc(doc(db, "matches", id))));
+        if (cancelled) return;
+        const matchesMap = new Map(matches.filter((snapshot) => snapshot.exists())
+          .map((snapshot) => [snapshot.id, snapshot.data()]));
+        const debts: Share[] = shareDocs.flatMap((snapshot) => {
+          const data = snapshot.data();
+          const matchId = snapshot.ref.parent.parent?.id;
+          const match = matchesMap.get(matchId);
+          if (!match || match.status !== "PUBLISHED" || match.isDeleted ||
+              !Number.isSafeInteger(data.amount) || data.amount <= 0) return [];
+          const team = match.teamsConfig?.find((item: { id: string }) => item.id === data.teamId);
+          return [{
+            id: snapshot.ref.path, memberId: data.memberId,
+            memberName: members.find((member) => member.id === data.memberId)?.name || "Unknown member",
+            matchId, matchDate: formatMatchDateTime(match.date), amount: data.amount,
+            teamId: data.teamId, status: "PENDING", matchTotalAmount: match.totalAmount || 0,
+            teamPercent: team?.percent || 0, teamName: team?.name || "Team",
+            teamMemberCount: team?.members?.length || 0, teamShares: [],
+            expenseBreakdown: data.expenseBreakdown || [], calculationDetails: data.calculationDetails,
+          }];
+        });
+        setUnpaidShares(debts);
+        setSelectedShares(debts.map((share) => share.id));
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Error fetching group debts:", error);
+        toast({ title: "Error", description: "Could not load selected members' debts. Please try again.", variant: "destructive" });
+      } finally {
+        if (!cancelled) setIsLoadingShares(false);
+      }
+    };
+    void fetchGroupShares();
+    return () => { cancelled = true; };
+  }, [isGroupPayment, groupMemberIds, members]);
+
+  useEffect(() => {
+    if (isGroupPayment) return;
+    let cancelled = false;
     if (!selectedMemberId) {
+      setIsLoadingShares(false);
       setUnpaidShares([]);
       setSelectedShares([]);
       setRatingTargets([]);
@@ -345,6 +404,7 @@ const Pay = () => {
           const matchId = docSnap.ref.parent.parent?.id;
           if (matchId) ratedMatchSet.add(matchId);
         });
+        if (cancelled) return;
         setRatedMatchIds(ratedMatchSet);
 
         // 1. Get all PENDING shares for the selected member
@@ -576,6 +636,7 @@ const Pay = () => {
           ...ratingOnlyShares,
         ];
 
+        if (cancelled) return;
         setUnpaidShares(allShares);
         // Automatically select payable shares; if không có khoản phải trả, chọn các trận chỉ đánh giá
         const payableIds = allShares
@@ -587,6 +648,7 @@ const Pay = () => {
         setSelectedShares(payableIds.length > 0 ? payableIds : ratingOnlyIds);
         setExpandedItems([]);
       } catch (error) {
+        if (cancelled) return;
         console.error("Error fetching unpaid shares:", error);
         toast({
           variant: "destructive",
@@ -594,20 +656,40 @@ const Pay = () => {
           description: "Không thể tải các khoản nợ chưa thanh toán.",
         });
       } finally {
-        setIsLoadingShares(false);
+        if (!cancelled) setIsLoadingShares(false);
       }
     };
 
-    fetchUnpaidShares();
-  }, [selectedMemberId, members]);
+    void fetchUnpaidShares();
+    return () => { cancelled = true; };
+  }, [selectedMemberId, members, isGroupPayment]);
+
+  const clearPaymentSelection = () => {
+    setUnpaidShares([]);
+    setSelectedShares([]);
+    setExpandedItems([]);
+  };
+
+  const handlePaymentModeChange = (enabled: boolean) => {
+    if (isCreatingPayment) return;
+    clearPaymentSelection();
+    setIsGroupPayment(enabled);
+    setGroupMemberIds(enabled && members.some((member) => member.id === selectedMemberId) ? [selectedMemberId] : []);
+  };
 
   const handleMemberChange = (memberId: string) => {
+    if (isCreatingPayment || (!isGroupPayment && memberId === selectedMemberId)) return;
+    clearPaymentSelection();
+    if (isGroupPayment) {
+      setGroupMemberIds((prev) => prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]);
+      return;
+    }
     setSelectedMemberId(memberId);
     localStorage.setItem("lastSelectedMemberId", memberId);
   };
 
   const handleViewTeamDetails = async (share: Share) => {
-    if (!selectedMemberId) return;
+    if (!selectedMemberId && !isGroupPayment) return;
     setIsLoadingDetails(true);
     setDetailedTeamShares([]);
     try {
@@ -646,7 +728,7 @@ const Pay = () => {
           memberName: membersMap.get(s.memberId) || "Không rõ",
           amount: s.amount,
           reason: s.calculationDetails?.reason,
-          isCurrentUser: s.memberId === selectedMemberId,
+          isCurrentUser: s.memberId === (share.memberId || selectedMemberId),
         }))
         .sort((a, b) => b.amount - a.amount);
 
@@ -696,6 +778,10 @@ const Pay = () => {
     );
     return payableSelected || ratingOnlyAvailable;
   }, [selectedShares, unpaidShares]);
+
+  const selectedPeopleCount = new Set(unpaidShares
+    .filter((share) => selectedShares.includes(share.id))
+    .map((share) => share.memberId)).size;
 
   const handleShareSelection = (shareId: string) => {
     setSelectedShares((prev) =>
@@ -755,6 +841,7 @@ const Pay = () => {
 
   // [RATING_FLOW_DISABLED] — Direct payment without rating step
   const handlePayment = async () => {
+    if (isLoadingShares || isCreatingPayment) return;
     const payableShareIds = selectedShares.filter((id) => {
       const share = unpaidShares.find((s) => s.id === id);
       return (
@@ -780,8 +867,9 @@ const Pay = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shareIds: payableShareIds,
-          memberId: selectedMemberId,
+          ...(isGroupPayment
+            ? { sharePaths: payableShareIds, memberIds: groupMemberIds, memberId: groupMemberIds[0] }
+            : { shareIds: payableShareIds, memberId: selectedMemberId }),
           ratings: [], // [RATING_FLOW_DISABLED] — no ratings sent
         }),
       });
@@ -1057,12 +1145,16 @@ const Pay = () => {
                 </Card>
                 */}
 
+                <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                  <Label htmlFor="group-payment">Pay for multiple people</Label>
+                  <Switch id="group-payment" checked={isGroupPayment} onCheckedChange={handlePaymentModeChange} disabled={isCreatingPayment} />
+                </div>
                 <div className="space-y-2">
                   <Label
                     htmlFor="member-selector"
                     className="text-base font-semibold text-foreground"
                   >
-                    1. Chọn tên của bạn
+                    {isGroupPayment ? "1. Choose people to pay for" : "1. Chọn tên của bạn"}
                   </Label>
                   <Popover
                     open={isComboboxOpen}
@@ -1071,13 +1163,15 @@ const Pay = () => {
                     <PopoverTrigger asChild>
                       <Button
                         id="member-selector"
-                        variant={selectedMemberId ? "secondary" : "outline"}
+                        variant={(isGroupPayment ? groupMemberIds.length > 0 : selectedMemberId) ? "secondary" : "outline"}
                         role="combobox"
                         aria-expanded={isComboboxOpen}
                         className="w-full justify-between h-12 text-base"
-                        disabled={isLoadingMembers}
+                        disabled={isLoadingMembers || isCreatingPayment}
                       >
-                        {selectedMemberId
+                        {isGroupPayment
+                          ? `${groupMemberIds.length} ${groupMemberIds.length === 1 ? "person" : "people"} selected`
+                          : selectedMemberId
                           ? members.find(
                               (member) => member.id === selectedMemberId
                             )?.name
@@ -1109,14 +1203,15 @@ const Pay = () => {
                               <CommandItem
                                 key={member.id}
                                 value={member.name}
+                                aria-label={isGroupPayment ? `${member.name}, ${groupMemberIds.includes(member.id) ? "selected" : "not selected"}` : member.name}
                                 onSelect={() => {
                                   handleMemberChange(member.id);
-                                  setIsComboboxOpen(false);
+                                  if (!isGroupPayment) setIsComboboxOpen(false);
                                 }}
                               >
                                 <Check
                                   className={`mr-2 h-4 w-4 ${
-                                    selectedMemberId === member.id
+                                    (isGroupPayment ? groupMemberIds.includes(member.id) : selectedMemberId === member.id)
                                       ? "opacity-100"
                                       : "opacity-0"
                                   }`}
@@ -1129,6 +1224,11 @@ const Pay = () => {
                       </Command>
                     </PopoverContent>
                   </Popover>
+                  {isGroupPayment && groupMemberIds.length > 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      {members.filter((member) => groupMemberIds.includes(member.id)).map((member) => member.name).join(", ")}
+                    </p>
+                  )}
                 </div>
 
                 {isLoadingShares && (
@@ -1138,12 +1238,12 @@ const Pay = () => {
                 )}
 
                 {!isLoadingShares &&
-                  selectedMemberId &&
+                  (isGroupPayment ? groupMemberIds.length > 0 : selectedMemberId) &&
                   unpaidShares.length === 0 && (
                     <div className="text-center p-8 bg-gradient-card rounded-xl border">
                       <h3 className="text-lg font-semibold">Tuyệt vời!</h3>
                       <p className="text-muted-foreground">
-                        Bạn không có khoản nợ nào chưa thanh toán.
+                        {isGroupPayment ? "The selected people have no unpaid debts." : "Bạn không có khoản nợ nào chưa thanh toán."}
                       </p>
                       {/* [RATING_FLOW_DISABLED] — Rating-only button hidden
                       {hasRatingOnlyShares && (
@@ -1166,7 +1266,7 @@ const Pay = () => {
                     <div className="mb-4">
                       <div className="flex items-center justify-between">
                         <h3 className="text-base sm:text-lg font-semibold">
-                          Các trận cần xử lý / đánh giá
+                          {isGroupPayment ? "Selected members' debts" : "Các trận cần xử lý / đánh giá"}
                         </h3>
                         <Button
                           variant="link"
@@ -1214,6 +1314,7 @@ const Pay = () => {
                                   <div className="flex-1 flex justify-between items-center pr-2 sm:pr-4">
                                     <div>
                                       <p className="font-medium text-sm sm:text-base text-left">
+                                        {isGroupPayment && <span className="block text-sm text-primary">{share.memberName}</span>}
                                         Trận ngày {share.matchDate}
                                       </p>
                                       <div className="flex flex-wrap items-center gap-2 mt-1">
@@ -1470,7 +1571,7 @@ const Pay = () => {
                           size="lg"
                           className="w-full h-12 text-base sm:h-14 sm:text-lg"
                           onClick={handlePayment}
-                          disabled={!canProceedToRating || isCreatingPayment}
+                          disabled={!canProceedToRating || isCreatingPayment || isLoadingShares}
                         >
                           {isCreatingPayment ? (
                             <>
@@ -1481,7 +1582,7 @@ const Pay = () => {
                             <>
                               <CreditCard className="h-5 w-5 mr-2" />
                               {/* [RATING_FLOW_DISABLED] — Changed from "Đánh giá & Thanh toán" */}
-                              {`Thanh toán (${selectedShares.length} trận)`}
+                              {isGroupPayment ? `Pay selected debts (${selectedPeopleCount} ${selectedPeopleCount === 1 ? "person" : "people"})` : `Thanh toán (${selectedShares.length} trận)`}
                             </>
                           )}
                         </Button>

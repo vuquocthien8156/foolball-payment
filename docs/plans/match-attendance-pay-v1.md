@@ -55,3 +55,15 @@
   matches, switching, refresh preservation, isolated writes, and late responses.
   Match selector is disabled during attendance writes or team submission.
   Production build passes; TypeScript baseline errors are unchanged.
+- Part 3: 24 silent Node tests pass across all three parts. Group requests use
+  exact share document paths, validate every selected debt, and create one
+  checkout. Webhook uses immutable paths, validates amount, credits each owner,
+  and handles retries and pre-change orders. Single-member requests stay compatible.
+- Browser fixtures verified two owners and a 120,000 VND combined checkout,
+  match-specific attendance writes, and native kickoff editing/save/reload.
+  All external services were mocked; CSP blocked external connections.
+- Build passes; no new TypeScript errors. Exporting the existing Share contract
+  also resolves the pre-existing Rating import error; four old errors remain.
+- Re-run tests with `cd web && node --test tests/*.test.mjs`.
+- Browser artifacts: `/tmp/football-group-pay.png`. Temporary fixture server and
+  data live in `/tmp/football-silent-preview`, not production code.

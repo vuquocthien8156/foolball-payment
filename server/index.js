@@ -123,64 +123,62 @@ const sendPushToTokens = async (tokens, payload) => {
 };
 
 apiRoutes.post("/create-payment-link", async (req, res) => {
-  const { shareIds, memberId, ratings } = req.body;
-
-  if (
-    !shareIds ||
-    !Array.isArray(shareIds) ||
-    shareIds.length === 0 ||
-    !memberId
-  ) {
-    return res
-      .status(400)
-      .json({ error: "shareIds (non-empty array) and memberId are required" });
+  const { shareIds, sharePaths, memberId, memberIds, ratings } = req.body || {};
+  const isGroupPayment = sharePaths !== undefined || memberIds !== undefined;
+  const validId = (id) => typeof id === "string" && id.length > 0 && !id.includes("/");
+  const selectedMembers = isGroupPayment ? memberIds : [memberId];
+  const selections = isGroupPayment ? sharePaths : shareIds;
+  if (!validId(memberId) || !Array.isArray(selectedMembers) || selectedMembers.length === 0 ||
+      selectedMembers.length > 200 || !selectedMembers.every(validId) || !selectedMembers.includes(memberId) ||
+      !Array.isArray(selections) || selections.length === 0 || selections.length > 200 ||
+      new Set(selections).size !== selections.length ||
+      !selections.every((id) => isGroupPayment
+        ? typeof id === "string" && /^matches\/[^/]+\/shares\/[^/]+$/.test(id)
+        : validId(id))) {
+    return res.status(400).json({ error: "Select valid members and unique pending shares." });
   }
 
   try {
     const db = admin.firestore();
-    const sharesRef = db.collectionGroup("shares");
-    const querySnapshot = await sharesRef
-      .where("memberId", "==", memberId)
-      .where("status", "==", "PENDING")
-      .get();
-
-    const selectedShareDocs = querySnapshot.docs.filter((doc) =>
-      shareIds.includes(doc.id)
-    );
-
-    if (selectedShareDocs.length === 0) {
-      return res.status(404).json({
-        error: "No matching pending shares found for the provided IDs",
-      });
+    let selectedShareDocs;
+    if (isGroupPayment) {
+      selectedShareDocs = await db.getAll(...sharePaths.map((path) => db.doc(path)));
+    } else {
+      const querySnapshot = await db.collectionGroup("shares")
+        .where("memberId", "==", memberId).where("status", "==", "PENDING").get();
+      selectedShareDocs = querySnapshot.docs.filter((doc) => shareIds.includes(doc.id));
     }
-
-    let totalAmount = 0;
-    const fetchedShareIds = [];
-    selectedShareDocs.forEach((doc) => {
-      const shareData = doc.data();
-      if (shareData.memberId !== memberId) {
-        throw new Error(
-          `Share ${doc.id} does not belong to member ${memberId}`
-        );
-      }
-      if (shareData.status !== "PENDING") {
-        throw new Error(`Share ${doc.id} is not in PENDING state.`);
-      }
-      totalAmount += shareData.amount;
-      fetchedShareIds.push(doc.id);
-    });
-
-    if (totalAmount <= 0) {
-      return res
-        .status(400)
-        .json({ error: "Total amount must be greater than zero." });
+    if (selectedShareDocs.length !== selections.length || selectedShareDocs.some((doc) => !doc.exists)) {
+      return res.status(409).json({ error: "Some debts have changed. Reload and select them again." });
     }
+    if (selectedShareDocs.some((doc) => {
+      const data = doc.data();
+      return !selectedMembers.includes(data.memberId) || data.status !== "PENDING" ||
+        !Number.isSafeInteger(data.amount) || data.amount <= 0;
+    })) {
+      return res.status(409).json({ error: "Selected debts must be pending, positive, and belong to the selected members." });
+    }
+    if (isGroupPayment) {
+      const matchPaths = [...new Set(selectedShareDocs.map((doc) => doc.ref.path.split("/").slice(0, 2).join("/")))];
+      const matches = await db.getAll(...matchPaths.map((path) => db.doc(path)));
+      if (matches.some((doc) => !doc.exists || doc.data().isDeleted || doc.data().status !== "PUBLISHED")) {
+        return res.status(409).json({ error: "Only published, active matches can be paid." });
+      }
+    }
+    const totalAmount = selectedShareDocs.reduce((sum, doc) => sum + doc.data().amount, 0);
+    if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0) {
+      return res.status(400).json({ error: "Total amount must be a positive integer." });
+    }
+    const fetchedShareIds = selectedShareDocs.map((doc) => doc.id);
+    const paidMemberIds = [...new Set(selectedShareDocs.map((doc) => doc.data().memberId))];
 
     const orderCode = Date.now();
 
     // Fetch member name
     const memberDoc = await db.collection("members").doc(memberId).get();
-    const memberName = memberDoc.exists ? memberDoc.data().name : "";
+    const memberName = isGroupPayment && paidMemberIds.length > 1
+      ? `Group ${paidMemberIds.length}`
+      : memberDoc.exists ? memberDoc.data().name : "";
 
     // Remove Vietnamese diacritics for payment description
     const removeDiacritics = (str) => {
@@ -212,6 +210,9 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
     await paymentRequestRef.set({
       orderCode,
       shareIds: fetchedShareIds,
+      sharePaths: selectedShareDocs.map((doc) => doc.ref.path),
+      totalAmount,
+      memberIds: paidMemberIds,
       memberId,
       ratings: ratings || null, // Store ratings, can be null
       status: "PENDING",
@@ -282,6 +283,7 @@ const payosWebhookHandler = async (req, res) => {
 
       // Start a transaction to ensure atomicity
       await db.runTransaction(async (transaction) => {
+        paidContext = null;
         // 1. Get the payment request to access ratings and shareIds
         const paymentRequestRef = db
           .collection("paymentRequests")
@@ -296,17 +298,34 @@ const payosWebhookHandler = async (req, res) => {
           return;
         }
         const paymentRequestData = paymentRequestSnap.data();
+        if (paymentRequestData.status === "PAID") return;
 
-        // 2. Get the related share documents
-        const sharesQuery = db
-          .collectionGroup("shares")
-          .where("payosOrderCode", "==", orderCode);
-        const sharesSnapshot = await sharesQuery.get();
-
-        if (sharesSnapshot.empty) {
+        // Use the immutable selection: another checkout may replace payosOrderCode.
+        let shareDocs;
+        if (paymentRequestData.sharePaths?.length) {
+          if (webhookData.amount !== paymentRequestData.totalAmount) {
+            throw new Error(`Webhook amount mismatch for order ${orderCode}`);
+          }
+          shareDocs = await transaction.getAll(
+            ...paymentRequestData.sharePaths.map((path) => db.doc(path))
+          );
+          if (shareDocs.some((doc) => !doc.exists) ||
+              shareDocs.reduce((sum, doc) => sum + doc.data().amount, 0) !== paymentRequestData.totalAmount) {
+            throw new Error(`Webhook: selected debts have changed for order ${orderCode}`);
+          }
+        } else {
+          // Existing orders created before sharePaths were stored.
+          const sharesSnapshot = await transaction.get(db.collectionGroup("shares")
+            .where("payosOrderCode", "==", orderCode));
+          shareDocs = sharesSnapshot.docs;
+        }
+        if (shareDocs.length === 0) {
           console.error(`Webhook: No shares found for orderCode ${orderCode}`);
           return;
         }
+        const ownerIds = [...new Set(shareDocs.map((doc) => doc.data().memberId))];
+        const ownerDocs = await transaction.getAll(...ownerIds.map((id) => db.collection("members").doc(id)));
+        const ownerNames = new Map(ownerDocs.map((doc) => [doc.id, doc.exists ? doc.data().name : "A member"]));
 
         // 3. Process ratings if they exist
         if (
@@ -334,16 +353,12 @@ const payosWebhookHandler = async (req, res) => {
         }
 
         // 4. Update share statuses and create notifications
-        const memberId = paymentRequestData.memberId;
-        const memberDoc = await db.collection("members").doc(memberId).get();
-        const memberName = memberDoc.exists
-          ? memberDoc.data().name
-          : "Một thành viên";
+        const memberName = ownerIds.map((id) => ownerNames.get(id)).join(", ");
 
         let totalPaid = 0;
         const affectedMatchIds = new Set();
 
-        sharesSnapshot.docs.forEach((doc) => {
+        shareDocs.forEach((doc) => {
           const shareData = doc.data();
           if (shareData.status !== "PAID") {
             transaction.update(doc.ref, {
@@ -360,7 +375,7 @@ const payosWebhookHandler = async (req, res) => {
               return;
             }
             transaction.set(notificationRef, {
-              message: `${memberName} đã thanh toán ${shareData.amount.toLocaleString()} VND`,
+              message: `${ownerNames.get(shareData.memberId)} đã thanh toán ${shareData.amount.toLocaleString()} VND`,
               matchId: matchId,
               shareId: doc.id,
               isRead: false,
