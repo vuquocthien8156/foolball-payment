@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, DragEvent } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,7 +53,6 @@ import {
   query,
   orderBy,
   where,
-  limit,
   onSnapshot,
   updateDoc,
   addDoc,
@@ -65,7 +64,7 @@ import { Badge } from "@/components/ui/badge";
 import useLocalStorage from "@/hooks/useLocalStorage";
 import { ensureNotificationToken } from "@/lib/notifications";
 import { postApiJson } from "@/lib/api";
-import { MATCH_TZ, getMatchTimeParts } from "@/lib/utils";
+import { MATCH_TZ, getMatchTimeParts, formatMatchDateTime } from "@/lib/utils";
 
 // Interfaces
 interface Member {
@@ -121,6 +120,9 @@ const Attendance = () => {
   const { toast } = useToast();
 
   const [members, setMembers] = useState<Member[]>([]);
+  const [pendingMatches, setPendingMatches] = useState<Match[]>([]);
+  const selectedMatchRef = useRef<string | null>(null);
+  const fetchVersion = useRef(0);
   const [match, setMatch] = useState<Match | null>(null);
   const [matchId, setMatchId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -227,7 +229,9 @@ const Attendance = () => {
       orderBy("timestamp", "desc")
     );
 
+    const version = fetchVersion.current;
     const unsubscribe = onSnapshot(logQuery, (snapshot) => {
+      if (version !== fetchVersion.current) return;
       const history = snapshot.docs.map(
         (doc) => doc.data() as AttendanceLogEntry
       );
@@ -238,96 +242,73 @@ const Attendance = () => {
     return () => unsubscribe();
   }, [matchId]);
 
-  const fetchMatchAndMembers = useCallback(async () => {
+  const fetchMatchAndMembers = useCallback(async (requestedMatchId?: string) => {
+    const version = ++fetchVersion.current;
+    if (requestedMatchId) selectedMatchRef.current = requestedMatchId;
     setIsLoading(true);
+    setMatchId(null);
+    setAttendance(new Map());
+    setNotAttendance(new Map());
+    setAttendanceHistory([]);
+    setTeams([]);
+    setTeamPool([]);
+    setTeamBuilderInitialized(false);
+    setTeamSearch("");
+    setMapExpanded(false);
     try {
-      // Find the latest match with PENDING status
       const matchesQuery = query(
         collection(db, "matches"),
         where("status", "==", "PENDING"),
-        orderBy("createdAt", "desc"),
-        limit(1)
+        orderBy("createdAt", "desc")
       );
       const matchSnapshot = await getDocs(matchesQuery);
-
-      const activeMatchDoc = matchSnapshot.docs.find(
-        (doc) => !doc.data().isDeleted
-      );
-
-      if (!activeMatchDoc) {
-        setMatch(null); // No pending match found
-        setMatchId(null);
-        setTeams([]);
-        setTeamPool([]);
-        setTeamBuilderInitialized(false);
-        setTeamSearch("");
+      if (version !== fetchVersion.current) return;
+      const availableMatches = matchSnapshot.docs
+        .filter((snapshot) => !snapshot.data().isDeleted)
+        .map((snapshot) => ({ ...snapshot.data(), id: snapshot.id } as Match));
+      setPendingMatches(availableMatches);
+      const selectedMatch = availableMatches.find((item) => item.id === selectedMatchRef.current)
+        || availableMatches[0];
+      if (!selectedMatch) {
+        setMatch(null);
+        selectedMatchRef.current = null;
         return;
       }
 
-      const latestMatchDoc = activeMatchDoc;
-      const latestMatch = {
-        id: latestMatchDoc.id,
-        ...latestMatchDoc.data(),
-      } as Match;
-      setMatch(latestMatch);
-      setMatchId(latestMatch.id);
-      setTeams([]);
-      setTeamPool([]);
-      setTeamBuilderInitialized(false);
-      setTeamSearch("");
-
-      // Fetch all members
-      const membersQuery = query(
-        collection(db, "members"),
-        orderBy("name", "asc")
-      );
-      const membersSnapshot = await getDocs(membersQuery);
-      const membersList = membersSnapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() } as Member))
-        .filter((m) => !m.inactive);
-      setMembers(membersList);
-
-      // Fetch attendance for this specific match
-      const attendanceCollectionRef = collection(
-        db,
-        "matches",
-        latestMatch.id,
-        "attendance"
-      );
-      const attendanceSnapshot = await getDocs(attendanceCollectionRef);
-      const attendanceMap = new Map<string, AttendanceRecord>();
-      attendanceSnapshot.forEach((doc) => {
-        attendanceMap.set(doc.id, doc.data() as AttendanceRecord);
-      });
-      setAttendance(attendanceMap);
-
-      // Fetch not attending for this specific match
-      const notAttendanceCollectionRef = collection(
-        db,
-        "matches",
-        latestMatch.id,
-        "not_attending"
-      );
-      const notAttendanceSnapshot = await getDocs(notAttendanceCollectionRef);
-      const notAttendanceMap = new Map<string, AttendanceRecord>();
-      notAttendanceSnapshot.forEach((doc) => {
-        notAttendanceMap.set(doc.id, doc.data() as AttendanceRecord);
-      });
-      setNotAttendance(notAttendanceMap);
+      const [membersSnapshot, attendanceSnapshot, notAttendanceSnapshot] = await Promise.all([
+        getDocs(query(collection(db, "members"), orderBy("name", "asc"))),
+        getDocs(collection(db, "matches", selectedMatch.id, "attendance")),
+        getDocs(collection(db, "matches", selectedMatch.id, "not_attending")),
+      ]);
+      if (version !== fetchVersion.current) return;
+      setMembers(membersSnapshot.docs
+        .map((snapshot) => ({ ...snapshot.data(), id: snapshot.id } as Member))
+        .filter((member) => !member.inactive));
+      setAttendance(new Map(attendanceSnapshot.docs.map((snapshot) =>
+        [snapshot.id, snapshot.data() as AttendanceRecord])));
+      setNotAttendance(new Map(notAttendanceSnapshot.docs.map((snapshot) =>
+        [snapshot.id, snapshot.data() as AttendanceRecord])));
+      selectedMatchRef.current = selectedMatch.id;
+      setMatch(selectedMatch);
+      setMatchId(selectedMatch.id);
     } catch (error) {
+      if (version !== fetchVersion.current) return;
+      setMatch(null);
       console.error("Error fetching data: ", error);
       toast({
         variant: "destructive",
-        title: "Lỗi",
-        description: "Không thể tải dữ liệu từ cơ sở dữ liệu.",
+        title: "Error",
+        description: "Could not load match data. Please try again.",
       });
     } finally {
-      setIsLoading(false);
+      if (version === fetchVersion.current) setIsLoading(false);
     }
   }, [toast]);
 
   useEffect(() => {
-    fetchMatchAndMembers();
+    const requests = fetchVersion;
+    void fetchMatchAndMembers();
+    return () => { requests.current++; };
   }, [fetchMatchAndMembers]);
 
   const removeDiacritics = (str: string) => {
@@ -419,7 +400,7 @@ const Attendance = () => {
     memberName: string,
     status: "attending" | "not_attending"
   ) => {
-    if (!matchId) return;
+    if (!matchId || isLoading) return;
 
     // Idempotent guard: if already in the requested state, skip.
     if (status === "attending" && attendance.has(memberId)) return;
@@ -788,6 +769,24 @@ const Attendance = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
+        {pendingMatches.length > 1 && (
+          <div className="mb-6 space-y-2">
+            <label htmlFor="attendance-match" className="text-sm font-medium">Choose a match</label>
+            <select
+              id="attendance-match"
+              value={matchId || ""}
+              disabled={isLoading || isSubmitting.size > 0 || isSendingTeams || isPasscodeDialogOpen}
+              onChange={(event) => void fetchMatchAndMembers(event.target.value)}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:opacity-50"
+            >
+              {pendingMatches.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {formatMatchDateTime(item.date)}{item.venueName ? ` · ${item.venueName}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="mb-8">
           {(() => {
             const matchDate = new Date(match.date.seconds * 1000);

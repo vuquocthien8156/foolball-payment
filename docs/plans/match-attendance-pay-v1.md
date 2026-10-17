@@ -51,3 +51,7 @@
 - TypeScript baseline has 5 existing errors (Rating export, Matches member type,
   ScoringMatches tuple, and two SetupMatch detail properties); confirmed against
   an untouched archive of HEAD. Focused lint also has existing errors only.
+- Part 2: four silent regression tests pass for deleted/zero/one/multiple
+  matches, switching, refresh preservation, isolated writes, and late responses.
+  Match selector is disabled during attendance writes or team submission.
+  Production build passes; TypeScript baseline errors are unchanged.
