@@ -73,7 +73,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn, createMatchDate, getMatchDateTimeInput } from "@/lib/utils";
 import { Check, ChevronsUpDown } from "lucide-react";
 
 // Interfaces
@@ -147,6 +147,7 @@ interface MatchConfig {
   teamCount: 2 | 3;
   teamsConfig: SavedTeamConfig[];
   date?: Timestamp;
+  kickoffTime?: string;
   status?: "PENDING" | "COMPLETED";
   isTest?: boolean;
   venueName?: string;
@@ -170,16 +171,7 @@ const SetupMatch = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
 
-  // Default to today in the user's local timezone.
-  // toISOString() returns UTC — between 00:00–07:00 ICT it would land on
-  // yesterday for users in GMT+7.
-  const todayLocalKey = (() => {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  })();
+  const todayLocalKey = getMatchDateTimeInput(new Date()).date;
   const [date, setDate] = useState(todayLocalKey);
   const [time, setTime] = useState("19:00");
   const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([
@@ -191,6 +183,7 @@ const SetupMatch = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
+  const isBusy = isLoading || isSaving || isSavingConfig || isUpdatingConfig || isCreating;
   const [existingStatus, setExistingStatus] = useState<
     "PENDING" | "COMPLETED" | undefined
   >("PENDING");
@@ -385,21 +378,11 @@ const SetupMatch = () => {
         setTeams(newTeams);
         setPool(newPool);
         if (matchId && configSource.date) {
-          const matchDate = (configSource.date as Timestamp).toDate();
-          setDate(
-            `${matchDate.getFullYear()}-${(matchDate.getMonth() + 1)
-              .toString()
-              .padStart(2, "0")}-${matchDate
-              .getDate()
-              .toString()
-              .padStart(2, "0")}`
-          );
-          setTime(
-            `${matchDate.getHours().toString().padStart(2, "0")}:${matchDate
-              .getMinutes()
-              .toString()
-              .padStart(2, "0")}`
-          );
+          const kickoff = getMatchDateTimeInput(configSource.date.toDate());
+          setDate(kickoff.date);
+          setTime(kickoff.time);
+        } else if (!matchId && configSource.kickoffTime) {
+          setTime(configSource.kickoffTime);
         }
       } else {
         setPool(membersList);
@@ -722,7 +705,9 @@ const SetupMatch = () => {
   const handleSaveConfigToDb = async () => {
     setIsSavingConfig(true);
     try {
+      const kickoff = createMatchDate(date, time);
       const configToSave = {
+        kickoffTime: time,
         expenseItems: expenseItems,
         teamCount,
         venueName: venueName || null,
@@ -742,17 +727,24 @@ const SetupMatch = () => {
           })),
         })),
       };
-      await setDoc(doc(db, "configs", "last_match"), configToSave);
+      const batch = writeBatch(db);
+      batch.set(doc(db, "configs", "last_match"), configToSave);
+      if (matchId) {
+        batch.update(doc(db, "matches", matchId), { date: kickoff, updatedAt: serverTimestamp() });
+      }
+      await batch.commit();
       toast({
         title: "Đã lưu!",
         description: "Cấu hình trận đấu đã được lưu.",
       });
+      return true;
     } catch (e) {
       toast({
         variant: "destructive",
         title: "Lỗi",
         description: "Không thể lưu cấu hình.",
       });
+      return false;
     } finally {
       setIsSavingConfig(false);
     }
@@ -765,7 +757,7 @@ const SetupMatch = () => {
       const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
       const matchRef = doc(db, "matches", matchId);
       const matchData: any = {
-        date: new Date(`${date}T${time}`),
+        date: createMatchDate(date, time),
         totalAmount: totalAmount,
         expenseItems: expenseItems,
         teamCount,
@@ -815,7 +807,7 @@ const SetupMatch = () => {
       const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
       const matchRef = doc(collection(db, "matches"));
       const matchData = {
-        date: new Date(`${date}T${time}`),
+        date: createMatchDate(date, time),
         totalAmount: totalAmount,
         expenseItems: expenseItems,
         teamCount,
@@ -909,7 +901,7 @@ const SetupMatch = () => {
       });
       return;
     }
-    await handleSaveConfigToDb();
+    if (!(await handleSaveConfigToDb())) return;
     if (activeTeams.some((t) => getTeamEffectivePercent(t.id) > 0 && t.members.length === 0)) {
       toast({
         title: "Lỗi đội hình",
@@ -1138,7 +1130,7 @@ const SetupMatch = () => {
       const batch = writeBatch(db);
 
       const matchData = {
-        date: new Date(`${date}T${time}`),
+        date: createMatchDate(date, time),
         totalAmount: numericTotalAmount,
         expenseItems: expenseItems,
         teamCount,
@@ -1290,6 +1282,7 @@ const SetupMatch = () => {
                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   id="date"
+                  disabled={isBusy}
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
@@ -1301,6 +1294,7 @@ const SetupMatch = () => {
               <Label htmlFor="time">Giờ đá</Label>
               <Input
                 id="time"
+                disabled={isBusy}
                 type="time"
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
@@ -2194,7 +2188,7 @@ const SetupMatch = () => {
           </Button>
           <Button
             onClick={handleCreateMatchForAttendance}
-            disabled={isCreating || !!matchId}
+            disabled={isBusy || !!matchId}
             variant="default"
             className="bg-blue-600 hover:bg-blue-700"
           >
@@ -2207,7 +2201,7 @@ const SetupMatch = () => {
           </Button>
           <Button
             onClick={handleSaveConfigToDb}
-            disabled={isSavingConfig || isSaving}
+            disabled={isBusy}
             variant="secondary"
           >
             {isSavingConfig ? (
@@ -2222,7 +2216,7 @@ const SetupMatch = () => {
             <>
               <Button
                 onClick={handleUpdateMatchConfig}
-                disabled={isUpdatingConfig || isSaving}
+                disabled={isBusy}
                 variant="secondary"
               >
                 {isUpdatingConfig ? (
@@ -2232,7 +2226,7 @@ const SetupMatch = () => {
                 )}
                 Cập nhật (không tính tiền)
               </Button>
-              <Button onClick={handleSave} size="lg" disabled={isSaving}>
+              <Button onClick={handleSave} size="lg" disabled={isBusy}>
                 {isSaving ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -2244,7 +2238,7 @@ const SetupMatch = () => {
               </Button>
             </>
           ) : (
-            <Button onClick={handleSave} size="lg" disabled={isSaving}>
+            <Button onClick={handleSave} size="lg" disabled={isBusy}>
               {isSaving ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

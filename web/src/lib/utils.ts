@@ -9,6 +9,26 @@ export function cn(...inputs: ClassValue[]) {
 // still see the actual kickoff time, not their local re-projection.
 export const MATCH_TZ = "Asia/Ho_Chi_Minh";
 
+export const getMatchDateTimeInput = (date: Date): { date: string; time: string } => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: MATCH_TZ, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour")}:${get("minute")}` };
+};
+
+export const createMatchDate = (date: string, time: string): Date => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    throw new Error("Enter a valid match date and time.");
+  }
+  const kickoff = new Date(`${date}T${time}:00+07:00`);
+  if (isNaN(kickoff.getTime()) || getMatchDateTimeInput(kickoff).date !== date) {
+    throw new Error("Enter a valid match date and time.");
+  }
+  return kickoff;
+};
+
 // Wall-clock hour & minute as observed in MATCH_TZ.
 // Use this when a "is the time set?" check is needed — getHours()/getMinutes()
 // read in the browser's TZ and can disagree with the displayed time.
