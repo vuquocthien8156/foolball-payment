@@ -148,7 +148,7 @@ interface MatchConfig {
   teamsConfig: SavedTeamConfig[];
   date?: Timestamp;
   kickoffTime?: string;
-  status?: "PENDING" | "COMPLETED";
+  status?: "PENDING" | "COMPLETED" | "PUBLISHED";
   isTest?: boolean;
   venueName?: string;
   mapIframe?: string;
@@ -185,7 +185,7 @@ const SetupMatch = () => {
   const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
   const isBusy = isLoading || isSaving || isSavingConfig || isUpdatingConfig || isCreating;
   const [existingStatus, setExistingStatus] = useState<
-    "PENDING" | "COMPLETED" | undefined
+    "PENDING" | "COMPLETED" | "PUBLISHED" | undefined
   >("PENDING");
   const [searchQuery, setSearchQuery] = useState("");
   const [isTestMatch, setIsTestMatch] = useState(false);
@@ -856,7 +856,7 @@ const SetupMatch = () => {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (publish = false) => {
     // Validate từng chi phí
     for (let i = 0; i < expenseItems.length; i++) {
       const expense = expenseItems[i];
@@ -901,7 +901,6 @@ const SetupMatch = () => {
       });
       return;
     }
-    if (!(await handleSaveConfigToDb())) return;
     if (activeTeams.some((t) => getTeamEffectivePercent(t.id) > 0 && t.members.length === 0)) {
       toast({
         title: "Lỗi đội hình",
@@ -916,6 +915,15 @@ const SetupMatch = () => {
       const matchRef = matchId
         ? doc(db, "matches", matchId)
         : doc(collection(db, "matches"));
+      const existingSharesSnapshot = matchId
+        ? await getDocs(collection(db, "matches", matchId, "shares"))
+        : null;
+      if (existingSharesSnapshot?.docs.some((snapshot) => snapshot.data().status === "PAID")) {
+        toast({ title: "Cannot recalculate paid bills", description: "This match already has payments. Use the configuration update to keep paid debts intact.", variant: "destructive" });
+        return;
+      }
+      if (!(await handleSaveConfigToDb())) return;
+      const nextStatus = publish ? "PUBLISHED" : "COMPLETED";
 
       const shares: Share[] = [];
 
@@ -1151,7 +1159,7 @@ const SetupMatch = () => {
             reason: m.reason || null,
           })),
         })),
-        status: "COMPLETED",
+        status: nextStatus,
         updatedAt: serverTimestamp(),
       };
 
@@ -1161,19 +1169,9 @@ const SetupMatch = () => {
         batch.set(matchRef, { ...matchData, createdAt: serverTimestamp() });
       }
 
-      // Delete existing shares if updating a match
-      if (matchId) {
-        const existingSharesQuery = collection(
-          db,
-          "matches",
-          matchId,
-          "shares"
-        );
-        const existingSharesSnapshot = await getDocs(existingSharesQuery);
-        existingSharesSnapshot.forEach((doc) => {
-          batch.delete(doc.ref);
-        });
-      }
+      existingSharesSnapshot?.forEach((snapshot) => {
+        batch.delete(snapshot.ref);
+      });
 
       shares.forEach((share) => {
         const shareRef = doc(collection(matchRef, "shares"));
@@ -1181,8 +1179,14 @@ const SetupMatch = () => {
       });
 
       await batch.commit();
-      setExistingStatus("COMPLETED");
-      toast({ title: "Thành công!", description: `Đã xử lý trận đấu.` });
+      if (publish && existingStatus !== "PUBLISHED") {
+        void postApiJson("/notify/match-published", { matchId: matchRef.id }).catch((error) => {
+          console.error("Failed to send match-published notification", error);
+        });
+      }
+      setExistingStatus(nextStatus);
+      toast({ title: "Saved", description: publish ? "Match calculated and published. Members can now see their debts in Pay." : "Match calculated. Publish it when you are ready to collect payment." });
+      if (!matchId) navigate(`/admin/setup/${matchRef.id}`);
     } catch (error) {
       toast({
         title: "Lỗi!",
@@ -2212,43 +2216,22 @@ const SetupMatch = () => {
             Lưu Cấu Hình
           </Button>
 
-          {matchId ? (
-            <>
-              <Button
-                onClick={handleUpdateMatchConfig}
-                disabled={isBusy}
-                variant="secondary"
-              >
-                {isUpdatingConfig ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Save className="h-4 w-4 mr-2" />
-                )}
-                Cập nhật (không tính tiền)
-              </Button>
-              <Button onClick={handleSave} size="lg" disabled={isBusy}>
-                {isSaving ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Đang xử lý...
-                  </>
-                ) : (
-                  "Tính tiền & Hoàn tất"
-                )}
-              </Button>
-            </>
-          ) : (
-            <Button onClick={handleSave} size="lg" disabled={isBusy}>
-              {isSaving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Đang lưu...
-                </>
-              ) : (
-                "Tính tiền & Lưu trận"
-              )}
+          {matchId && (
+            <Button
+              onClick={handleUpdateMatchConfig}
+              disabled={isBusy}
+              variant="secondary"
+            >
+              {isUpdatingConfig ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+              Cập nhật (không tính tiền)
             </Button>
           )}
+          <Button onClick={() => void handleSave(false)} variant="outline" disabled={isBusy}>
+            Calculate only
+          </Button>
+          <Button onClick={() => void handleSave(true)} size="lg" disabled={isBusy}>
+            {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : "Calculate & Publish"}
+          </Button>
         </div>
       </div>
     </div>

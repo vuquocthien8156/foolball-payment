@@ -67,3 +67,27 @@
 - Re-run tests with `cd web && node --test tests/*.test.mjs`.
 - Browser artifacts: `/tmp/football-group-pay.png`. Temporary fixture server and
   data live in `/tmp/football-silent-preview`, not production code.
+
+## Added request: calculate and publish together
++
++The user requested this on 2026-10-17 after asking which extra action makes
++bills visible in Pay. Code confirms Calculate completes the bill, while the
++separate Publish action sets PUBLISHED, which Pay requires.
++
++- Modify only SetupMatch and its tests; preserve the existing Matches publish action.
++- Main action: Calculate & Publish. Secondary action: Calculate only.
++- Save shares and PUBLISHED status in the same batch; trigger the existing
++  publish notification only after success and only for a newly published bill.
++- Keep all tests silent through fake notification boundaries.
++- Prevent recalculation from replacing already-paid debts.
++- Commit this addition separately after tests and browser verification.
+- Added request implemented: Calculate & Publish is primary; Calculate only is
+  secondary. Status and debts commit together, then the existing publish API is
+  invoked for a newly published bill. New matches open their saved route.
+- All 29 silent tests pass, covering failure-before-publication, private saves,
+  duplicate notification prevention, and refusal to recalculate paid debts.
+- Browser verified the combined action and then opened Pay as Bob: the new
+  24/10 match debt was visible with the saved 21:45 kickoff.
+- Existing browser warnings: React Router future flags and a nested div inside
+  CardDescription in SetupMatch; these originate in unchanged markup.
+- Browser proof: `/tmp/football-published-pay.png`. No live services were called.
