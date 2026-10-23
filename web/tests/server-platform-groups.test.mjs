@@ -31,6 +31,19 @@ test("user lists own groups; owner lists all", async (t) => {
   assert.deepEqual((await host.request("GET", "/groups")).data.map((group) => group.id), ["alpha"]);
   assert.deepEqual((await host.request("GET", "/groups", null, "owner")).data.map((group) => group.id), ["alpha", "beta"]);
 });
+test("shared bill group needs no sport and its kind cannot be converted", async (t) => {
+  const host = await setup(t);
+  const created = await host.request("POST", "/groups", { id: "netflix-family", name: "Netflix Family", kind: "shared_bills" });
+  assert.equal(created.status, 201);
+  assert.equal(host.records.get("groups/netflix-family").kind, "shared_bills");
+  assert.equal(host.records.get("groups/netflix-family").sport, undefined);
+  const groups = (await host.request("GET", "/groups")).data;
+  assert.equal(groups.find((group) => group.id === "netflix-family").kind, "shared_bills");
+  assert.equal(groups.find((group) => group.id === "alpha").kind, "sports");
+  assert.equal((await host.request("PATCH", "/groups/netflix-family", { kind: "sports" })).status, 400);
+  assert.equal((await host.request("PATCH", "/groups/netflix-family", { sport: "football" })).status, 400);
+  assert.equal((await host.request("POST", "/groups", { name: "Invalid", kind: "unknown", sport: "other" })).status, 400);
+});
 test("create validates sport and atomically creates manager with empty group", async (t) => {
   const host = await setup(t);
   for (const sport of [undefined, "tennis"]) assert.equal((await host.request("POST", "/groups", { name: "New group", sport })).status, 400);

@@ -1,4 +1,4 @@
-const { isValidGroupId, publicUrlFor } = require("./groups");
+const { isValidGroupId, publicUrlFor, groupKindOf } = require("./groups");
 
 /**
  * Calculates next date for a target day of the week (0=Sun, 1=Mon, ..., 6=Sat) and time (HH:mm)
@@ -34,6 +34,7 @@ async function createMatchFromTemplate({ db, FieldValue, groupId, templateId, cr
   const groupSnap = await db.collection("groups").doc(groupId).get();
   if (!groupSnap.exists || groupSnap.data().status === "deleted") throw new Error("GROUP_NOT_FOUND");
   const groupData = groupSnap.data();
+  if (groupKindOf(groupData) !== "sports") throw new Error("SPORTS_NOT_SUPPORTED");
 
   let templateData = {
     name: "Trận đấu định kỳ",
@@ -127,6 +128,7 @@ async function checkAndRunScheduledMatches({ db, FieldValue, slack = null, targe
   const groupsSnap = await db.collection("groups").where("status", "==", "active").get();
 
   for (const groupDoc of groupsSnap.docs) {
+    if (groupKindOf(groupDoc.data()) !== "sports") continue;
     const groupId = groupDoc.id;
     const schedulesToRun = [];
 

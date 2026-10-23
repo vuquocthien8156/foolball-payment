@@ -1,5 +1,9 @@
 export const DEFAULT_GROUP_ID = "football-zigvy";
 export const DEFAULT_GROUP_NAME = "Football Zigvy Group";
+export const GROUP_KINDS = ["sports", "shared_bills"] as const;
+export type GroupKind = typeof GROUP_KINDS[number];
+export const isValidGroupKind = (kind: unknown): kind is GroupKind => GROUP_KINDS.includes(kind as GroupKind);
+export const groupKindOf = (group?: { kind?: string } | null): GroupKind => group?.kind === "shared_bills" ? "shared_bills" : "sports";
 export const GROUP_SPORTS = ["football", "badminton", "pickleball", "other"] as const;
 export type GroupSport = typeof GROUP_SPORTS[number];
 export const SPORT_LABELS: Record<GroupSport, string> = {

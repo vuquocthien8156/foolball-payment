@@ -1,5 +1,5 @@
 const express = require("express");
-const { groupIdOf, isValidGroupId } = require("./groups");
+const { groupIdOf, isValidGroupId, groupKindOf } = require("./groups");
 
 const validId = (value) => typeof value === "string" && value.length > 0 && value !== "." && value !== ".." && !value.includes("/");
 const reject = (status, message) => { throw Object.assign(new Error(message), { status }); };
@@ -60,6 +60,7 @@ function createPublicRouter({ db, FieldValue, Timestamp, onMemberAction }) {
     const group = await transaction.get(db.collection("groups").doc(gid));
     if (!group.exists) reject(404, "NOT_FOUND");
     if (group.data().status !== "active") reject(403, "GROUP_INACTIVE");
+    if (groupKindOf(group.data()) !== "sports") reject(400, "SPORTS_NOT_SUPPORTED");
     return operation(transaction);
   });
   const checkRecord = (snapshot, gid) => {

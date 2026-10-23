@@ -1,6 +1,6 @@
 const express = require("express");
 const { randomInt } = require("node:crypto");
-const { makeGroupId, isValidSport, isValidGroupId } = require("./groups");
+const { makeGroupId, isValidSport, isValidGroupId, groupKindOf, isValidGroupKind } = require("./groups");
 const { createAuthMiddleware } = require("./auth");
 const validPassword = (value) => typeof value === "string" && value.length >= 8 && value.length <= 128;
 const validName = (value) => typeof value === "string" && value.trim().length >= 1 && value.trim().length <= 60;
@@ -125,6 +125,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         id: doc.id,
         name: data.name,
         sport: data.sport,
+        kind: groupKindOf(data),
         status: data.status,
         ownerUid,
         ownerDisplayName: ownerDisplayName || ownerEmail || (ownerUid ? "Chủ nhóm" : "Hệ thống"),
@@ -141,7 +142,10 @@ function createPlatformRouter({ db, auth, FieldValue }) {
   router.post("/groups", requirePlatform, wrap(async (req, res) => {
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
     if (name.length < 2 || name.length > 60) return res.status(400).json({ error: "INVALID_NAME" });
-    if (!isValidSport(req.body.sport)) return res.status(400).json({ error: "INVALID_SPORT" });
+    const kind = req.body.kind ?? "sports";
+    if (!isValidGroupKind(kind)) return res.status(400).json({ error: "INVALID_GROUP_KIND" });
+    if (kind === "sports" && !isValidSport(req.body.sport)) return res.status(400).json({ error: "INVALID_SPORT" });
+    const groupType = { kind, ...(kind === "sports" ? { sport: req.body.sport } : {}) };
 
     const rawSlug = typeof req.body.id === "string" ? req.body.id.trim().toLowerCase() : (typeof req.body.slug === "string" ? req.body.slug.trim().toLowerCase() : null);
     if (rawSlug) {
@@ -153,10 +157,11 @@ function createPlatformRouter({ db, auth, FieldValue }) {
       if (existing.exists) return res.status(409).json({ error: "GROUP_ID_EXISTS" });
 
       const timestamps = { createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
-      await db.runTransaction(async (transaction) => {
+      const created = await db.runTransaction(async (transaction) => {
+        if ((await transaction.get(ref)).exists) return false;
         transaction.set(ref, {
           name,
-          sport: req.body.sport,
+          ...groupType,
           ownerUid: req.uid,
           ownerEmail: req.email || "",
           ownerDisplayName: req.platform.displayName || req.email || "",
@@ -174,7 +179,9 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           tabs: [],
           ...timestamps,
         });
+        return true;
       });
+      if (!created) return res.status(409).json({ error: "GROUP_ID_EXISTS" });
       return res.status(201).json({ id: rawSlug });
     }
 
@@ -187,7 +194,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         const timestamps = { createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
         transaction.set(ref, {
           name,
-          sport: req.body.sport,
+          ...groupType,
           ownerUid: req.uid,
           ownerEmail: req.email || "",
           ownerDisplayName: req.platform.displayName || req.email || "",
@@ -216,12 +223,15 @@ function createPlatformRouter({ db, auth, FieldValue }) {
   router.patch("/groups/:groupId", requireGroupRole({ manager: true }), wrap(async (req, res) => {
     if (!isValidGroupId(req.params.groupId)) return res.status(400).json({ error: "INVALID_GROUP" });
     const { name, sport, status } = req.body;
+    const ref = db.collection("groups").doc(req.params.groupId);
+    const current = await ref.get();
+    if (!current.exists) return res.status(404).json({ error: "NOT_FOUND" });
+    if (req.body.kind !== undefined && req.body.kind !== groupKindOf(current.data())) return res.status(400).json({ error: "GROUP_KIND_IMMUTABLE" });
+    if (sport !== undefined && groupKindOf(current.data()) === "shared_bills") return res.status(400).json({ error: "SPORT_NOT_SUPPORTED" });
     if (req.groupRole.role !== "owner" && (sport !== undefined || status !== undefined)) return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
     if (sport !== undefined && !isValidSport(sport)) return res.status(400).json({ error: "INVALID_SPORT" });
     if (name !== undefined && (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 60)) return res.status(400).json({ error: "INVALID_NAME" });
     if (status !== undefined && !["active", "archived"].includes(status)) return res.status(400).json({ error: "INVALID_STATUS" });
-    const ref = db.collection("groups").doc(req.params.groupId);
-    if (!(await ref.get()).exists) return res.status(404).json({ error: "NOT_FOUND" });
     await ref.update({ ...(name !== undefined ? { name: name.trim() } : {}), ...(sport !== undefined ? { sport } : {}), ...(status !== undefined ? { status } : {}), updatedAt: FieldValue.serverTimestamp() });
     res.json({ id: req.params.groupId });
   }));

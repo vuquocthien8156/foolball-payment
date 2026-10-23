@@ -5,7 +5,7 @@ import { db } from "@/lib/firebase";
 import { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME, groupPath, isValidGroupId } from "@/lib/groups";
 import NotFound from "@/pages/NotFound";
 
-export type Group = { name: string; sport?: string; status?: string; ownerUid?: string };
+export type Group = { name: string; kind?: string; sport?: string; status?: string; ownerUid?: string };
 type GroupState = { groupId: string; group: Group | null; loading: boolean; notFound: boolean };
 const GroupContext = createContext<GroupState | null>(null);
 
