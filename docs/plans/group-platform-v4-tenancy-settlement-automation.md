@@ -290,3 +290,83 @@ Phase 2: Match Settlement Ledger & Manager Payout Workflow
 Phase 3: Multi-template Setup & Scheduled Attendance Automation
   └── Verify: Load/save multiple templates in SetupMatch, test cron auto-generation of PENDING attendance match.
 ```
+
+---
+
+## 7. Refinements & User Feedback Architecture (v4.1)
+
+Based on direct operational feedback and real-world edge cases from the platform owner, the following 5 critical design refinements are established:
+
+### 7.1 Group Owner Display & Role Clarity (Concern 1)
+- **Problem:** When Super Admin inspects the group list, groups created by other managers display `Vai trò của bạn: Chủ nhóm (Owner)` and `Chủ nhóm: Owner` because `ownerDisplayName` is null on older documents and `req.platform.role === "owner"` overrides the displayed personal role.
+- **Solution:**
+  - In `server/lib/platformRoutes.js` (`GET /groups`):
+    - For any group where `ownerDisplayName` or `ownerEmail` is missing, perform a lookup against `platformAccounts` using `data.ownerUid || data.createdBy` and backfill the real `displayName` and `email`.
+    - Distinguish caller's role:
+      - If `req.platform.role === "owner"` and `data.ownerUid !== req.uid`: Set `role: "super_admin"`.
+      - If `data.ownerUid === req.uid`: Set `role: "owner"`.
+      - Else: Set `role: "manager"`.
+  - In `web/src/pages/Groups.tsx`:
+    - Display role badges: `Super Admin (Nền tảng)`, `Chủ nhóm (Owner)`, or `Quản lý (Manager)`.
+    - Display owner as `Nguyễn Văn A (a@zigvy.com)` instead of the fallback string `"Owner"`.
+
+### 7.2 Group Edit Dialog & Path ID / Slug Management (Concern 2)
+- **Problem:** Groups currently only have "Mở nhóm", "Phân quyền", and "Xóa nhóm". There is no Edit modal to view or update group name, sport, or see/edit the path ID.
+- **Solution:**
+  - Add an **Edit Group** (`<Pencil>`) button on each group card in `web/src/pages/Groups.tsx`.
+  - Open a **"Chỉnh sửa thông tin nhóm"** dialog:
+    - **Tên nhóm (Display Name):** Editable input.
+    - **Môn thể thao (Sport):** Select dropdown (Bóng đá, Cầu lông, Pickleball, Khác).
+    - **Đường dẫn hiện tại (Group Slug / Path ID):** Displays `/g/{groupId}` with 1-click copy button.
+    - **Slug Migration Strategy:**
+      - If modifying the path ID, create an alias document in `groupAliases/{oldSlug} -> { targetGroupId: newSlug }` and update the group document or copy references so external bookmarks and QR codes never 404.
+
+### 7.3 Two-Tier Financial Settlement & Super Admin Aggregate Ledger (Concern 3)
+- **User Insight & Reality:**
+  - Money flow: Members pay online via PayOS into **Super Admin's central bank account**.
+  - Fronting money: Group Managers front money to court owners. Sometimes another member fronts, but Super Admin should **only settle with the Group Manager**. The Group Manager is responsible for handling internal member reimbursements locally.
+  - Historical match burden: Dozens of past completed matches from previous months still show `Chờ hoàn tiền`. Manually clicking into 50+ matches one-by-one is unacceptable.
+- **Architectural Solution:**
+  1. **Two-Tier Separation:**
+     - **Tier 1 (Super Admin ↔ Group Manager):** Super Admin reimburses the group's total court funds directly to the Group Manager's configured VietQR.
+     - **Tier 2 (Group Manager ↔ Members):** Group Manager manages internal member fronting locally if a non-manager member paid the venue.
+  2. **Super Admin Global Settlement Dashboard:**
+     - A dedicated aggregate view for Super Admin (accessible from `/platform/groups` via button `"Đối soát toàn nền tảng"`):
+       - Groups all pending reimbursements by **Group & Manager**.
+       - Table columns: Group Name, Group Manager Name, Bank & Account No, Number of Pending Matches, Total VND to Reimburse.
+       - **1-Click Batch VietQR:** Generates a single VietQR with the exact TOTAL sum for that manager across all their pending matches.
+       - **1-Click "Xác nhận đã hoàn tất cả trận":** Batch updates all pending matches for that group to `PAID_OUT`.
+  3. **"Đánh dấu tất cả trận cũ là đã hoàn tiền" (Batch Clear Historical Backlog):**
+     - Button in the settlement header: In 1 click, marks all completed matches prior to today (or all selected historical matches) as `PAID_OUT`, instantly clearing the legacy debt backlog.
+
+### 7.4 Embed Schedule into Templates vs Standalone Config (Concern 4)
+- **User Insight:** Groups often play on multiple days with different venues/courts (e.g. Tuesday at Sân Viettel, Saturday at Sân Ga). Having a single schedule in `Config` cannot support multiple recurring days with different settings.
+- **Solution:**
+  - Move the recurring schedule configuration **into each Template**:
+    ```typescript
+    interface MatchTemplate {
+      id: string;
+      name: string; // e.g. "Sân Viettel - Thứ 3"
+      isDefault: boolean;
+      venueName: string;
+      totalAmount: number;
+      // ... match settings
+      schedule?: {
+        enabled: boolean;
+        cronDayOfWeek: number; // e.g. 2 (Tuesday)
+        cronHour: number; // e.g. 9 (09:00 AM)
+        matchDayOfWeek: number; // e.g. 4 (Thursday)
+        matchTime: string; // "19:00"
+      };
+    }
+    ```
+  - This allows multiple independent recurring routines per group (e.g. Schedule 1: Sân Viettel on Tuesday; Schedule 2: Sân Ga on Saturday).
+
+### 7.5 Unification of "Mẫu mặc định" with Template Presets (Concern 5)
+- **Problem:** Currently, "Lưu làm mẫu mặc định" writes to `lastMatch`, while templates are in `templates/{templateId}`. Having both is redundant, stores data in two different places, and confuses managers.
+- **Solution:**
+  - Deprecate separate `lastMatch` in favor of **Unified Template System**.
+  - In the Template list, each template has a star / badge: `[ Mẫu mặc định ]` (`isDefault: true`).
+  - When opening "Tạo trận đấu mới", the system automatically pre-fills from whichever template has `isDefault === true`.
+  - The duplicate footer button "Lưu làm mẫu mặc định" is removed; managers set any template as default directly inside the Template dropdown or dialog.
+
