@@ -17,7 +17,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -252,8 +257,17 @@ const MatchListItem = ({
 
   const date = formatMatchDateTime(match.date);
 
+  const isFullyPaid =
+    !stats.isLoading &&
+    stats.totalShares > 0 &&
+    stats.paidCount === stats.totalShares;
+
   const isPaidOut = match.payoutStatus === "PAID_OUT";
-  const isReadyForPayout = !isPaidOut && (isFullyPaid || stats.paidAmount >= match.totalAmount || match.payoutStatus === "READY_FOR_PAYOUT");
+  const isReadyForPayout =
+    !isPaidOut &&
+    (isFullyPaid ||
+      stats.paidAmount >= match.totalAmount ||
+      match.payoutStatus === "READY_FOR_PAYOUT");
 
   return (
     <div
@@ -305,15 +319,33 @@ const MatchListItem = ({
         )}
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
           {isPaidOut ? (
-            <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10", isSelected && "border-white/50 text-white bg-white/20")}>
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[10px] px-1.5 py-0 h-4 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10",
+                isSelected && "border-white/50 text-white bg-white/20",
+              )}
+            >
               ✓ Đã hoàn tiền ứng
             </Badge>
           ) : isReadyForPayout ? (
-            <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 border-sky-500/40 text-sky-600 dark:text-sky-400 bg-sky-500/10", isSelected && "border-white/50 text-white bg-white/20")}>
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[10px] px-1.5 py-0 h-4 border-sky-500/40 text-sky-600 dark:text-sky-400 bg-sky-500/10",
+                isSelected && "border-white/50 text-white bg-white/20",
+              )}
+            >
               ⚡ Chờ hoàn tiền
             </Badge>
           ) : (
-            <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10", isSelected && "border-white/50 text-white bg-white/20")}>
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[10px] px-1.5 py-0 h-4 border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10",
+                isSelected && "border-white/50 text-white bg-white/20",
+              )}
+            >
               Đang thu tiền
             </Badge>
           )}
@@ -420,7 +452,9 @@ const Matches = () => {
   const [isLiveStatsDialogOpen, setIsLiveStatsDialogOpen] = useState(false);
   const [isRatingsDialogOpen, setIsRatingsDialogOpen] = useState(false);
   const [isPosterDialogOpen, setIsPosterDialogOpen] = useState(false);
-  const [payoutFilter, setPayoutFilter] = useState<"ALL" | "UNPAID" | "PAID_OUT">("ALL");
+  const [payoutFilter, setPayoutFilter] = useState<
+    "ALL" | "UNPAID" | "PAID_OUT"
+  >("ALL");
   const [payoutSettings, setPayoutSettings] = useState<{
     bankBin?: string;
     bankName?: string;
@@ -440,20 +474,34 @@ const Matches = () => {
         })
         .catch(() => {});
     }
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [groupId]);
 
-  const handleUpdatePayoutStatus = async (status: "PAID_OUT" | "COLLECTING") => {
+  const handleUpdatePayoutStatus = async (
+    status: "PAID_OUT" | "COLLECTING",
+  ) => {
     if (!selectedMatchId) return;
     setIsUpdatingPayout(true);
     try {
-      await apiRequest("POST", `/groups/${groupId}/matches/${selectedMatchId}/payout`, {
-        payoutStatus: status,
-        note: status === "PAID_OUT" ? "Đã chuyển khoản hoàn tiền sân" : "",
-      });
+      await apiRequest(
+        "POST",
+        `/groups/${groupId}/matches/${selectedMatchId}/payout`,
+        {
+          payoutStatus: status,
+          note: status === "PAID_OUT" ? "Đã chuyển khoản hoàn tiền sân" : "",
+        },
+      );
       toast({
-        title: status === "PAID_OUT" ? "Đã xác nhận hoàn tiền!" : "Đã hoàn tác trạng thái",
-        description: status === "PAID_OUT" ? "Trận đấu đã được đánh dấu là Đã hoàn tiền ứng." : "Trận đấu chuyển về trạng thái đang thu tiền.",
+        title:
+          status === "PAID_OUT"
+            ? "Đã xác nhận hoàn tiền!"
+            : "Đã hoàn tác trạng thái",
+        description:
+          status === "PAID_OUT"
+            ? "Trận đấu đã được đánh dấu là Đã hoàn tiền ứng."
+            : "Trận đấu chuyển về trạng thái đang thu tiền.",
       });
       setMatches((current) =>
         current.map((m) =>
@@ -461,10 +509,11 @@ const Matches = () => {
             ? {
                 ...m,
                 payoutStatus: status,
-                paidOutAt: status === "PAID_OUT" ? new Date().toISOString() : null,
+                paidOutAt:
+                  status === "PAID_OUT" ? new Date().toISOString() : null,
               }
-            : m
-        )
+            : m,
+        ),
       );
       setIsPayoutModalOpen(false);
     } catch {
@@ -479,13 +528,21 @@ const Matches = () => {
   };
 
   const displayedMatches = useMemo(() => {
-    if (payoutFilter === "PAID_OUT") return matches.filter((m) => m.payoutStatus === "PAID_OUT");
-    if (payoutFilter === "UNPAID") return matches.filter((m) => m.payoutStatus !== "PAID_OUT");
+    if (payoutFilter === "PAID_OUT")
+      return matches.filter((m) => m.payoutStatus === "PAID_OUT");
+    if (payoutFilter === "UNPAID")
+      return matches.filter((m) => m.payoutStatus !== "PAID_OUT");
     return matches;
   }, [matches, payoutFilter]);
 
-  const unpaidCount = useMemo(() => matches.filter((m) => m.payoutStatus !== "PAID_OUT").length, [matches]);
-  const paidOutCount = useMemo(() => matches.filter((m) => m.payoutStatus === "PAID_OUT").length, [matches]);
+  const unpaidCount = useMemo(
+    () => matches.filter((m) => m.payoutStatus !== "PAID_OUT").length,
+    [matches],
+  );
+  const paidOutCount = useMemo(
+    () => matches.filter((m) => m.payoutStatus === "PAID_OUT").length,
+    [matches],
+  );
   const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
   const [pendingSharesMap, setPendingSharesMap] = useState<
     Map<
@@ -546,7 +603,9 @@ const Matches = () => {
   useEffect(() => {
     const fetchMembers = async () => {
       try {
-        const membersSnapshot = await getDocs(query(collection(db, "members"), where("groupId", "==", groupId)));
+        const membersSnapshot = await getDocs(
+          query(collection(db, "members"), where("groupId", "==", groupId)),
+        );
         const membersMap = new Map(
           membersSnapshot.docs.map((doc) => [
             doc.id,
@@ -1311,7 +1370,7 @@ const Matches = () => {
       const matchRef = doc(db, "matches", selectedMatchId);
       try {
         const isAlreadyPublished = Boolean(
-          selectedMatch.wasPublished || selectedMatch.publishedAt
+          selectedMatch.wasPublished || selectedMatch.publishedAt,
         );
         const updateData: Record<string, any> = { status: newStatus };
         if (newStatus === "PUBLISHED" && !isAlreadyPublished) {
@@ -1379,20 +1438,20 @@ const Matches = () => {
             Quản lý Trận đấu
           </h1>
           <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => navigate(groupPath("admin/setup"))}>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Tạo trận đấu mới
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setIsDebtModalOpen(true);
-              fetchPendingSharesAcrossAllMatches();
-            }}
-          >
-            <DollarSign className="mr-2 h-4 w-4" />
-            Nợ chưa trả
-          </Button>
+            <Button onClick={() => navigate(groupPath("admin/setup"))}>
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Tạo trận đấu mới
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsDebtModalOpen(true);
+                fetchPendingSharesAcrossAllMatches();
+              }}
+            >
+              <DollarSign className="mr-2 h-4 w-4" />
+              Nợ chưa trả
+            </Button>
           </div>
         </div>
         <div className="grid min-h-0 flex-1 grid-rows-[minmax(10rem,30%)_minmax(0,1fr)] gap-4 lg:grid-cols-12 lg:grid-rows-1">
@@ -1400,7 +1459,9 @@ const Matches = () => {
             <Card className="flex h-full min-h-0 flex-col shadow-card">
               <CardHeader className="shrink-0 p-3 space-y-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Danh sách trận đấu</CardTitle>
+                  <CardTitle className="text-base">
+                    Danh sách trận đấu
+                  </CardTitle>
                 </div>
                 <Select
                   value={payoutFilter}
@@ -1410,13 +1471,24 @@ const Matches = () => {
                     <SelectValue placeholder="Lọc trạng thái hoàn tiền" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ALL">Tất cả trận ({matches.length})</SelectItem>
-                    <SelectItem value="UNPAID">Chưa hoàn tiền ({unpaidCount})</SelectItem>
-                    <SelectItem value="PAID_OUT">Đã hoàn tiền ({paidOutCount})</SelectItem>
+                    <SelectItem value="ALL">
+                      Tất cả trận ({matches.length})
+                    </SelectItem>
+                    <SelectItem value="UNPAID">
+                      Chưa hoàn tiền ({unpaidCount})
+                    </SelectItem>
+                    <SelectItem value="PAID_OUT">
+                      Đã hoàn tiền ({paidOutCount})
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </CardHeader>
-              <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-0" role="region" aria-label="Danh sách trận đấu" tabIndex={0}>
+              <CardContent
+                className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-0"
+                role="region"
+                aria-label="Danh sách trận đấu"
+                tabIndex={0}
+              >
                 {isLoadingMatches ? (
                   <div className="p-6 text-center">
                     <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
@@ -1440,7 +1512,9 @@ const Matches = () => {
                           isSelected={selectedMatchId === match.id}
                           onSelect={() => setSelectedMatchId(match.id)}
                           onDelete={() => setMatchIdToDelete(match.id)}
-                          onEdit={() => navigate(groupPath(`admin/setup/${match.id}`))}
+                          onEdit={() =>
+                            navigate(groupPath(`admin/setup/${match.id}`))
+                          }
                         />
                       ))}
                     </div>
@@ -1474,7 +1548,12 @@ const Matches = () => {
               </CardContent>
             </Card>
           </div>
-          <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain lg:col-span-8 xl:col-span-9" role="region" aria-label="Chi tiết trận đấu" tabIndex={0}>
+          <div
+            className="min-h-0 min-w-0 overflow-y-auto overscroll-contain lg:col-span-8 xl:col-span-9"
+            role="region"
+            aria-label="Chi tiết trận đấu"
+            tabIndex={0}
+          >
             {!selectedMatchId || !selectedMatch ? (
               <Card className="shadow-card">
                 <CardContent className="p-12 text-center">
@@ -1498,12 +1577,18 @@ const Matches = () => {
                         Đã công khai
                       </Badge>
                     ) : selectedMatch.status === "COMPLETED" ? (
-                      <Badge variant="outline" className="text-amber-700 dark:text-amber-400 bg-amber-500/15 border-amber-500/30 gap-1.5 py-1 px-2.5">
+                      <Badge
+                        variant="outline"
+                        className="text-amber-700 dark:text-amber-400 bg-amber-500/15 border-amber-500/30 gap-1.5 py-1 px-2.5"
+                      >
                         <Calculator className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
                         Đã tính tiền
                       </Badge>
                     ) : (
-                      <Badge variant="outline" className="text-blue-700 dark:text-blue-400 bg-blue-500/15 border-blue-500/30 gap-1.5 py-1 px-2.5">
+                      <Badge
+                        variant="outline"
+                        className="text-blue-700 dark:text-blue-400 bg-blue-500/15 border-blue-500/30 gap-1.5 py-1 px-2.5"
+                      >
                         <Clock className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
                         Đang điểm danh
                       </Badge>
@@ -1535,7 +1620,10 @@ const Matches = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(groupPath(`admin/setup/${selectedMatch.id}`))}>
+                      onClick={() =>
+                        navigate(groupPath(`admin/setup/${selectedMatch.id}`))
+                      }
+                    >
                       <Pencil className="h-4 w-4 mr-1.5" />
                       Sửa / Tính tiền
                     </Button>
@@ -1569,7 +1657,10 @@ const Matches = () => {
                           ) : (
                             <>
                               <div className="flex gap-2 mb-4">
-                                <Popover open={manualAddPopoverOpen} onOpenChange={setManualAddPopoverOpen}>
+                                <Popover
+                                  open={manualAddPopoverOpen}
+                                  onOpenChange={setManualAddPopoverOpen}
+                                >
                                   <PopoverTrigger asChild>
                                     <Button
                                       variant="outline"
@@ -1578,32 +1669,44 @@ const Matches = () => {
                                       className="w-full justify-between font-normal"
                                     >
                                       {manualAddMemberId
-                                        ? members.get(manualAddMemberId) || "Chọn thành viên..."
+                                        ? members.get(manualAddMemberId) ||
+                                          "Chọn thành viên..."
                                         : "Chọn thành viên..."}
                                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                     </Button>
                                   </PopoverTrigger>
-                                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                                  <PopoverContent
+                                    className="w-[var(--radix-popover-trigger-width)] p-0"
+                                    align="start"
+                                  >
                                     <Command>
                                       <CommandInput placeholder="Tìm thành viên..." />
                                       <CommandList>
-                                        <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
+                                        <CommandEmpty>
+                                          Không tìm thấy thành viên.
+                                        </CommandEmpty>
                                         <CommandGroup>
                                           {Array.from(members.entries())
-                                            .filter(([id]) => !attendance.has(id))
+                                            .filter(
+                                              ([id]) => !attendance.has(id),
+                                            )
                                             .map(([id, name]) => (
                                               <CommandItem
                                                 key={id}
                                                 value={name}
                                                 onSelect={() => {
                                                   setManualAddMemberId(id);
-                                                  setManualAddPopoverOpen(false);
+                                                  setManualAddPopoverOpen(
+                                                    false,
+                                                  );
                                                 }}
                                               >
                                                 <Check
                                                   className={cn(
                                                     "mr-2 h-4 w-4",
-                                                    manualAddMemberId === id ? "opacity-100" : "opacity-0"
+                                                    manualAddMemberId === id
+                                                      ? "opacity-100"
+                                                      : "opacity-0",
                                                   )}
                                                 />
                                                 {name}
@@ -1683,7 +1786,7 @@ const Matches = () => {
                       onClick={() =>
                         copyLink(
                           `${window.location.origin}${groupPath("public/pay")}`,
-                          "Link thanh toán chung đã được sao chép."
+                          "Link thanh toán chung đã được sao chép.",
                         )
                       }
                       title="Sao chép link thanh toán chung gửi thành viên"
@@ -1698,7 +1801,7 @@ const Matches = () => {
                       onClick={() =>
                         copyLink(
                           `${window.location.origin}${groupPath("public/attendance")}`,
-                          "Link điểm danh đã được sao chép."
+                          "Link điểm danh đã được sao chép.",
                         )
                       }
                       title="Sao chép link điểm danh gửi thành viên"
@@ -1720,7 +1823,7 @@ const Matches = () => {
                           onSelect={() =>
                             window.open(
                               `${window.location.origin}${groupPath("public/pay")}`,
-                              "_blank"
+                              "_blank",
                             )
                           }
                         >
@@ -1728,342 +1831,370 @@ const Matches = () => {
                           Mở trang thanh toán (khách)
                         </DropdownMenuItem>
                         {hasFeature(groupId, group, "ratings") && (
-                          <DropdownMenuItem onSelect={() => setIsRatingsDialogOpen(true)}>
-                            <Star className="mr-2 h-4 w-4" />Xem đánh giá
+                          <DropdownMenuItem
+                            onSelect={() => setIsRatingsDialogOpen(true)}
+                          >
+                            <Star className="mr-2 h-4 w-4" />
+                            Xem đánh giá
                           </DropdownMenuItem>
                         )}
                         {hasFeature(groupId, group, "liveNotes") && (
-                          <DropdownMenuItem onSelect={() => setIsLiveStatsDialogOpen(true)}>
-                            <TrendingUp className="mr-2 h-4 w-4" />Thống kê nhanh
+                          <DropdownMenuItem
+                            onSelect={() => setIsLiveStatsDialogOpen(true)}
+                          >
+                            <TrendingUp className="mr-2 h-4 w-4" />
+                            Thống kê nhanh
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem onSelect={() => setIsPosterDialogOpen(true)}>
-                          <Trophy className="mr-2 h-4 w-4" />Vinh danh dạng Poster
+                        <DropdownMenuItem
+                          onSelect={() => setIsPosterDialogOpen(true)}
+                        >
+                          <Trophy className="mr-2 h-4 w-4" />
+                          Vinh danh dạng Poster
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
-                  {hasFeature(groupId, group, "ratings") && (<Dialog open={isRatingsDialogOpen} onOpenChange={setIsRatingsDialogOpen}>
-                    <DialogContent className="max-w-4xl">
-                      <DialogHeader>
-                        <DialogTitle>
-                          Đánh giá cho trận ngày {matchDateString}
-                        </DialogTitle>
-                      </DialogHeader>
-                      <div className="max-h-[80vh] overflow-y-auto p-4">
-                        <Tabs defaultValue="ratings" className="w-full">
-                          <TabsList className="grid w-full grid-cols-2">
-                            <TabsTrigger value="ratings">
-                              Xếp hạng & Ấn tượng
-                            </TabsTrigger>
-                            <TabsTrigger value="cross-rating">
-                              Đánh giá chéo
-                            </TabsTrigger>
-                          </TabsList>
-                          <TabsContent value="ratings" className="mt-6">
-                            {mvpData.length > 0 && (
-                              <Card className="mb-6">
-                                <CardHeader>
-                                  <CardTitle className="text-lg flex items-center gap-2">
-                                    <Trophy className="w-5 h-5 text-yellow-500" />
-                                    Cầu thủ ấn tượng (vote)
-                                  </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                  <div className="space-y-3">
-                                    {(showAllMvp
-                                      ? mvpData
-                                      : mvpData.slice(0, 3)
-                                    ).map((mvp, index) => (
-                                      <Dialog key={mvp.mvpId}>
-                                        <DialogTrigger asChild>
-                                          <div
-                                            className={cn(
-                                              "flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md",
-                                              index === 0 &&
-                                                "bg-yellow-100 dark:bg-yellow-900/50",
-                                            )}
-                                          >
-                                            <div className="flex items-center gap-3">
-                                              {index === 0 && (
-                                                <Trophy className="w-6 h-6 text-yellow-500" />
-                                              )}
-                                              <span
-                                                className={cn(
-                                                  "font-semibold",
-                                                  index === 0
-                                                    ? "text-lg text-yellow-600 dark:text-yellow-400"
-                                                    : "text-sm",
-                                                )}
-                                              >
-                                                {index + 1}. {mvp.mvpName}
-                                              </span>
-                                            </div>
-                                            <Badge
-                                              variant={
-                                                index === 0
-                                                  ? "default"
-                                                  : "secondary"
-                                              }
-                                              className={cn(
-                                                index === 0 &&
-                                                  "bg-yellow-500 text-white",
-                                              )}
-                                            >
-                                              {mvp.voteCount} phiếu
-                                            </Badge>
-                                          </div>
-                                        </DialogTrigger>
-                                        <DialogContent>
-                                          <DialogHeader>
-                                            <DialogTitle>
-                                              Danh sách bình chọn cho{" "}
-                                              {mvp.mvpName}
-                                            </DialogTitle>
-                                          </DialogHeader>
-                                          <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
-                                            {mvp.votedBy.map((voter, i) => (
-                                              <li key={i}>{voter}</li>
-                                            ))}
-                                          </ul>
-                                        </DialogContent>
-                                      </Dialog>
-                                    ))}
-                                  </div>
-                                  {mvpData.length > 3 && (
-                                    <div className="mt-4 text-center">
-                                      <Button
-                                        variant="link"
-                                        className="p-0 h-auto"
-                                        onClick={() =>
-                                          setShowAllMvp(!showAllMvp)
-                                        }
-                                      >
-                                        {showAllMvp ? "Thu gọn" : "Xem tất cả"}
-                                      </Button>
-                                    </div>
-                                  )}
-                                </CardContent>
-                              </Card>
-                            )}
-                            {combinedRatings.size > 0 ? (
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>Hạng</TableHead>
-                                    <TableHead>Thành viên</TableHead>
-                                    <TableHead>Đội</TableHead>
-                                    <TableHead className="text-right">
-                                      Peer /5
-                                    </TableHead>
-                                    <TableHead className="text-right">
-                                      Admin /5
-                                    </TableHead>
-                                    <TableHead className="text-right">
-                                      Điểm cuối /10
-                                    </TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {Array.from(combinedRatings.entries())
-                                    .sort(
-                                      ([, a], [, b]) =>
-                                        b.finalScore - a.finalScore,
-                                    )
-                                    .map(([memberId, ratingData], index) => {
-                                      const shareInfo = shares.find(
-                                        (s) => s.memberId === memberId,
-                                      );
-                                      const teamName =
-                                        shareInfo?.teamName || "N/A";
-                                      const isTopScorer =
-                                        topScorerIds.has(memberId);
-                                      const peerScore = Number.isFinite(
-                                        ratingData.averageScore,
-                                      )
-                                        ? ratingData.averageScore
-                                        : 0;
-                                      return (
-                                        <Dialog key={memberId}>
+                  {hasFeature(groupId, group, "ratings") && (
+                    <Dialog
+                      open={isRatingsDialogOpen}
+                      onOpenChange={setIsRatingsDialogOpen}
+                    >
+                      <DialogContent className="max-w-4xl">
+                        <DialogHeader>
+                          <DialogTitle>
+                            Đánh giá cho trận ngày {matchDateString}
+                          </DialogTitle>
+                        </DialogHeader>
+                        <div className="max-h-[80vh] overflow-y-auto p-4">
+                          <Tabs defaultValue="ratings" className="w-full">
+                            <TabsList className="grid w-full grid-cols-2">
+                              <TabsTrigger value="ratings">
+                                Xếp hạng & Ấn tượng
+                              </TabsTrigger>
+                              <TabsTrigger value="cross-rating">
+                                Đánh giá chéo
+                              </TabsTrigger>
+                            </TabsList>
+                            <TabsContent value="ratings" className="mt-6">
+                              {mvpData.length > 0 && (
+                                <Card className="mb-6">
+                                  <CardHeader>
+                                    <CardTitle className="text-lg flex items-center gap-2">
+                                      <Trophy className="w-5 h-5 text-yellow-500" />
+                                      Cầu thủ ấn tượng (vote)
+                                    </CardTitle>
+                                  </CardHeader>
+                                  <CardContent>
+                                    <div className="space-y-3">
+                                      {(showAllMvp
+                                        ? mvpData
+                                        : mvpData.slice(0, 3)
+                                      ).map((mvp, index) => (
+                                        <Dialog key={mvp.mvpId}>
                                           <DialogTrigger asChild>
-                                            <TableRow
+                                            <div
                                               className={cn(
-                                                "cursor-pointer",
-                                                isTopScorer &&
-                                                  "bg-green-100 dark:bg-green-900/50",
+                                                "flex justify-between items-center cursor-pointer hover:bg-muted p-2 rounded-md",
+                                                index === 0 &&
+                                                  "bg-yellow-100 dark:bg-yellow-900/50",
                                               )}
                                             >
-                                              <TableCell
-                                                className={cn(
-                                                  isTopScorer &&
-                                                    "font-bold text-lg",
+                                              <div className="flex items-center gap-3">
+                                                {index === 0 && (
+                                                  <Trophy className="w-6 h-6 text-yellow-500" />
                                                 )}
-                                              >
-                                                {index + 1}
-                                              </TableCell>
-                                              <TableCell
-                                                className={cn(
-                                                  "font-medium",
-                                                  isTopScorer &&
-                                                    "text-lg text-green-600 dark:text-green-400",
-                                                )}
-                                              >
-                                                <div className="flex items-center gap-2">
-                                                  {isTopScorer && (
-                                                    <Trophy className="w-5 h-5 text-green-500" />
-                                                  )}
-                                                  {members.get(memberId) ||
-                                                    "Không rõ"}
-                                                </div>
-                                              </TableCell>
-                                              <TableCell>{teamName}</TableCell>
-                                              <TableCell className="text-right">
-                                                <Badge variant="outline">
-                                                  {peerScore.toFixed(2)}
-                                                </Badge>
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                {ratingData.hasAdminScore ? (
-                                                  <Badge variant="secondary">
-                                                    {ratingData.adminScore.toFixed(
-                                                      2,
-                                                    )}
-                                                  </Badge>
-                                                ) : (
-                                                  <span className="text-xs text-muted-foreground">
-                                                    Chưa chấm
-                                                  </span>
-                                                )}
-                                              </TableCell>
-                                              <TableCell className="text-right">
-                                                <Badge
-                                                  variant={
-                                                    isTopScorer
-                                                      ? "default"
-                                                      : "outline"
-                                                  }
+                                                <span
                                                   className={cn(
-                                                    isTopScorer &&
-                                                      "bg-green-500 text-white text-base px-3 py-1",
+                                                    "font-semibold",
+                                                    index === 0
+                                                      ? "text-lg text-yellow-600 dark:text-yellow-400"
+                                                      : "text-sm",
                                                   )}
                                                 >
-                                                  {ratingData.finalScore.toFixed(
-                                                    2,
-                                                  )}
-                                                </Badge>
-                                              </TableCell>
-                                            </TableRow>
+                                                  {index + 1}. {mvp.mvpName}
+                                                </span>
+                                              </div>
+                                              <Badge
+                                                variant={
+                                                  index === 0
+                                                    ? "default"
+                                                    : "secondary"
+                                                }
+                                                className={cn(
+                                                  index === 0 &&
+                                                    "bg-yellow-500 text-white",
+                                                )}
+                                              >
+                                                {mvp.voteCount} phiếu
+                                              </Badge>
+                                            </div>
                                           </DialogTrigger>
                                           <DialogContent>
                                             <DialogHeader>
                                               <DialogTitle>
-                                                Chi tiết điểm của{" "}
-                                                {members.get(memberId) ||
-                                                  "Không rõ"}
+                                                Danh sách bình chọn cho{" "}
+                                                {mvp.mvpName}
                                               </DialogTitle>
                                             </DialogHeader>
-                                            <div className="space-y-3">
-                                              <div className="flex justify-between text-sm">
-                                                <span>Điểm peer</span>
-                                                <strong>
-                                                  {peerScore.toFixed(2)} / 5
-                                                </strong>
-                                              </div>
-                                              <div className="flex justify-between text-sm">
-                                                <span>Điểm admin</span>
-                                                <strong>
-                                                  {ratingData.hasAdminScore
-                                                    ? `${ratingData.adminScore.toFixed(
-                                                        2,
-                                                      )} / 5`
-                                                    : "Chưa chấm"}
-                                                </strong>
-                                              </div>
-                                              <div className="flex justify-between text-sm items-center">
-                                                <span>Tổng</span>
-                                                <Badge>
-                                                  {ratingData.finalScore.toFixed(
-                                                    2,
-                                                  )}{" "}
-                                                  / 10
-                                                </Badge>
-                                              </div>
-                                              <div>
-                                                <p className="text-xs text-muted-foreground mb-2">
-                                                  Chi tiết điểm peer:
-                                                </p>
-                                                <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
-                                                  {ratingData.details.length >
-                                                  0 ? (
-                                                    ratingData.details.map(
-                                                      (d, i) => (
-                                                        <li
-                                                          key={i}
-                                                          className="flex justify-between"
-                                                        >
-                                                          <span>
-                                                            {d.ratedBy}
-                                                          </span>
-                                                          <strong>
-                                                            {d.score} điểm
-                                                          </strong>
-                                                        </li>
-                                                      ),
-                                                    )
-                                                  ) : (
-                                                    <li className="text-xs text-muted-foreground">
-                                                      Chưa có đánh giá peer.
-                                                    </li>
-                                                  )}
-                                                </ul>
-                                              </div>
-                                            </div>
+                                            <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
+                                              {mvp.votedBy.map((voter, i) => (
+                                                <li key={i}>{voter}</li>
+                                              ))}
+                                            </ul>
                                           </DialogContent>
                                         </Dialog>
-                                      );
-                                    })}
-                                </TableBody>
-                              </Table>
-                            ) : (
-                              <div className="text-center p-8 text-muted-foreground">
-                                Chưa có dữ liệu xếp hạng cho trận này.
-                              </div>
-                            )}
-                          </TabsContent>
-                          <TabsContent value="cross-rating" className="mt-6">
-                            {isLoadingRatings ? (
-                              <div className="text-center p-8">
-                                <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                              </div>
-                            ) : crossRatings.size === 0 ? (
-                              <div className="text-center p-8 text-muted-foreground">
-                                Chưa có dữ liệu đánh giá cho trận này.
-                              </div>
-                            ) : (
-                              <div className="space-y-4">
-                                <div>
-                                  <Popover open={raterPopoverOpen} onOpenChange={setRaterPopoverOpen}>
-                                    <PopoverTrigger asChild>
-                                      <Button
-                                        variant="outline"
-                                        role="combobox"
-                                        aria-expanded={raterPopoverOpen}
-                                        className="w-full justify-between font-normal"
+                                      ))}
+                                    </div>
+                                    {mvpData.length > 3 && (
+                                      <div className="mt-4 text-center">
+                                        <Button
+                                          variant="link"
+                                          className="p-0 h-auto"
+                                          onClick={() =>
+                                            setShowAllMvp(!showAllMvp)
+                                          }
+                                        >
+                                          {showAllMvp
+                                            ? "Thu gọn"
+                                            : "Xem tất cả"}
+                                        </Button>
+                                      </div>
+                                    )}
+                                  </CardContent>
+                                </Card>
+                              )}
+                              {combinedRatings.size > 0 ? (
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>Hạng</TableHead>
+                                      <TableHead>Thành viên</TableHead>
+                                      <TableHead>Đội</TableHead>
+                                      <TableHead className="text-right">
+                                        Peer /5
+                                      </TableHead>
+                                      <TableHead className="text-right">
+                                        Admin /5
+                                      </TableHead>
+                                      <TableHead className="text-right">
+                                        Điểm cuối /10
+                                      </TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {Array.from(combinedRatings.entries())
+                                      .sort(
+                                        ([, a], [, b]) =>
+                                          b.finalScore - a.finalScore,
+                                      )
+                                      .map(([memberId, ratingData], index) => {
+                                        const shareInfo = shares.find(
+                                          (s) => s.memberId === memberId,
+                                        );
+                                        const teamName =
+                                          shareInfo?.teamName || "N/A";
+                                        const isTopScorer =
+                                          topScorerIds.has(memberId);
+                                        const peerScore = Number.isFinite(
+                                          ratingData.averageScore,
+                                        )
+                                          ? ratingData.averageScore
+                                          : 0;
+                                        return (
+                                          <Dialog key={memberId}>
+                                            <DialogTrigger asChild>
+                                              <TableRow
+                                                className={cn(
+                                                  "cursor-pointer",
+                                                  isTopScorer &&
+                                                    "bg-green-100 dark:bg-green-900/50",
+                                                )}
+                                              >
+                                                <TableCell
+                                                  className={cn(
+                                                    isTopScorer &&
+                                                      "font-bold text-lg",
+                                                  )}
+                                                >
+                                                  {index + 1}
+                                                </TableCell>
+                                                <TableCell
+                                                  className={cn(
+                                                    "font-medium",
+                                                    isTopScorer &&
+                                                      "text-lg text-green-600 dark:text-green-400",
+                                                  )}
+                                                >
+                                                  <div className="flex items-center gap-2">
+                                                    {isTopScorer && (
+                                                      <Trophy className="w-5 h-5 text-green-500" />
+                                                    )}
+                                                    {members.get(memberId) ||
+                                                      "Không rõ"}
+                                                  </div>
+                                                </TableCell>
+                                                <TableCell>
+                                                  {teamName}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                  <Badge variant="outline">
+                                                    {peerScore.toFixed(2)}
+                                                  </Badge>
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                  {ratingData.hasAdminScore ? (
+                                                    <Badge variant="secondary">
+                                                      {ratingData.adminScore.toFixed(
+                                                        2,
+                                                      )}
+                                                    </Badge>
+                                                  ) : (
+                                                    <span className="text-xs text-muted-foreground">
+                                                      Chưa chấm
+                                                    </span>
+                                                  )}
+                                                </TableCell>
+                                                <TableCell className="text-right">
+                                                  <Badge
+                                                    variant={
+                                                      isTopScorer
+                                                        ? "default"
+                                                        : "outline"
+                                                    }
+                                                    className={cn(
+                                                      isTopScorer &&
+                                                        "bg-green-500 text-white text-base px-3 py-1",
+                                                    )}
+                                                  >
+                                                    {ratingData.finalScore.toFixed(
+                                                      2,
+                                                    )}
+                                                  </Badge>
+                                                </TableCell>
+                                              </TableRow>
+                                            </DialogTrigger>
+                                            <DialogContent>
+                                              <DialogHeader>
+                                                <DialogTitle>
+                                                  Chi tiết điểm của{" "}
+                                                  {members.get(memberId) ||
+                                                    "Không rõ"}
+                                                </DialogTitle>
+                                              </DialogHeader>
+                                              <div className="space-y-3">
+                                                <div className="flex justify-between text-sm">
+                                                  <span>Điểm peer</span>
+                                                  <strong>
+                                                    {peerScore.toFixed(2)} / 5
+                                                  </strong>
+                                                </div>
+                                                <div className="flex justify-between text-sm">
+                                                  <span>Điểm admin</span>
+                                                  <strong>
+                                                    {ratingData.hasAdminScore
+                                                      ? `${ratingData.adminScore.toFixed(
+                                                          2,
+                                                        )} / 5`
+                                                      : "Chưa chấm"}
+                                                  </strong>
+                                                </div>
+                                                <div className="flex justify-between text-sm items-center">
+                                                  <span>Tổng</span>
+                                                  <Badge>
+                                                    {ratingData.finalScore.toFixed(
+                                                      2,
+                                                    )}{" "}
+                                                    / 10
+                                                  </Badge>
+                                                </div>
+                                                <div>
+                                                  <p className="text-xs text-muted-foreground mb-2">
+                                                    Chi tiết điểm peer:
+                                                  </p>
+                                                  <ul className="text-sm space-y-2 max-h-60 overflow-y-auto">
+                                                    {ratingData.details.length >
+                                                    0 ? (
+                                                      ratingData.details.map(
+                                                        (d, i) => (
+                                                          <li
+                                                            key={i}
+                                                            className="flex justify-between"
+                                                          >
+                                                            <span>
+                                                              {d.ratedBy}
+                                                            </span>
+                                                            <strong>
+                                                              {d.score} điểm
+                                                            </strong>
+                                                          </li>
+                                                        ),
+                                                      )
+                                                    ) : (
+                                                      <li className="text-xs text-muted-foreground">
+                                                        Chưa có đánh giá peer.
+                                                      </li>
+                                                    )}
+                                                  </ul>
+                                                </div>
+                                              </div>
+                                            </DialogContent>
+                                          </Dialog>
+                                        );
+                                      })}
+                                  </TableBody>
+                                </Table>
+                              ) : (
+                                <div className="text-center p-8 text-muted-foreground">
+                                  Chưa có dữ liệu xếp hạng cho trận này.
+                                </div>
+                              )}
+                            </TabsContent>
+                            <TabsContent value="cross-rating" className="mt-6">
+                              {isLoadingRatings ? (
+                                <div className="text-center p-8">
+                                  <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                                </div>
+                              ) : crossRatings.size === 0 ? (
+                                <div className="text-center p-8 text-muted-foreground">
+                                  Chưa có dữ liệu đánh giá cho trận này.
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  <div>
+                                    <Popover
+                                      open={raterPopoverOpen}
+                                      onOpenChange={setRaterPopoverOpen}
+                                    >
+                                      <PopoverTrigger asChild>
+                                        <Button
+                                          variant="outline"
+                                          role="combobox"
+                                          aria-expanded={raterPopoverOpen}
+                                          className="w-full justify-between font-normal"
+                                        >
+                                          {selectedRaterId
+                                            ? crossRatings.get(selectedRaterId)
+                                                ?.ratedByName ||
+                                              "Chọn người đánh giá để xem điểm"
+                                            : "Chọn người đánh giá để xem điểm"}
+                                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                        </Button>
+                                      </PopoverTrigger>
+                                      <PopoverContent
+                                        className="w-[var(--radix-popover-trigger-width)] p-0"
+                                        align="start"
                                       >
-                                        {selectedRaterId
-                                          ? crossRatings.get(selectedRaterId)?.ratedByName || "Chọn người đánh giá để xem điểm"
-                                          : "Chọn người đánh giá để xem điểm"}
-                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                      </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                                      <Command>
-                                        <CommandInput placeholder="Tìm người đánh giá..." />
-                                        <CommandList>
-                                          <CommandEmpty>Không tìm thấy người đánh giá.</CommandEmpty>
-                                          <CommandGroup>
-                                            {Array.from(crossRatings.entries()).map(
-                                              ([raterId, data]) => (
+                                        <Command>
+                                          <CommandInput placeholder="Tìm người đánh giá..." />
+                                          <CommandList>
+                                            <CommandEmpty>
+                                              Không tìm thấy người đánh giá.
+                                            </CommandEmpty>
+                                            <CommandGroup>
+                                              {Array.from(
+                                                crossRatings.entries(),
+                                              ).map(([raterId, data]) => (
                                                 <CommandItem
                                                   key={raterId}
                                                   value={data.ratedByName}
@@ -2075,218 +2206,229 @@ const Matches = () => {
                                                   <Check
                                                     className={cn(
                                                       "mr-2 h-4 w-4",
-                                                      selectedRaterId === raterId ? "opacity-100" : "opacity-0"
+                                                      selectedRaterId ===
+                                                        raterId
+                                                        ? "opacity-100"
+                                                        : "opacity-0",
                                                     )}
                                                   />
                                                   {data.ratedByName}
                                                 </CommandItem>
-                                              ),
-                                            )}
-                                          </CommandGroup>
-                                        </CommandList>
-                                      </Command>
-                                    </PopoverContent>
-                                  </Popover>
-                                </div>
-                                {selectedRaterId && (
-                                  <Card>
-                                    <CardHeader>
-                                      <CardTitle>
-                                        Điểm do{" "}
-                                        {
-                                          crossRatings.get(selectedRaterId)
-                                            ?.ratedByName
-                                        }{" "}
-                                        chấm
-                                      </CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                      <Table>
-                                        <TableHeader>
-                                          <TableRow>
-                                            <TableHead>
-                                              Cầu thủ được đánh giá
-                                            </TableHead>
-                                            <TableHead className="text-right">
-                                              Điểm
-                                            </TableHead>
-                                          </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                          {crossRatings
-                                            .get(selectedRaterId)
-                                            ?.ratingsGiven.sort(
-                                              (a, b) => b.score - a.score,
-                                            )
-                                            .map(({ playerRatedId, score }) => (
-                                              <TableRow key={playerRatedId}>
-                                                <TableCell className="font-medium">
-                                                  {members.get(playerRatedId) ||
-                                                    "Không rõ"}
-                                                </TableCell>
-                                                <TableCell className="text-right font-semibold">
-                                                  {score}
-                                                </TableCell>
-                                              </TableRow>
-                                            ))}
-                                        </TableBody>
-                                      </Table>
-                                    </CardContent>
-                                  </Card>
-                                )}
-                              </div>
-                            )}
-                          </TabsContent>
-                        </Tabs>
-                      </div>
-                    </DialogContent>
-                  </Dialog>)}
-                  {hasFeature(groupId, group, "liveNotes") && (<Dialog
-                    open={isLiveStatsDialogOpen}
-                    onOpenChange={setIsLiveStatsDialogOpen}
-                  >
-
-                    <DialogContent className="max-w-4xl">
-                      <DialogHeader>
-                        <DialogTitle>
-                          Thống kê nhanh (Live notes) - {matchDateString}
-                        </DialogTitle>
-                      </DialogHeader>
-                      <div className="max-h-[70vh] overflow-y-auto">
-                        {isLoadingLiveStats ? (
-                          <div className="text-center py-6">
-                            <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
-                            <p className="text-sm text-muted-foreground mt-2">
-                              Đang tải live notes...
-                            </p>
-                          </div>
-                        ) : liveStatsList.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">
-                            Chưa có dữ liệu live notes cho trận này.
-                          </p>
-                        ) : (
-                          <>
-                            {Object.keys(currentTeamNames).length > 0 && (
-                              <div
-                                className={`grid gap-2 mb-3 ${Object.keys(currentTeamNames).length >= 3 ? "grid-cols-3" : "grid-cols-2"}`}
-                              >
-                                {Object.entries(currentTeamNames).map(
-                                  ([teamId, teamName]) => (
-                                    <Card
-                                      key={teamId}
-                                      className="p-3 border-dashed"
-                                    >
-                                      <div className="text-sm font-semibold truncate">
-                                        {teamName}
-                                      </div>
-                                      <div className="text-2xl font-black">
-                                        {teamScore.get(teamId) || 0}
-                                      </div>
-                                    </Card>
-                                  ),
-                                )}
-                              </div>
-                            )}
-                            <div className="flex flex-wrap gap-2">
-                              {liveStatsList.map((stats) => {
-                                const medal = medalClassForScore(
-                                  stats.primaryScore,
-                                );
-                                const medalIcon =
-                                  medal === "gold"
-                                    ? "🥇"
-                                    : medal === "silver"
-                                      ? "🥈"
-                                      : medal === "bronze"
-                                        ? "🥉"
-                                        : null;
-                                const medalClass =
-                                  medal === "gold"
-                                    ? "border-emerald-400 bg-emerald-50"
-                                    : medal === "silver"
-                                      ? "border-blue-400 bg-blue-50"
-                                      : medal === "bronze"
-                                        ? "border-amber-400 bg-amber-50"
-                                        : "";
-                                return (
-                                  <div
-                                    key={stats.memberId}
-                                    className={cn(
-                                      "rounded border p-2 bg-muted/30 text-xs space-y-1 w-[48%] sm:w-[31%] lg:w-[23%]",
-                                      medalClass,
-                                    )}
-                                  >
-                                    <div className="font-semibold truncate flex items-center gap-1">
-                                      {medalIcon && <span>{medalIcon}</span>}
-                                      <span className="truncate">
-                                        {members.get(stats.memberId) ||
-                                          "Không rõ"}
-                                      </span>
-                                    </div>
-                                    <div className="flex flex-wrap gap-1">
-                                      {stats.goal > 0 && (
-                                        <Badge className="bg-emerald-100 text-emerald-700 cursor-default">
-                                          {labelFor("goal")} {stats.goal}
-                                        </Badge>
-                                      )}
-                                      {stats.assist > 0 && (
-                                        <Badge className="bg-blue-100 text-blue-700 cursor-default">
-                                          {labelFor("assist")} {stats.assist}
-                                        </Badge>
-                                      )}
-                                      {stats.save_gk > 0 && (
-                                        <Badge className="bg-cyan-100 text-cyan-700 cursor-default">
-                                          {labelFor("save_gk")} {stats.save_gk}
-                                        </Badge>
-                                      )}
-                                      {stats.tackle > 0 && (
-                                        <Badge className="bg-indigo-100 text-indigo-700 cursor-default">
-                                          {labelFor("tackle")} {stats.tackle}
-                                        </Badge>
-                                      )}
-                                      {stats.dribble > 0 && (
-                                        <Badge className="bg-purple-100 text-purple-700 cursor-default">
-                                          {labelFor("dribble")} {stats.dribble}
-                                        </Badge>
-                                      )}
-                                      {stats.yellow > 0 && (
-                                        <Badge className="bg-amber-100 text-amber-800 cursor-default">
-                                          {labelFor("yellow")} {stats.yellow}
-                                        </Badge>
-                                      )}
-                                      {stats.red > 0 && (
-                                        <Badge className="bg-red-100 text-red-700 cursor-default">
-                                          {labelFor("red")} {stats.red}
-                                        </Badge>
-                                      )}
-                                      {stats.foul > 0 && (
-                                        <Badge
-                                          variant="outline"
-                                          className="cursor-default"
-                                        >
-                                          {labelFor("foul")} {stats.foul}
-                                        </Badge>
-                                      )}
-                                      {stats.note > 0 && (
-                                        <Badge
-                                          variant="outline"
-                                          className="cursor-default"
-                                        >
-                                          {labelFor("note")} {stats.note}
-                                        </Badge>
-                                      )}
-                                    </div>
+                                              ))}
+                                            </CommandGroup>
+                                          </CommandList>
+                                        </Command>
+                                      </PopoverContent>
+                                    </Popover>
                                   </div>
-                                );
-                              })}
+                                  {selectedRaterId && (
+                                    <Card>
+                                      <CardHeader>
+                                        <CardTitle>
+                                          Điểm do{" "}
+                                          {
+                                            crossRatings.get(selectedRaterId)
+                                              ?.ratedByName
+                                          }{" "}
+                                          chấm
+                                        </CardTitle>
+                                      </CardHeader>
+                                      <CardContent>
+                                        <Table>
+                                          <TableHeader>
+                                            <TableRow>
+                                              <TableHead>
+                                                Cầu thủ được đánh giá
+                                              </TableHead>
+                                              <TableHead className="text-right">
+                                                Điểm
+                                              </TableHead>
+                                            </TableRow>
+                                          </TableHeader>
+                                          <TableBody>
+                                            {crossRatings
+                                              .get(selectedRaterId)
+                                              ?.ratingsGiven.sort(
+                                                (a, b) => b.score - a.score,
+                                              )
+                                              .map(
+                                                ({ playerRatedId, score }) => (
+                                                  <TableRow key={playerRatedId}>
+                                                    <TableCell className="font-medium">
+                                                      {members.get(
+                                                        playerRatedId,
+                                                      ) || "Không rõ"}
+                                                    </TableCell>
+                                                    <TableCell className="text-right font-semibold">
+                                                      {score}
+                                                    </TableCell>
+                                                  </TableRow>
+                                                ),
+                                              )}
+                                          </TableBody>
+                                        </Table>
+                                      </CardContent>
+                                    </Card>
+                                  )}
+                                </div>
+                              )}
+                            </TabsContent>
+                          </Tabs>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                  {hasFeature(groupId, group, "liveNotes") && (
+                    <Dialog
+                      open={isLiveStatsDialogOpen}
+                      onOpenChange={setIsLiveStatsDialogOpen}
+                    >
+                      <DialogContent className="max-w-4xl">
+                        <DialogHeader>
+                          <DialogTitle>
+                            Thống kê nhanh (Live notes) - {matchDateString}
+                          </DialogTitle>
+                        </DialogHeader>
+                        <div className="max-h-[70vh] overflow-y-auto">
+                          {isLoadingLiveStats ? (
+                            <div className="text-center py-6">
+                              <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                              <p className="text-sm text-muted-foreground mt-2">
+                                Đang tải live notes...
+                              </p>
                             </div>
-                          </>
-                        )}
-                      </div>
-                    </DialogContent>
-                  </Dialog>)}
-                  <Dialog open={isPosterDialogOpen} onOpenChange={setIsPosterDialogOpen}>
-
+                          ) : liveStatsList.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">
+                              Chưa có dữ liệu live notes cho trận này.
+                            </p>
+                          ) : (
+                            <>
+                              {Object.keys(currentTeamNames).length > 0 && (
+                                <div
+                                  className={`grid gap-2 mb-3 ${Object.keys(currentTeamNames).length >= 3 ? "grid-cols-3" : "grid-cols-2"}`}
+                                >
+                                  {Object.entries(currentTeamNames).map(
+                                    ([teamId, teamName]) => (
+                                      <Card
+                                        key={teamId}
+                                        className="p-3 border-dashed"
+                                      >
+                                        <div className="text-sm font-semibold truncate">
+                                          {teamName}
+                                        </div>
+                                        <div className="text-2xl font-black">
+                                          {teamScore.get(teamId) || 0}
+                                        </div>
+                                      </Card>
+                                    ),
+                                  )}
+                                </div>
+                              )}
+                              <div className="flex flex-wrap gap-2">
+                                {liveStatsList.map((stats) => {
+                                  const medal = medalClassForScore(
+                                    stats.primaryScore,
+                                  );
+                                  const medalIcon =
+                                    medal === "gold"
+                                      ? "🥇"
+                                      : medal === "silver"
+                                        ? "🥈"
+                                        : medal === "bronze"
+                                          ? "🥉"
+                                          : null;
+                                  const medalClass =
+                                    medal === "gold"
+                                      ? "border-emerald-400 bg-emerald-50"
+                                      : medal === "silver"
+                                        ? "border-blue-400 bg-blue-50"
+                                        : medal === "bronze"
+                                          ? "border-amber-400 bg-amber-50"
+                                          : "";
+                                  return (
+                                    <div
+                                      key={stats.memberId}
+                                      className={cn(
+                                        "rounded border p-2 bg-muted/30 text-xs space-y-1 w-[48%] sm:w-[31%] lg:w-[23%]",
+                                        medalClass,
+                                      )}
+                                    >
+                                      <div className="font-semibold truncate flex items-center gap-1">
+                                        {medalIcon && <span>{medalIcon}</span>}
+                                        <span className="truncate">
+                                          {members.get(stats.memberId) ||
+                                            "Không rõ"}
+                                        </span>
+                                      </div>
+                                      <div className="flex flex-wrap gap-1">
+                                        {stats.goal > 0 && (
+                                          <Badge className="bg-emerald-100 text-emerald-700 cursor-default">
+                                            {labelFor("goal")} {stats.goal}
+                                          </Badge>
+                                        )}
+                                        {stats.assist > 0 && (
+                                          <Badge className="bg-blue-100 text-blue-700 cursor-default">
+                                            {labelFor("assist")} {stats.assist}
+                                          </Badge>
+                                        )}
+                                        {stats.save_gk > 0 && (
+                                          <Badge className="bg-cyan-100 text-cyan-700 cursor-default">
+                                            {labelFor("save_gk")}{" "}
+                                            {stats.save_gk}
+                                          </Badge>
+                                        )}
+                                        {stats.tackle > 0 && (
+                                          <Badge className="bg-indigo-100 text-indigo-700 cursor-default">
+                                            {labelFor("tackle")} {stats.tackle}
+                                          </Badge>
+                                        )}
+                                        {stats.dribble > 0 && (
+                                          <Badge className="bg-purple-100 text-purple-700 cursor-default">
+                                            {labelFor("dribble")}{" "}
+                                            {stats.dribble}
+                                          </Badge>
+                                        )}
+                                        {stats.yellow > 0 && (
+                                          <Badge className="bg-amber-100 text-amber-800 cursor-default">
+                                            {labelFor("yellow")} {stats.yellow}
+                                          </Badge>
+                                        )}
+                                        {stats.red > 0 && (
+                                          <Badge className="bg-red-100 text-red-700 cursor-default">
+                                            {labelFor("red")} {stats.red}
+                                          </Badge>
+                                        )}
+                                        {stats.foul > 0 && (
+                                          <Badge
+                                            variant="outline"
+                                            className="cursor-default"
+                                          >
+                                            {labelFor("foul")} {stats.foul}
+                                          </Badge>
+                                        )}
+                                        {stats.note > 0 && (
+                                          <Badge
+                                            variant="outline"
+                                            className="cursor-default"
+                                          >
+                                            {labelFor("note")} {stats.note}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  )}
+                  <Dialog
+                    open={isPosterDialogOpen}
+                    onOpenChange={setIsPosterDialogOpen}
+                  >
                     <DialogContent className="max-w-5xl p-0 overflow-hidden border-0 shadow-2xl">
                       {!topMvp && topScorers.length === 0 ? (
                         <div className="p-8 text-center text-muted-foreground">
@@ -2461,12 +2603,17 @@ const Matches = () => {
                   <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50/70 p-3 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
                     <div className="flex items-center gap-2">
                       <Clock className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                      <span>Trận đấu đang ở trạng thái điểm danh, chưa được chốt tính tiền chia bill.</span>
+                      <span>
+                        Trận đấu đang ở trạng thái điểm danh, chưa được chốt
+                        tính tiền chia bill.
+                      </span>
                     </div>
                     <Button
                       size="sm"
                       className="bg-blue-600 hover:bg-blue-700 text-white"
-                      onClick={() => navigate(groupPath(`admin/setup/${selectedMatch.id}`))}
+                      onClick={() =>
+                        navigate(groupPath(`admin/setup/${selectedMatch.id}`))
+                      }
                     >
                       <Calculator className="mr-1.5 h-4 w-4" />
                       Tính tiền ngay
@@ -2556,7 +2703,8 @@ const Matches = () => {
                           className="bg-amber-100 text-amber-800 hover:bg-amber-100"
                         >
                           {selectedMatch.paidByMemberId
-                            ? members.get(selectedMatch.paidByMemberId) || "Không rõ"
+                            ? members.get(selectedMatch.paidByMemberId) ||
+                              "Không rõ"
                             : group?.ownerDisplayName || "Người ứng nhóm"}
                         </Badge>
                       </div>
@@ -2592,43 +2740,62 @@ const Matches = () => {
                 </Card>
 
                 {/* Reimbursement & VietQR Payout Dialog */}
-                <Dialog open={isPayoutModalOpen} onOpenChange={setIsPayoutModalOpen}>
+                <Dialog
+                  open={isPayoutModalOpen}
+                  onOpenChange={setIsPayoutModalOpen}
+                >
                   <DialogContent className="max-w-md">
                     <DialogHeader>
                       <div className="flex items-center gap-2">
                         <CreditCard className="h-5 w-5 text-primary" />
-                        <DialogTitle>Hoàn tiền ứng sân cho trận đấu</DialogTitle>
+                        <DialogTitle>
+                          Hoàn tiền ứng sân cho trận đấu
+                        </DialogTitle>
                       </div>
                       <DialogDescription>
-                        Thông tin tài khoản ngân hàng và mã VietQR để người quản lý hoặc thủ quỹ hoàn trả tiền sân cho người đã ứng.
+                        Thông tin tài khoản ngân hàng và mã VietQR để người quản
+                        lý hoặc thủ quỹ hoàn trả tiền sân cho người đã ứng.
                       </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-4 py-2">
                       <div className="p-3 bg-muted/40 rounded-lg space-y-2 text-sm">
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">Người ứng tiền:</span>
+                          <span className="text-muted-foreground">
+                            Người ứng tiền:
+                          </span>
                           <span className="font-semibold">
                             {selectedMatch?.paidByMemberId
-                              ? members.get(selectedMatch.paidByMemberId) || "Thành viên nhóm"
-                              : group?.ownerDisplayName || "Người ứng tiền nhóm"}
+                              ? members.get(selectedMatch.paidByMemberId) ||
+                                "Thành viên nhóm"
+                              : group?.ownerDisplayName ||
+                                "Người ứng tiền nhóm"}
                           </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">Tiền sân cần hoàn:</span>
+                          <span className="text-muted-foreground">
+                            Tiền sân cần hoàn:
+                          </span>
                           <span className="font-bold text-base text-primary">
                             {selectedMatch?.totalAmount.toLocaleString()} VND
                           </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">Tiền đã thu được:</span>
+                          <span className="text-muted-foreground">
+                            Tiền đã thu được:
+                          </span>
                           <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                            {paidAmount.toLocaleString()} VND ({totalAmount > 0 ? Math.round((paidAmount / totalAmount) * 100) : 0}%)
+                            {paidAmount.toLocaleString()} VND (
+                            {totalAmount > 0
+                              ? Math.round((paidAmount / totalAmount) * 100)
+                              : 0}
+                            %)
                           </span>
                         </div>
                       </div>
 
-                      {payoutSettings?.bankBin && payoutSettings?.accountNumber ? (
+                      {payoutSettings?.bankBin &&
+                      payoutSettings?.accountNumber ? (
                         <div className="flex flex-col items-center gap-3 p-4 border rounded-xl bg-card">
                           <img
                             src={
@@ -2636,36 +2803,49 @@ const Matches = () => {
                               `https://img.vietqr.io/image/${payoutSettings.bankBin}-${payoutSettings.accountNumber}-compact.png?amount=${
                                 selectedMatch?.totalAmount || 0
                               }&addInfo=${encodeURIComponent(
-                                `HOAN TIEN SAN ${selectedMatch?.id.slice(0, 8)}`
+                                `HOAN TIEN SAN ${selectedMatch?.id.slice(0, 8)}`,
                               )}&accountName=${encodeURIComponent(payoutSettings.accountHolder || "")}`
                             }
                             alt="VietQR Payout"
                             className="w-48 h-48 object-contain rounded-lg bg-white p-2 border shadow-xs"
                           />
                           <div className="w-full text-center space-y-1">
-                            <p className="font-medium text-foreground">{payoutSettings.bankName}</p>
+                            <p className="font-medium text-foreground">
+                              {payoutSettings.bankName}
+                            </p>
                             <div className="flex items-center justify-center gap-2">
-                              <span className="font-mono font-bold text-lg text-primary">{payoutSettings.accountNumber}</span>
+                              <span className="font-mono font-bold text-lg text-primary">
+                                {payoutSettings.accountNumber}
+                              </span>
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7"
                                 title="Sao chép số tài khoản"
                                 onClick={() => {
-                                  navigator.clipboard.writeText(payoutSettings.accountNumber || "");
+                                  navigator.clipboard.writeText(
+                                    payoutSettings.accountNumber || "",
+                                  );
                                   toast({ title: "Đã sao chép số tài khoản" });
                                 }}
                               >
                                 <Copy className="h-3.5 w-3.5" />
                               </Button>
                             </div>
-                            <p className="text-xs text-muted-foreground uppercase">{payoutSettings.accountHolder}</p>
+                            <p className="text-xs text-muted-foreground uppercase">
+                              {payoutSettings.accountHolder}
+                            </p>
                           </div>
                         </div>
                       ) : (
                         <div className="p-4 border border-dashed rounded-lg text-center text-sm text-muted-foreground">
-                          <p>Chưa cấu hình tài khoản nhận hoàn tiền cho nhóm.</p>
-                          <p className="text-xs mt-1">Vui lòng vào trang <strong>Cấu hình</strong> để cập nhật số tài khoản & VietQR.</p>
+                          <p>
+                            Chưa cấu hình tài khoản nhận hoàn tiền cho nhóm.
+                          </p>
+                          <p className="text-xs mt-1">
+                            Vui lòng vào trang <strong>Cấu hình</strong> để cập
+                            nhật số tài khoản & VietQR.
+                          </p>
                         </div>
                       )}
 
@@ -2679,7 +2859,9 @@ const Matches = () => {
                             variant="outline"
                             size="sm"
                             className="text-xs"
-                            onClick={() => handleUpdatePayoutStatus("COLLECTING")}
+                            onClick={() =>
+                              handleUpdatePayoutStatus("COLLECTING")
+                            }
                             disabled={isUpdatingPayout}
                           >
                             Hoàn tác trạng thái về Chưa hoàn
@@ -2701,39 +2883,45 @@ const Matches = () => {
                       )}
                     </div>
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsPayoutModalOpen(false)}>
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsPayoutModalOpen(false)}
+                      >
                         Đóng
                       </Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
-                {hasFeature(groupId, group, "ratings") && (<Card className="shadow-card mb-6">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <div>
-                      <CardTitle className="text-sm font-medium">
-                        Công khai đánh giá
-                      </CardTitle>
-                      <CardDescription className="text-xs mt-1">
-                        Cho phép hiển thị MVP và điểm đánh giá trên trang public
-                      </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Label
-                        htmlFor="ratings-published-toggle"
-                        className="text-sm font-normal cursor-pointer"
-                      >
-                        {selectedMatch?.ratingsPublished
-                          ? "Đã công khai"
-                          : "Đang ẩn"}
-                      </Label>
-                      <Switch
-                        id="ratings-published-toggle"
-                        checked={selectedMatch?.ratingsPublished || false}
-                        onCheckedChange={handleToggleRatingsPublished}
-                      />
-                    </div>
-                  </CardHeader>
-                </Card>)}
+                {hasFeature(groupId, group, "ratings") && (
+                  <Card className="shadow-card mb-6">
+                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                      <div>
+                        <CardTitle className="text-sm font-medium">
+                          Công khai đánh giá
+                        </CardTitle>
+                        <CardDescription className="text-xs mt-1">
+                          Cho phép hiển thị MVP và điểm đánh giá trên trang
+                          public
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Label
+                          htmlFor="ratings-published-toggle"
+                          className="text-sm font-normal cursor-pointer"
+                        >
+                          {selectedMatch?.ratingsPublished
+                            ? "Đã công khai"
+                            : "Đang ẩn"}
+                        </Label>
+                        <Switch
+                          id="ratings-published-toggle"
+                          checked={selectedMatch?.ratingsPublished || false}
+                          onCheckedChange={handleToggleRatingsPublished}
+                        />
+                      </div>
+                    </CardHeader>
+                  </Card>
+                )}
                 <Card className="shadow-card">
                   <CardHeader>
                     <CardTitle>Chi tiết</CardTitle>
@@ -2800,15 +2988,19 @@ const Matches = () => {
                                   <div className="font-semibold">
                                     {share.amount.toLocaleString()} VND
                                   </div>
-                                  {share.expenseBreakdown && share.expenseBreakdown.length > 0 && (
-                                    <div className="text-xs text-muted-foreground">
-                                      {share.expenseBreakdown.map((exp, idx) => (
-                                        <div key={idx}>
-                                          {exp.description}: {exp.amount.toLocaleString()}đ
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
+                                  {share.expenseBreakdown &&
+                                    share.expenseBreakdown.length > 0 && (
+                                      <div className="text-xs text-muted-foreground">
+                                        {share.expenseBreakdown.map(
+                                          (exp, idx) => (
+                                            <div key={idx}>
+                                              {exp.description}:{" "}
+                                              {exp.amount.toLocaleString()}đ
+                                            </div>
+                                          ),
+                                        )}
+                                      </div>
+                                    )}
                                 </div>
                               </TableCell>
                               <TableCell>
