@@ -22,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Users, Trash2, Shield, Loader2, UserPlus, X, Pencil, CreditCard, Copy, ExternalLink, QrCode, CheckCircle2, ArrowRight } from "lucide-react";
 
 type Group = {
@@ -40,6 +41,7 @@ type CoManager = {
   email: string;
   displayName?: string;
   role: string;
+  isOwner?: boolean;
 };
 
 function slugifyName(text: string) {
@@ -498,62 +500,85 @@ const Groups = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleAddCoManager} className="space-y-3 pt-2">
-            <Label htmlFor="manager-email">Thêm đồng quản lý (Email tài khoản)</Label>
+          {/* Thông tin Chủ nhóm (Owner) */}
+          <div className="p-3.5 rounded-lg border bg-amber-500/10 border-amber-500/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 font-semibold text-sm text-foreground">
+                  <span className="text-base">👑</span>
+                  <span>{selectedGroupForManagers?.ownerDisplayName || coManagers.find((m) => m.isOwner)?.displayName || "Chủ nhóm"}</span>
+                  <Badge variant="outline" className="text-xs border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10 font-medium">
+                    Chủ nhóm (Owner)
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {selectedGroupForManagers?.ownerEmail || coManagers.find((m) => m.isOwner)?.email || "Chưa có email"}
+                </p>
+              </div>
+              <span className="text-xs text-muted-foreground italic">Người tạo nhóm</span>
+            </div>
+          </div>
+
+          <form onSubmit={handleAddCoManager} className="space-y-2.5 pt-2">
+            <Label htmlFor="manager-email">Thêm đồng quản lý mới</Label>
             <div className="flex gap-2">
               <Input
                 id="manager-email"
                 type="email"
-                placeholder="user@example.com"
+                placeholder="Nhập email tài khoản cần thêm..."
                 value={newManagerEmail}
                 onChange={(e) => setNewManagerEmail(e.target.value)}
                 required
               />
-              <Select value={newManagerRole} onValueChange={(val: "manager" | "admin") => setNewManagerRole(val)}>
-                <SelectTrigger className="w-[120px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="manager">Quản lý</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button type="submit" disabled={addingManager || !newManagerEmail.trim()}>
-                {addingManager ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+              <Button type="submit" disabled={addingManager || !newManagerEmail.trim()} className="gap-1.5 shrink-0">
+                {addingManager ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <UserPlus className="h-4 w-4" />
+                    <span>Thêm</span>
+                  </>
+                )}
               </Button>
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              Đồng quản lý có toàn quyền tạo trận, chốt danh sách và điểm danh trận đấu cùng chủ nhóm.
+            </p>
           </form>
 
-          <div className="border-t pt-3 mt-2">
+          <div className="border-t pt-3 mt-1">
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-              Danh sách quản lý hiện tại
+              Danh sách Đồng quản lý ({coManagers.filter((m) => !m.isOwner && m.uid !== selectedGroupForManagers?.ownerUid).length})
             </h4>
             {loadingManagers ? (
               <div className="flex justify-center p-4">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
-            ) : coManagers.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-3">Chưa có đồng quản lý nào.</p>
+            ) : coManagers.filter((m) => !m.isOwner && m.uid !== selectedGroupForManagers?.ownerUid).length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-3 bg-muted/30 rounded-md">
+                Chưa có đồng quản lý nào.
+              </p>
             ) : (
               <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                {coManagers.map((m) => (
-                  <div key={m.uid} className="flex items-center justify-between p-2 rounded-md bg-muted/50 text-sm">
-                    <div>
-                      <p className="font-medium">{m.displayName || m.email}</p>
-                      <p className="text-xs text-muted-foreground">{m.email} · {m.role === "manager" ? "Quản lý" : "Admin"}</p>
-                    </div>
-                    {m.uid !== selectedGroupForManagers?.ownerUid && (
+                {coManagers
+                  .filter((m) => !m.isOwner && m.uid !== selectedGroupForManagers?.ownerUid)
+                  .map((m) => (
+                    <div key={m.uid} className="flex items-center justify-between p-2.5 rounded-md bg-muted/50 text-sm">
+                      <div>
+                        <p className="font-medium text-foreground">{m.displayName || m.email}</p>
+                        <p className="text-xs text-muted-foreground">{m.email} · Đồng quản lý</p>
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7 text-muted-foreground hover:text-destructive"
                         onClick={() => handleRemoveCoManager(m.uid)}
+                        title="Gỡ quyền đồng quản lý"
                       >
                         <X className="h-4 w-4" />
                       </Button>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  ))}
               </div>
             )}
           </div>

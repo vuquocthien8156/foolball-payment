@@ -21,8 +21,9 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     res.json(accounts);
   }));
   router.post("/accounts", requireOwner, wrap(async (req, res) => {
-    const { email, displayName, password } = req.body;
+    const { email, displayName, password, role } = req.body;
     if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !validName(displayName) || !validPassword(password)) return res.status(400).json({ error: "INVALID_ACCOUNT" });
+    const accountRole = role === "owner" ? "owner" : "user";
     let user;
     try { user = await auth.createUser({ email, displayName: displayName.trim(), password }); }
     catch (error) {
@@ -30,21 +31,26 @@ function createPlatformRouter({ db, auth, FieldValue }) {
       return res.status(500).json({ error: "PROVISION_FAILED" });
     }
     try {
-      await db.collection("platformAccounts").doc(user.uid).set({ email, displayName: displayName.trim(), role: "user", status: "active", createdBy: req.uid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+      await db.collection("platformAccounts").doc(user.uid).set({ email, displayName: displayName.trim(), role: accountRole, status: "active", createdBy: req.uid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
     } catch {
       try { await auth.deleteUser(user.uid); } catch { console.error("Account provisioning rollback failed"); }
       return res.status(500).json({ error: "PROVISION_FAILED" });
     }
-    res.status(201).json({ uid: user.uid, email });
+    res.status(201).json({ uid: user.uid, email, role: accountRole });
   }));
   router.patch("/accounts/:uid", requireOwner, wrap(async (req, res) => {
     const ref = db.collection("platformAccounts").doc(req.params.uid);
     const snapshot = await ref.get();
     if (!snapshot.exists) return res.status(404).json({ error: "NOT_FOUND" });
     if ((snapshot.data().role === "owner" && req.params.uid !== req.uid) || (req.params.uid === req.uid && req.body.status !== undefined)) return res.status(409).json({ error: "CANNOT_CHANGE_OWNER" });
-    const { status, displayName } = req.body;
-    if ((status !== undefined && !["active", "disabled"].includes(status)) || (displayName !== undefined && !validName(displayName))) return res.status(400).json({ error: "INVALID_ACCOUNT" });
-    await ref.update({ ...(status !== undefined ? { status } : {}), ...(displayName !== undefined ? { displayName: displayName.trim() } : {}), updatedAt: FieldValue.serverTimestamp() });
+    const { status, displayName, role } = req.body;
+    if ((status !== undefined && !["active", "disabled"].includes(status)) || (displayName !== undefined && !validName(displayName)) || (role !== undefined && !["user", "owner"].includes(role))) return res.status(400).json({ error: "INVALID_ACCOUNT" });
+    await ref.update({
+      ...(status !== undefined ? { status } : {}),
+      ...(displayName !== undefined ? { displayName: displayName.trim() } : {}),
+      ...(role !== undefined ? { role } : {}),
+      updatedAt: FieldValue.serverTimestamp()
+    });
     if (status === "disabled") await auth.revokeRefreshTokens(req.params.uid);
     res.json({ uid: req.params.uid });
   }));
@@ -162,6 +168,8 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         transaction.set(db.collection("groupMembers").doc(`${rawSlug}_${req.uid}`), {
           groupId: rawSlug,
           uid: req.uid,
+          email: req.email || "",
+          displayName: req.platform.displayName || req.email || "",
           role: "manager",
           tabs: [],
           ...timestamps,
@@ -191,6 +199,8 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         transaction.set(db.collection("groupMembers").doc(`${gid}_${req.uid}`), {
           groupId: gid,
           uid: req.uid,
+          email: req.email || "",
+          displayName: req.platform.displayName || req.email || "",
           role: "manager",
           tabs: [],
           ...timestamps,
@@ -234,9 +244,51 @@ function createPlatformRouter({ db, auth, FieldValue }) {
   }));
 
   router.get("/groups/:groupId/co-managers", requirePlatform, requireGroupRole({ manager: true }), wrap(async (req, res) => {
+    const groupSnap = await db.collection("groups").doc(req.params.groupId).get();
+    const groupData = groupSnap.exists ? groupSnap.data() : {};
+    const ownerUid = groupData.ownerUid || groupData.createdBy;
+
     const snap = await db.collection("groupMembers").where("groupId", "==", req.params.groupId).get();
     const members = snap.docs.map((d) => d.data());
-    res.json(members);
+
+    const uids = new Set(members.map((m) => m.uid).filter(Boolean));
+    if (ownerUid) uids.add(ownerUid);
+
+    const accountsMap = new Map();
+    if (uids.size > 0) {
+      const accDocs = await Promise.all(
+        Array.from(uids).map((uid) => db.collection("platformAccounts").doc(uid).get())
+      );
+      accDocs.forEach((doc) => {
+        if (doc.exists) accountsMap.set(doc.id, doc.data());
+      });
+    }
+
+    const enrichedMembers = members.map((m) => {
+      const acc = accountsMap.get(m.uid) || {};
+      const isOwner = m.uid === ownerUid;
+      return {
+        ...m,
+        displayName: m.displayName || acc.displayName || (isOwner ? groupData.ownerDisplayName : "") || acc.email || "",
+        email: m.email || acc.email || (isOwner ? groupData.ownerEmail : "") || "",
+        isOwner,
+      };
+    });
+
+    if (ownerUid && !enrichedMembers.some((m) => m.uid === ownerUid)) {
+      const ownerAcc = accountsMap.get(ownerUid) || {};
+      enrichedMembers.unshift({
+        groupId: req.params.groupId,
+        uid: ownerUid,
+        email: groupData.ownerEmail || ownerAcc.email || "",
+        displayName: groupData.ownerDisplayName || ownerAcc.displayName || ownerAcc.email || "Chủ nhóm",
+        role: "owner",
+        isOwner: true,
+        tabs: ["*"],
+      });
+    }
+
+    res.json(enrichedMembers);
   }));
 
   router.post("/groups/:groupId/co-managers", requirePlatform, requireGroupRole({ manager: true }), wrap(async (req, res) => {
