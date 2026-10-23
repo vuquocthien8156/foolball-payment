@@ -9,12 +9,20 @@ const { FieldValue, Timestamp, FieldPath } = require("firebase-admin/firestore")
 const axios = require("axios");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { defineSecret } = require("firebase-functions/params");
 const slack = require("./lib/slack");
 const cfg = require("./lib/slackConfig");
 const { isMuted } = require("./lib/mute");
 const { createPlatformRouter } = require("./lib/platformRoutes");
 const { createGroupRouter } = require("./lib/groupRoutes");
 const { createPublicRouter } = require("./lib/publicRoutes");
+const { createBillRouter } = require("./lib/billRoutes");
+const { runScheduledBills } = require("./lib/scheduledBills");
+const { createTelegramRouter } = require("./lib/telegramRoutes");
+const { createTelegramClient } = require("./lib/telegram");
+const { deliverBillNotifications } = require("./lib/billNotifications");
+const telegramBotToken = defineSecret("TELEGRAM_BOT_TOKEN");
+const telegramWebhookSecret = defineSecret("TELEGRAM_WEBHOOK_SECRET");
 const { createAuthMiddleware, resolveGroupRole } = require("./lib/auth");
 const { createGroupTargets } = require("./lib/groupTargets");
 const { DEFAULT_GROUP_ID, groupIdOf, isValidGroupId, publicUrlFor } = require("./lib/groups");
@@ -1280,6 +1288,8 @@ apiRoutes.post("/slack/interactions", (req, res) => {
 apiRoutes.use("/public", createPublicRouter({ db: admin.firestore(), FieldValue, Timestamp,
   onMemberAction: (params) => recordMemberAction({ db: admin.firestore(), ...params }),
 }));
+apiRoutes.use("/groups", createBillRouter({ db: admin.firestore(), auth: admin.auth(), FieldValue }));
+apiRoutes.use(createTelegramRouter({ db: admin.firestore(), auth: admin.auth(), FieldValue }));
 apiRoutes.use("/groups", createGroupRouter({ db: admin.firestore(), auth: admin.auth(), FieldValue, slack }));
 apiRoutes.use("/platform", createPlatformRouter({ db: admin.firestore(), auth: admin.auth(), FieldValue }));
 
@@ -1292,7 +1302,24 @@ app.use("/api", apiRoutes);
 // });
 
 // Export the Express API as a Cloud Function
-exports.api = onRequest({ invoker: "public" }, app);
+exports.api = onRequest({ invoker: "public", secrets: [telegramBotToken, telegramWebhookSecret] }, app);
+
+exports.generateMonthlyBills = onSchedule(
+  { schedule: "0 * * * *", timeZone: "Asia/Ho_Chi_Minh" },
+  async () => {
+    const results = await runScheduledBills({ db: admin.firestore(), FieldValue });
+    console.log("Monthly bills", { processed: results.length, failed: results.filter((item) => !item.ok).length });
+  },
+);
+
+exports.sendBillReminders = onSchedule(
+  { schedule: "* * * * *", timeZone: "Asia/Ho_Chi_Minh", secrets: [telegramBotToken] },
+  async () => {
+    const result = await deliverBillNotifications({ db: admin.firestore(), FieldValue,
+      telegram: createTelegramClient(), slack, muted: isMuted() });
+    console.log("Bill reminders", result);
+  },
+);
 
 // =====================================================
 // SCHEDULED CRON JOBS

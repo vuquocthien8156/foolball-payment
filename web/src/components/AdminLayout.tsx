@@ -27,6 +27,7 @@ import { getAuth, signOut } from "firebase/auth";
 import { toast } from "@/hooks/use-toast";
 import { useGroup, useGroupPath } from "@/contexts/GroupContext";
 import { hasFeature } from "@/lib/features";
+import { groupKindOf } from "@/lib/groups";
 import { useGroupRole } from "@/hooks/useGroupRole";
 import { usePlatformAccount } from "@/hooks/usePlatformAccount";
 
@@ -35,6 +36,7 @@ const AdminLayout = () => {
   const { pathname } = useLocation();
   const isMatchesPage = pathname === groupPath("admin/matches");
   const { groupId, group, loading: groupLoading } = useGroup();
+  const sharedBills = groupKindOf(group) === "shared_bills";
   const { user } = useAuth();
   const { role, isManager: isSuperAdmin, tabs, loading: rolesLoading } = useGroupRole(groupId);
   const { account } = usePlatformAccount();
@@ -73,6 +75,7 @@ const AdminLayout = () => {
 
     const currentPath = window.location.pathname;
     if (currentPath === groupPath("admin") || currentPath === groupPath("admin/")) {
+      if (sharedBills) { if (isSuperAdmin) navigate(groupPath("admin/bills"), { replace: true }); return; }
       const tabRoutes = [
         { key: "matches", path: groupPath("admin/matches") },
         { key: "members", path: groupPath("admin/members") },
@@ -91,7 +94,7 @@ const AdminLayout = () => {
         navigate(firstAvailableTab.path, { replace: true });
       }
     }
-  }, [rolesLoading, isSuperAdmin, allowedTabs, navigate, groupPath, groupLoading, groupId, group]);
+  }, [rolesLoading, isSuperAdmin, allowedTabs, navigate, groupPath, groupLoading, groupId, group, sharedBills]);
 
   return (
     <div
@@ -153,7 +156,11 @@ const AdminLayout = () => {
                 </NavLink>
               )} */}
               {account && <NavLink to="/platform" className="text-sm underline">Nền tảng</NavLink>}
-              {(isSuperAdmin || allowedTabs.has("matches")) && (
+              {sharedBills && isSuperAdmin ? <>
+                <NavLink to={groupPath("admin/bills")} className="rounded-md px-3 py-2">Khoản thu</NavLink>
+                <NavLink to={groupPath("admin/bill-history")} className="rounded-md px-3 py-2">Lịch sử</NavLink>
+              </> : null}
+              {!sharedBills && (isSuperAdmin || allowedTabs.has("matches")) && (
                 <>
                   <NavLink
                     to={groupPath("admin/matches")}
@@ -211,7 +218,7 @@ const AdminLayout = () => {
                   Ghi chú live
                 </NavLink>
               ) : null}
-              {isSuperAdmin || allowedTabs.has("public") ? (
+              {!sharedBills && (isSuperAdmin || allowedTabs.has("public")) ? (
                 <NavLink
                   to={groupPath("public")}
                   onClick={() => setIsSidebarOpen(false)}
@@ -276,7 +283,7 @@ const AdminLayout = () => {
             <div className="text-sm text-muted-foreground">
               {rolesLoading
                 ? "Đang tải vai trò..."
-                : `Role: ${role === "owner" ? "Owner" : isSuperAdmin ? "Manager" : "Admin"}`}
+                : `Vai trò: ${role === "owner" ? "Chủ nhóm" : isSuperAdmin ? "Quản lý" : "Quản trị viên"}`}
             </div>
           </div>
         </header>

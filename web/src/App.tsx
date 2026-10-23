@@ -11,7 +11,7 @@ import { usePlatformAccount } from "./hooks/usePlatformAccount";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { GroupProvider, useGroup, useGroupPath } from "./contexts/GroupContext";
-import { DEFAULT_GROUP_ID, groupPath, resolveLegacyRedirect } from "./lib/groups";
+import { DEFAULT_GROUP_ID, groupPath, resolveLegacyRedirect, groupKindOf } from "./lib/groups";
 import { FeatureKey, hasFeature } from "./lib/features";
 
 // Lazy load components
@@ -35,6 +35,11 @@ const Config = React.lazy(() => import("./pages/Config"));
 const Groups = React.lazy(() => import("./pages/Groups"));
 const PlatformLogin = React.lazy(() => import("./pages/PlatformLogin"));
 const PlatformAccounts = React.lazy(() => import("./pages/PlatformAccounts"));
+const Bills = React.lazy(() => import("./pages/Bills"));
+const BillDetails = React.lazy(() => import("./pages/BillDetails"));
+const BillHistory = React.lazy(() => import("./pages/BillHistory"));
+const Subscriptions = React.lazy(() => import("./pages/Subscriptions"));
+const SharedBillMembers = React.lazy(() => import("./pages/SharedBillMembers"));
 
 const queryClient = new QueryClient();
 
@@ -60,14 +65,14 @@ export const PlatformRoute = ({ ownerOnly = false, children }: { ownerOnly?: boo
 const AdminProtectedRoute = ({ children }: { children: JSX.Element }) => {
   const groupPath = useGroupPath();
   const { user } = useAuth();
-  const { groupId } = useGroup();
+  const { groupId, group } = useGroup();
   const { role, loading } = useGroupRole(groupId);
 
   if (!user) return <Navigate to="/platform/login" replace />;
   if (loading) return <LoadingSplash />;
 
   const canAccess = role !== null;
-  if (!canAccess) return <Navigate to={groupPath("public")} replace />;
+  if (!canAccess) return <Navigate to={groupKindOf(group) === "shared_bills" ? "/platform" : groupPath("public")} replace />;
   return children;
 };
 
@@ -79,9 +84,10 @@ const TabGuard = ({
   children: JSX.Element;
 }) => {
   const groupPath = useGroupPath();
-  const { groupId } = useGroup();
+  const { groupId, group } = useGroup();
   const { isManager, tabs, loading } = useGroupRole(groupId);
   if (loading) return <LoadingSplash />;
+  if (groupKindOf(group) === "shared_bills" && ["matches", "scoring", "live"].includes(tabKey)) return <NotFound />;
   const allowed = isManager || tabs.includes(tabKey);
   return allowed ? children : <Navigate to={groupPath("admin")} replace />;
 };
@@ -91,6 +97,7 @@ const AdminHomeRedirect = () => {
   const { groupId, group, loading: groupLoading } = useGroup();
   const { isManager, tabs, loading } = useGroupRole(groupId);
   if (loading || groupLoading) return <LoadingSplash />;
+  if (groupKindOf(group) === "shared_bills") return <Navigate to={isManager ? groupPath("admin/bills") : "/platform"} replace />;
   if (isManager) return <Navigate to={groupPath("admin/matches")} replace />;
   const order = ["scoring", "live", "matches", "members"];
   const target = order.find((t) => tabs.includes(t) &&
@@ -115,6 +122,25 @@ export const RequireFeature = ({ feature, children }: { feature: FeatureKey; chi
   const { groupId, group, loading } = useGroup();
   if (loading) return <LoadingSplash />;
   return hasFeature(groupId, group, feature) ? children : <NotFound />;
+};
+
+export const SharedBillRoute = ({ children }: { children: JSX.Element }): JSX.Element => {
+  const { groupId, group, loading } = useGroup();
+  const { isManager, loading: roleLoading } = useGroupRole(groupId);
+  if (loading || roleLoading) return <LoadingSplash />;
+  return groupKindOf(group) === "shared_bills" && isManager ? children : <NotFound />;
+};
+
+const GroupMembersPage = (): JSX.Element => {
+  const { group } = useGroup();
+  return groupKindOf(group) === "shared_bills" ? <SharedBillRoute><SharedBillMembers /></SharedBillRoute> : <Members />;
+};
+
+const PublicGroupOutlet = (): JSX.Element => {
+  const { group, loading } = useGroup();
+  const groupPath = useGroupPath();
+  if (loading) return <LoadingSplash />;
+  return groupKindOf(group) === "shared_bills" ? <Navigate to={groupPath("admin")} replace /> : <Outlet />;
 };
 
 const App = () => {
@@ -145,7 +171,7 @@ const App = () => {
                   element={<Login />}
                 />
                 {/* Public Routes under /public */}
-                <Route path="public">
+                <Route path="public" element={<PublicGroupOutlet />}>
                   <Route index element={<PublicPortal />} />
                   <Route path="pay" element={<Pay />} />
                   <Route path="payment-success" element={<PaymentSuccess />} />
@@ -195,10 +221,14 @@ const App = () => {
                     path="members"
                     element={
                       <TabGuard tabKey="members">
-                        <Members />
+                        <GroupMembersPage />
                       </TabGuard>
                     }
                   />
+                  <Route path="bills" element={<SharedBillRoute><Bills /></SharedBillRoute>} />
+                  <Route path="bills/:billId" element={<SharedBillRoute><BillDetails /></SharedBillRoute>} />
+                  <Route path="subscriptions" element={<SharedBillRoute><Subscriptions /></SharedBillRoute>} />
+                  <Route path="bill-history" element={<SharedBillRoute><BillHistory /></SharedBillRoute>} />
                   <Route
                     path="matches"
                     element={

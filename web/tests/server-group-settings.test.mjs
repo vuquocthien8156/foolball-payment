@@ -71,6 +71,7 @@ test("Config shows group Slack settings while passcode remains Football-only", (
   for (const gid of ["football-zigvy", "badm-1"]) {
     const fake = createFakeFirestore();
     const host = mountPage("Config", {}, {
+      "@/lib/groups": groups, "react-router-dom": { Link: "Link" },
       "@/lib/firebase": { db: fake.db }, "firebase/firestore": fake.firestore,
       "@/contexts/GroupContext": { useGroup: () => ({ groupId: gid, group: { sport: gid === "football-zigvy" ? "football" : "badminton" } }) },
       "@/lib/features": loadSource("../src/lib/features.ts", { "@/lib/groups": groups }).exports,

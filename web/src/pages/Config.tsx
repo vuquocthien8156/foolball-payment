@@ -1,4 +1,7 @@
 import { apiRequest } from "@/lib/api";
+import { groupKindOf } from "@/lib/groups";
+import { TelegramSettings } from "@/components/settings/TelegramSettings";
+import { Link } from "react-router-dom";
 import { hasFeature } from "@/lib/features";
 import { useGroup } from "@/contexts/GroupContext";
 import { useState, useEffect } from "react";
@@ -55,6 +58,7 @@ const generateRandom = () =>
 
 const Config = () => {
   const { groupId, group } = useGroup();
+  const sharedBills = groupKindOf(group) === "shared_bills";
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -70,32 +74,45 @@ const Config = () => {
   const [botConfigured, setBotConfigured] = useState(false);
   const [slackLoading, setSlackLoading] = useState(true);
   const [slackBusy, setSlackBusy] = useState(false);
+  const [slackError, setSlackError] = useState("");
+  const [slackTestStatus, setSlackTestStatus] = useState("");
+  const [savedSlack, setSavedSlack] = useState<string | null>(null);
+  const [savedPayout, setSavedPayout] = useState<string | null>(null);
+  const [payoutError, setPayoutError] = useState("");
   useEffect(() => {
     let cancelled = false;
     setSlackLoading(true);
     apiRequest("GET", `/groups/${groupId}/settings`).then((data) => {
       if (cancelled) return;
       setChannelId(data.channelId || ""); setChannelLabel(data.channelLabel || ""); setBotConfigured(data.botConfigured);
+      setSavedSlack(JSON.stringify([data.channelId || "", data.channelLabel || ""]));
+      setSlackError(data.lastError ? "Lần gửi thử Slack trước chưa thành công." : "");
+      setSlackTestStatus(data.lastTestAt ? `Lần gửi thử gần nhất: ${new Date(data.lastTestAt.seconds * 1000).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}` : "Chưa gửi thử.");
     }).catch(() => { if (!cancelled) toast({ variant: "destructive", title: "Không thể tải cấu hình Slack" }); })
       .finally(() => { if (!cancelled) setSlackLoading(false); });
     return () => { cancelled = true; };
-  }, [groupId, toast]);
+  }, [groupId, toast, sharedBills]);
   const handleSlackSave = async () => {
     setSlackBusy(true);
+    setSlackError("");
     try {
       await apiRequest("PUT", `/groups/${groupId}/settings`, { channelId, channelLabel });
       setChannelId(channelId.trim().toUpperCase()); toast({ title: "Đã lưu cấu hình Slack" });
-    } catch { toast({ variant: "destructive", title: "Không thể lưu cấu hình Slack", description: "Kiểm tra lại Channel ID." }); }
+      setSavedSlack(JSON.stringify([channelId.trim().toUpperCase(), channelLabel.trim()])); setChannelLabel(channelLabel.trim()); setSlackTestStatus("Đã lưu nơi nhận. Hãy gửi thử.");
+    } catch { setSlackError("Không thể lưu Slack. Hãy kiểm tra mã kênh."); toast({ variant: "destructive", title: "Không thể lưu cấu hình Slack", description: "Kiểm tra lại Channel ID." }); }
     finally { setSlackBusy(false); }
   };
   const handleSlackTest = async () => {
     setSlackBusy(true);
+    setSlackError("");
     try {
       const result = await apiRequest("POST", `/groups/${groupId}/settings/slack-test`);
       toast({ title: result.muted ? "Chế độ test: không gửi thật lên Slack." : "Đã gửi tin nhắn thử" });
+      setSlackTestStatus(result.muted ? "Chế độ thử nghiệm: không gửi tin thật." : `Đã gửi thử: ${new Date().toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" })}`);
     } catch (error) {
       const code = error instanceof Error ? error.message : "";
       const description = code === "SLACK_NOT_IN_CHANNEL" ? "Bot chưa ở trong channel. Hãy /invite bot vào channel." : code === "SLACK_CHANNEL_NOT_FOUND" ? "Không tìm thấy channel. Kiểm tra lại Channel ID. Nếu là private channel, hãy /invite bot vào channel." : "Gửi thử thất bại.";
+      setSlackError(description);
       toast({ variant: "destructive", title: "Không thể gửi thử", description });
     } finally {
       setSlackBusy(false);
@@ -132,10 +149,12 @@ const Config = () => {
         setAccountNumber(data.accountNumber || "");
         setAccountHolder(data.accountHolder || "");
         setQrCodeUrl(data.qrCodeUrl || "");
+        setSavedPayout(JSON.stringify([data.bankBin || "", data.bankName || "", data.accountNumber || "", data.accountHolder || "", data.qrCodeUrl || ""]));
       })
       .catch(() => { if (!cancelled) toast({ variant: "destructive", title: "Không thể tải cấu hình nhận hoàn tiền" }); })
       .finally(() => { if (!cancelled) setPayoutLoading(false); });
 
+    if (sharedBills) { setScheduleLoading(false); return () => { cancelled = true; }; }
     setScheduleLoading(true);
     Promise.all([
       apiRequest("GET", `/groups/${groupId}/settings/schedule`),
@@ -157,10 +176,11 @@ const Config = () => {
       .finally(() => { if (!cancelled) setScheduleLoading(false); });
 
     return () => { cancelled = true; };
-  }, [groupId, toast]);
+  }, [groupId, toast, sharedBills]);
 
   const handlePayoutSave = async () => {
     setPayoutSaving(true);
+    setPayoutError("");
     try {
       await apiRequest("PUT", `/groups/${groupId}/settings/payout`, {
         bankBin,
@@ -170,7 +190,9 @@ const Config = () => {
         qrCodeUrl,
       });
       toast({ title: "Đã lưu thông tin nhận hoàn tiền" });
+      setSavedPayout(JSON.stringify([bankBin, bankName, accountNumber, accountHolder, qrCodeUrl]));
     } catch {
+      setPayoutError("Không thể lưu thông tin ngân hàng. Vui lòng thử lại.");
       toast({ variant: "destructive", title: "Lỗi lưu thông tin nhận hoàn tiền" });
     } finally {
       setPayoutSaving(false);
@@ -273,6 +295,14 @@ const Config = () => {
     });
   };
 
+  const slackDirty = savedSlack !== null && savedSlack !== JSON.stringify([channelId, channelLabel]);
+  const payoutDirty = savedPayout !== null && savedPayout !== JSON.stringify([bankBin, bankName, accountNumber, accountHolder, qrCodeUrl]);
+  useEffect(() => {
+    if ((!slackDirty && !payoutDirty) || typeof window === "undefined") return;
+    const warn = (event: BeforeUnloadEvent): void => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
+  }, [slackDirty, payoutDirty]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
       <div className="container mx-auto px-4 py-8 max-w-2xl">
@@ -286,25 +316,20 @@ const Config = () => {
           </div>
         </div>
 
-        <Card className="shadow-card mb-6">
-          <CardHeader><CardTitle>Thông báo Slack</CardTitle><CardDescription>Mở channel → bấm tên channel → tab About → copy Channel ID (dạng C0123ABCD). Trong channel gõ /invite @&lt;tên bot&gt;. Để trống = không gửi Slack.</CardDescription></CardHeader>
-          <CardContent className="space-y-4">
-            {!botConfigured && <p role="status">Slack bot chưa được cấu hình trên server.</p>}
-            <div><Label htmlFor="slack-channel">Channel ID</Label><Input id="slack-channel" value={channelId} onChange={(event) => setChannelId(event.target.value)} disabled={slackLoading || slackBusy} /></div>
-            <div><Label htmlFor="slack-label">Tên hiển thị</Label><Input id="slack-label" value={channelLabel} onChange={(event) => setChannelLabel(event.target.value)} disabled={slackLoading || slackBusy} /></div>
-            <div className="flex gap-2"><Button onClick={handleSlackSave} disabled={slackLoading || slackBusy}>Lưu</Button><Button variant="outline" onClick={handleSlackTest} disabled={slackLoading || slackBusy || !botConfigured}>Gửi thử</Button></div>
-          </CardContent>
-        </Card>
-
+        <nav aria-label="Các mục cấu hình" className="mb-6 flex flex-wrap gap-3 text-sm underline"><a href="#general">Thông tin chung</a><a href="#billing">Thu tiền</a><a href="#integrations">Tích hợp</a><a href="#automation">Tự động hóa</a>{hasFeature(groupId, group, "teamPropose") ? <a href="#advanced">Nâng cao</a> : null}</nav>
+        <section id="general" className="mb-6 scroll-mt-20 rounded-lg border bg-background p-5"><h2 className="text-lg font-semibold">Thông tin chung</h2><p>{group?.name}</p><p className="text-sm text-muted-foreground">{sharedBills ? "Chia tiền và thu định kỳ" : "Nhóm thể thao"} · Giờ Việt Nam (UTC+7)</p></section>
+        <section id="billing" className="scroll-mt-20"><h2 className="mb-3 text-lg font-semibold">Thu tiền và tài khoản nhận</h2>
+        {payoutError ? <p role="alert" className="mb-3 text-sm text-destructive">{payoutError}</p> : null}
+        {payoutDirty ? <p role="status" className="mb-3 text-xs">Có thay đổi thông tin ngân hàng chưa lưu</p> : null}
         {/* Payout Recipient Card */}
         <Card className="shadow-card mb-6">
           <CardHeader>
             <div className="flex items-center gap-2">
               <CreditCard className="h-5 w-5 text-primary" />
-              <CardTitle>Thông tin nhận hoàn tiền ứng sân (VietQR / Ngân hàng)</CardTitle>
+              <CardTitle>{sharedBills ? "Tài khoản nhận tiền chia sẻ" : "Thông tin nhận hoàn tiền ứng sân (VietQR / Ngân hàng)"}</CardTitle>
             </div>
             <CardDescription>
-              Cấu hình tài khoản ngân hàng của người đứng ra ứng tiền sân cho nhóm. Dùng để tạo mã VietQR chuyển khoản hoàn tiền nhanh.
+              {sharedBills ? "Lưu tài khoản của người ứng tiền thanh toán dịch vụ. Xác nhận các khoản chuyển đến trong từng khoản thu." : "Cấu hình tài khoản ngân hàng của người đứng ra ứng tiền sân cho nhóm. Dùng để tạo mã VietQR chuyển khoản hoàn tiền nhanh."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -412,8 +437,27 @@ const Config = () => {
           </CardContent>
         </Card>
 
-        {/* Automated Schedule Card */}
+        </section>
+        <section id="integrations" className="mb-6 scroll-mt-20 space-y-4"><div><h2 className="text-lg font-semibold">Tích hợp</h2><p className="text-sm text-muted-foreground">Kết nối nhóm chat để nhận thông báo. Lưu và gửi thử riêng cho từng kênh.</p></div>
         <Card className="shadow-card mb-6">
+          <CardHeader><CardTitle>Thông báo Slack</CardTitle><CardDescription>Mở channel → bấm tên channel → tab About → copy Channel ID (dạng C0123ABCD). Trong channel gõ /invite @&lt;tên bot&gt;. Để trống = không gửi Slack.</CardDescription></CardHeader>
+          <CardContent className="space-y-4">
+            {!botConfigured && <p role="status">Slack bot chưa được cấu hình trên server.</p>}
+            {slackError ? <p role="alert" className="text-sm text-destructive">{slackError}</p> : null}
+            <p className="text-xs text-muted-foreground">{channelId ? "Đã cấu hình nơi nhận" : "Chưa kết nối"} · {slackTestStatus}</p>
+            {slackDirty ? <p role="status" className="text-xs">Có thay đổi Slack chưa lưu. Hãy lưu trước khi gửi thử.</p> : null}
+            <div><Label htmlFor="slack-channel">Mã kênh (Channel ID)</Label><Input id="slack-channel" value={channelId} onChange={(event) => setChannelId(event.target.value)} disabled={slackLoading || slackBusy} /></div>
+            <div><Label htmlFor="slack-label">Tên hiển thị</Label><Input id="slack-label" value={channelLabel} onChange={(event) => setChannelLabel(event.target.value)} disabled={slackLoading || slackBusy} /></div>
+            <div className="flex gap-2"><Button onClick={handleSlackSave} disabled={slackLoading || slackBusy}>Lưu</Button><Button variant="outline" onClick={handleSlackTest} disabled={slackLoading || slackBusy || !botConfigured || slackDirty}>Gửi thử</Button></div>
+          </CardContent>
+        </Card>
+
+        <TelegramSettings groupId={groupId} />
+        </section>
+        <section id="automation" className="scroll-mt-20"><h2 className="mb-3 text-lg font-semibold">Tự động hóa</h2>
+        {sharedBills ? <Card className="mb-6"><CardHeader><CardTitle>Thu tiền hằng tháng và nhắc thanh toán</CardTitle><CardDescription>Mỗi khoản thu định kỳ có ngày thu, hạn thanh toán và giờ nhắc riêng. Hệ thống tự dừng nhắc khi đã thu đủ.</CardDescription></CardHeader><CardContent><Link className="text-sm underline" to={`/g/${groupId}/admin/subscriptions`}>Quản lý khoản thu định kỳ</Link></CardContent></Card> : null}
+        {/* Automated Schedule Card */}
+        {!sharedBills && <Card className="shadow-card mb-6">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -554,9 +598,10 @@ const Config = () => {
               </>
             )}
           </CardContent>
-        </Card>
+        </Card>}
 
-        {hasFeature(groupId, group, "teamPropose") && (<Card className="shadow-card">
+        </section>
+        {hasFeature(groupId, group, "teamPropose") && (<section id="advanced" className="scroll-mt-20"><h2 className="mb-3 text-lg font-semibold">Nâng cao</h2><Card className="shadow-card">
           <CardHeader>
             <CardTitle>Passcode gửi đội hình</CardTitle>
             <CardDescription>
@@ -680,7 +725,7 @@ const Config = () => {
               Lưu passcode mới
             </Button>
           </CardContent>
-        </Card>)}
+        </Card></section>)}
       </div>
     </div>
   );

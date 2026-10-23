@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { apiRequest } from "@/lib/api";
-import { GROUP_SPORTS, SPORT_LABELS, GroupSport, groupPath } from "@/lib/groups";
+import { GROUP_SPORTS, SPORT_LABELS, GroupSport, GroupKind, groupKindOf, groupPath } from "@/lib/groups";
 import { usePlatformAccount } from "@/hooks/usePlatformAccount";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,8 @@ import { Users, Trash2, Shield, Loader2, UserPlus, X, Pencil, CreditCard, Copy, 
 type Group = {
   id: string;
   name: string;
-  sport: GroupSport;
+  sport?: GroupSport;
+  kind?: GroupKind;
   status: string;
   role: string;
   ownerUid?: string | null;
@@ -69,6 +70,7 @@ const Groups = () => {
   const [slug, setSlug] = useState("");
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [sport, setSport] = useState<GroupSport | "">("");
+  const [kind, setKind] = useState<GroupKind>("sports");
   const [busy, setBusy] = useState(false);
 
   // Edit Group State
@@ -119,13 +121,13 @@ const Groups = () => {
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!sport || name.trim().length < 2) {
+    if ((kind === "sports" && !sport) || name.trim().length < 2) {
       toast({ variant: "destructive", title: "Nhập tên nhóm và chọn môn thể thao" });
       return;
     }
     setBusy(true);
     try {
-      const payload: Record<string, any> = { name: name.trim(), sport };
+      const payload: Record<string, unknown> = { name: name.trim(), kind, ...(kind === "sports" ? { sport } : {}) };
       if (slug.trim()) {
         payload.id = slug.trim().toLowerCase();
       }
@@ -207,16 +209,16 @@ const Groups = () => {
   const openEditGroup = (group: Group) => {
     setEditGroup(group);
     setEditName(group.name);
-    setEditSport(group.sport);
+    setEditSport(group.sport || "");
   };
 
   const handleSaveEditGroup = async () => {
-    if (!editGroup || !editName.trim() || !editSport) return;
+    if (!editGroup || !editName.trim() || (groupKindOf(editGroup) === "sports" && !editSport)) return;
     setSavingEdit(true);
     try {
       await apiRequest("PATCH", `/platform/groups/${editGroup.id}`, {
         name: editName.trim(),
-        sport: editSport,
+        ...(groupKindOf(editGroup) === "sports" ? { sport: editSport } : {}),
       });
       setGroups((prev) =>
         prev.map((g) =>
@@ -342,6 +344,7 @@ const Groups = () => {
             setSlug("");
             setSlugManuallyEdited(false);
             setSport("");
+            setKind("sports");
             setOpen(true);
           }}>
             Tạo nhóm mới
@@ -378,7 +381,7 @@ const Groups = () => {
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="break-words text-lg font-bold">{group.name}</CardTitle>
                     <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-xs font-medium">
-                      {SPORT_LABELS[group.sport] || SPORT_LABELS.other}
+                      {groupKindOf(group) === "shared_bills" ? "Chia tiền" : SPORT_LABELS[group.sport || "other"]}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground font-mono">/g/{group.id}</p>
@@ -484,7 +487,8 @@ const Groups = () => {
               </p>
             </div>
 
-            <div>
+            <div><Label htmlFor="group-kind">Loại nhóm</Label><Select value={kind} onValueChange={(value: GroupKind) => setKind(value)}><SelectTrigger id="group-kind"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="sports">Thể thao</SelectItem><SelectItem value="shared_bills">Chia tiền và thu định kỳ</SelectItem></SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">Chọn chia tiền cho Netflix, dịch vụ định kỳ và các chi phí dùng chung. Không thể đổi loại nhóm sau khi tạo.</p></div>
+            {kind === "sports" && <div>
               <Label htmlFor="group-sport">Môn thể thao</Label>
               <Select value={sport} onValueChange={(value: GroupSport) => setSport(value)} required>
                 <SelectTrigger id="group-sport">
@@ -498,13 +502,13 @@ const Groups = () => {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+            </div>}
 
             <DialogFooter className="pt-2">
               <Button variant="outline" type="button" onClick={() => setOpen(false)}>
                 Hủy
               </Button>
-              <Button disabled={busy || !sport || name.trim().length < 2} type="submit">
+              <Button disabled={busy || (kind === "sports" && !sport) || name.trim().length < 2} type="submit">
                 {busy ? "Đang tạo…" : "Tạo nhóm"}
               </Button>
             </DialogFooter>
@@ -631,7 +635,7 @@ const Groups = () => {
               />
             </div>
 
-            <div>
+            {groupKindOf(editGroup) === "sports" && <div>
               <Label htmlFor="edit-sport">Môn thể thao</Label>
               <Select value={editSport} onValueChange={(val: any) => setEditSport(val)}>
                 <SelectTrigger id="edit-sport">
@@ -645,7 +649,7 @@ const Groups = () => {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+            </div>}
 
             <div className="p-3 bg-muted/40 rounded-lg space-y-1.5 text-xs">
               <span className="font-semibold text-foreground">Đường dẫn nhóm (Path ID):</span>
@@ -678,7 +682,7 @@ const Groups = () => {
             <Button variant="outline" onClick={() => setEditGroup(null)} disabled={savingEdit}>
               Hủy
             </Button>
-            <Button onClick={handleSaveEditGroup} disabled={savingEdit || !editName.trim() || !editSport}>
+            <Button onClick={handleSaveEditGroup} disabled={savingEdit || !editName.trim() || (groupKindOf(editGroup) === "sports" && !editSport)}>
               {savingEdit ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
               Lưu thay đổi
             </Button>
