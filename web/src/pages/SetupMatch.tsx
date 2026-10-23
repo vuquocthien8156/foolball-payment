@@ -248,6 +248,7 @@ const SetupMatch = () => {
   const [existingStatus, setExistingStatus] = useState<
     "PENDING" | "COMPLETED" | "PUBLISHED" | undefined
   >("PENDING");
+  const [wasPublished, setWasPublished] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isTestMatch, setIsTestMatch] = useState(false);
   const [skipAutoAttendance, setSkipAutoAttendance] = useState(false);
@@ -308,6 +309,13 @@ const SetupMatch = () => {
           if ((configSource as any).status) {
             setExistingStatus((configSource as any).status);
           }
+          setWasPublished(
+            Boolean(
+              (configSource as any).wasPublished ||
+                (configSource as any).publishedAt ||
+                (configSource as any).status === "PUBLISHED"
+            )
+          );
           const attendanceCollectionRef = collection(
             db,
             "matches",
@@ -1187,6 +1195,8 @@ const SetupMatch = () => {
         })),
         status: nextStatus,
         updatedAt: serverTimestamp(),
+        ...(publish ? { wasPublished: true } : {}),
+        ...(publish && !wasPublished ? { publishedAt: serverTimestamp() } : {}),
       };
 
       if (matchId) {
@@ -1205,10 +1215,13 @@ const SetupMatch = () => {
       });
 
       await batch.commit();
-      if (publish && existingStatus !== "PUBLISHED") {
+      if (publish && !wasPublished && existingStatus !== "PUBLISHED") {
         void postApiJson("/notify/match-published", { matchId: matchRef.id, groupId }).catch((error) => {
           console.error("Failed to send match-published notification", error);
         });
+      }
+      if (publish) {
+        setWasPublished(true);
       }
       setExistingStatus(nextStatus);
       toast({ title: "Saved", description: publish ? "Match calculated and published. Members can now see their debts in Pay." : "Match calculated. Publish it when you are ready to collect payment." });

@@ -890,6 +890,12 @@ apiRoutes.post("/notify/match-published", triggerAuth.requireUser, requireTrigge
     const groupId = groupIdOf(match);
     if (req.body.groupId && req.body.groupId !== groupId) return res.status(409).json({ error: "MIXED_GROUP" });
 
+    // Anti-duplicate notification check: do not resend if already published previously
+    if (match.wasPublished || match.publishedAt) {
+      console.log(`[notify/match-published] Match ${matchId} was already published, skipping duplicate notifications.`);
+      return res.status(200).json({ success: true, skipped: true, reason: "ALREADY_PUBLISHED" });
+    }
+
     const sharesSnap = await db
       .collection("matches")
       .doc(matchId)
@@ -960,6 +966,11 @@ apiRoutes.post("/notify/match-published", triggerAuth.requireUser, requireTrigge
           .catch((e) => console.error("[slack] A6 failed", e));
       }
     }
+
+    await matchSnap.ref.update({
+      wasPublished: true,
+      publishedAt: FieldValue.serverTimestamp(),
+    });
 
     res.status(200).json({ success: true, ...pushResult });
   } catch (error) {

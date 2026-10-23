@@ -47,6 +47,9 @@ import {
   Check,
   ChevronsUpDown,
   MoreHorizontal,
+  Copy,
+  Link as LinkIcon,
+  ExternalLink,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -127,6 +130,8 @@ interface Match {
     exemptMemberIds: string[];
   }[];
   status: "PENDING" | "COMPLETED" | "PUBLISHED";
+  wasPublished?: boolean;
+  publishedAt?: Timestamp | string | null;
   isDeleted?: boolean;
   isTest?: boolean;
   ratingsPublished?: boolean;
@@ -294,28 +299,29 @@ const MatchListItem = ({
         )}
       </button>
       <div className="flex items-center flex-shrink-0">
-        {!isFullyPaid && match.status !== "PUBLISHED" && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  "rounded-full w-8 h-8",
-                  isSelected
-                    ? "hover:bg-primary-foreground/10 text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onEdit();
-                }}
-              >
-                <Pencil className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-          </Tooltip>
-        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "rounded-full w-8 h-8",
+                isSelected
+                  ? "hover:bg-primary-foreground/10 text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Sửa / Tính tiền</p>
+          </TooltipContent>
+        </Tooltip>
         {(match.isTest || (!isFullyPaid && match.status !== "PUBLISHED")) && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1207,12 +1213,25 @@ const Matches = () => {
     return sorted.filter((stat) => stat.assist === topValue);
   }, [liveStatsList, topByField]);
 
+  const copyLink = useCallback((link: string, message: string) => {
+    navigator.clipboard.writeText(link);
+    toast({ title: "Đã sao chép!", description: message });
+  }, []);
+
   const handleUpdateMatchStatus = useCallback(
     async (newStatus: "PUBLISHED" | "COMPLETED") => {
-      if (!selectedMatchId) return;
+      if (!selectedMatchId || !selectedMatch) return;
       const matchRef = doc(db, "matches", selectedMatchId);
       try {
-        await updateDoc(matchRef, { status: newStatus });
+        const isAlreadyPublished = Boolean(
+          selectedMatch.wasPublished || selectedMatch.publishedAt
+        );
+        const updateData: Record<string, any> = { status: newStatus };
+        if (newStatus === "PUBLISHED" && !isAlreadyPublished) {
+          updateData.wasPublished = true;
+          updateData.publishedAt = serverTimestamp();
+        }
+        await updateDoc(matchRef, updateData);
         toast({
           title: "Thành công",
           description: `Đã cập nhật trạng thái trận đấu thành ${
@@ -1220,10 +1239,11 @@ const Matches = () => {
           }.`,
         });
 
-        // Fire Slack + push notification when publishing the bill (A6).
-        if (newStatus === "PUBLISHED") {
+        // Fire Slack + push notification ONLY when published for the first time
+        if (newStatus === "PUBLISHED" && !isAlreadyPublished) {
           postApiJson("/notify/match-published", {
             matchId: selectedMatchId,
+            groupId,
           }).catch((err) =>
             console.error("Failed to send match-published notification", err),
           );
@@ -1237,7 +1257,7 @@ const Matches = () => {
         });
       }
     },
-    [selectedMatchId],
+    [selectedMatchId, selectedMatch, groupId],
   );
 
   const handleToggleRatingsPublished = useCallback(
@@ -1363,182 +1383,260 @@ const Matches = () => {
               </Card>
             ) : (
               <div>
-                <div className="sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-3">
-                  <Dialog
-                    open={isAttendanceDialogOpen}
-                    onOpenChange={setIsAttendanceDialogOpen}
-                  >
-                    <DialogTrigger asChild>
-                      <Button variant="outline">
-                        <Users className="mr-2 h-4 w-4" />
-                        Quản lý điểm danh
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader>
-                        <DialogTitle>
-                          Danh sách điểm danh ({attendance.size})
-                        </DialogTitle>
-                      </DialogHeader>
-                      <div className="max-h-[60vh] overflow-y-auto">
-                        {isLoadingAttendance ? (
-                          <div className="flex justify-center p-4">
-                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                          </div>
-                        ) : attendance.size === 0 ? (
-                          <div className="text-center p-4 text-muted-foreground">
-                            Chưa có ai điểm danh.
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex gap-2 mb-4">
-                              <Popover open={manualAddPopoverOpen} onOpenChange={setManualAddPopoverOpen}>
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    variant="outline"
-                                    role="combobox"
-                                    aria-expanded={manualAddPopoverOpen}
-                                    className="w-full justify-between font-normal"
-                                  >
-                                    {manualAddMemberId
-                                      ? members.get(manualAddMemberId) || "Chọn thành viên..."
-                                      : "Chọn thành viên..."}
-                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                                  <Command>
-                                    <CommandInput placeholder="Tìm thành viên..." />
-                                    <CommandList>
-                                      <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
-                                      <CommandGroup>
-                                        {Array.from(members.entries())
-                                          .filter(([id]) => !attendance.has(id))
-                                          .map(([id, name]) => (
-                                            <CommandItem
-                                              key={id}
-                                              value={name}
-                                              onSelect={() => {
-                                                setManualAddMemberId(id);
-                                                setManualAddPopoverOpen(false);
-                                              }}
-                                            >
-                                              <Check
-                                                className={cn(
-                                                  "mr-2 h-4 w-4",
-                                                  manualAddMemberId === id ? "opacity-100" : "opacity-0"
-                                                )}
-                                              />
-                                              {name}
-                                            </CommandItem>
-                                          ))}
-                                      </CommandGroup>
-                                    </CommandList>
-                                  </Command>
-                                </PopoverContent>
-                              </Popover>
-                              <Button
-                                onClick={handleAddAttendance}
-                                disabled={!manualAddMemberId}
-                              >
-                                <PlusCircle className="h-4 w-4" />
-                              </Button>
-                            </div>
+                <div className="sticky top-0 z-10 mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-3 shadow-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Status Badge */}
+                    {selectedMatch.status === "PUBLISHED" ? (
+                      <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 gap-1.5 py-1 px-2.5">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                        Đã công khai
+                      </Badge>
+                    ) : selectedMatch.status === "COMPLETED" ? (
+                      <Badge variant="outline" className="text-amber-700 dark:text-amber-400 bg-amber-500/15 border-amber-500/30 gap-1.5 py-1 px-2.5">
+                        <Calculator className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                        Đã tính tiền
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-blue-700 dark:text-blue-400 bg-blue-500/15 border-blue-500/30 gap-1.5 py-1 px-2.5">
+                        <Clock className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                        Đang điểm danh
+                      </Badge>
+                    )}
 
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Thành viên</TableHead>
-                                  <TableHead>Thời gian</TableHead>
-                                  <TableHead className="w-[50px]"></TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {Array.from(attendance.entries()).map(
-                                  ([memberId, record]) => (
-                                    <TableRow key={memberId}>
-                                      <TableCell className="font-medium">
-                                        {record.memberName}
-                                      </TableCell>
-                                      <TableCell className="text-sm text-muted-foreground">
-                                        {record.timestamp?.seconds
-                                          ? new Date(
-                                              record.timestamp.seconds * 1000,
-                                            ).toLocaleTimeString("vi-VN", {
-                                              hour: "2-digit",
-                                              minute: "2-digit",
-                                              timeZone: MATCH_TZ,
-                                            })
-                                          : "--:--"}
-                                      </TableCell>
-                                      <TableCell>
-                                        <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                                          onClick={() =>
-                                            handleDeleteAttendance(
-                                              memberId,
-                                              record.memberName,
-                                            )
-                                          }
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      </TableCell>
-                                    </TableRow>
-                                  ),
-                                )}
-                              </TableBody>
-                            </Table>
-                          </>
-                        )}
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                  {!isFullyPaid && (
-                    <>
-                      {selectedMatch?.status !== "PUBLISHED" ? (
-                        <Button
-                          onClick={() => handleUpdateMatchStatus("PUBLISHED")}
-                        >
-                          <Send className="h-4 w-4 mr-2" />
-                          Công khai
-                        </Button>
-                      ) : (
-                        <Button
-                          onClick={() => handleUpdateMatchStatus("COMPLETED")}
-                          variant="outline"
-                        >
-                          <XCircle className="h-4 w-4 mr-2" />
-                          Hủy công khai
-                        </Button>
-                      )}
-                    </>
-                  )}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="ml-auto">
-                        <MoreHorizontal className="mr-2 h-4 w-4" />
-                        Xem thêm
+                    {/* Publish / Unpublish Button */}
+                    {selectedMatch?.status !== "PUBLISHED" ? (
+                      <Button
+                        onClick={() => handleUpdateMatchStatus("PUBLISHED")}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                        size="sm"
+                      >
+                        <Send className="h-4 w-4 mr-1.5" />
+                        Công khai bill
                       </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {hasFeature(groupId, group, "ratings") && (
-                        <DropdownMenuItem onSelect={() => setIsRatingsDialogOpen(true)}>
-                          <Star className="mr-2 h-4 w-4" />Xem đánh giá
+                    ) : (
+                      <Button
+                        onClick={() => handleUpdateMatchStatus("COMPLETED")}
+                        variant="outline"
+                        size="sm"
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <XCircle className="h-4 w-4 mr-1.5" />
+                        Hủy công khai
+                      </Button>
+                    )}
+
+                    {/* Edit & Calculate */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate(groupPath(`admin/setup/${selectedMatch.id}`))}>
+                      <Pencil className="h-4 w-4 mr-1.5" />
+                      Sửa / Tính tiền
+                    </Button>
+
+                    {/* Attendance Dialog */}
+                    <Dialog
+                      open={isAttendanceDialogOpen}
+                      onOpenChange={setIsAttendanceDialogOpen}
+                    >
+                      <DialogTrigger asChild>
+                        <Button variant="outline" size="sm">
+                          <Users className="mr-1.5 h-4 w-4" />
+                          Điểm danh ({attendance.size})
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>
+                            Danh sách điểm danh ({attendance.size})
+                          </DialogTitle>
+                        </DialogHeader>
+                        <div className="max-h-[60vh] overflow-y-auto">
+                          {isLoadingAttendance ? (
+                            <div className="flex justify-center p-4">
+                              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                            </div>
+                          ) : attendance.size === 0 ? (
+                            <div className="text-center p-4 text-muted-foreground">
+                              Chưa có ai điểm danh.
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex gap-2 mb-4">
+                                <Popover open={manualAddPopoverOpen} onOpenChange={setManualAddPopoverOpen}>
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      role="combobox"
+                                      aria-expanded={manualAddPopoverOpen}
+                                      className="w-full justify-between font-normal"
+                                    >
+                                      {manualAddMemberId
+                                        ? members.get(manualAddMemberId) || "Chọn thành viên..."
+                                        : "Chọn thành viên..."}
+                                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                                    <Command>
+                                      <CommandInput placeholder="Tìm thành viên..." />
+                                      <CommandList>
+                                        <CommandEmpty>Không tìm thấy thành viên.</CommandEmpty>
+                                        <CommandGroup>
+                                          {Array.from(members.entries())
+                                            .filter(([id]) => !attendance.has(id))
+                                            .map(([id, name]) => (
+                                              <CommandItem
+                                                key={id}
+                                                value={name}
+                                                onSelect={() => {
+                                                  setManualAddMemberId(id);
+                                                  setManualAddPopoverOpen(false);
+                                                }}
+                                              >
+                                                <Check
+                                                  className={cn(
+                                                    "mr-2 h-4 w-4",
+                                                    manualAddMemberId === id ? "opacity-100" : "opacity-0"
+                                                  )}
+                                                />
+                                                {name}
+                                              </CommandItem>
+                                            ))}
+                                        </CommandGroup>
+                                      </CommandList>
+                                    </Command>
+                                  </PopoverContent>
+                                </Popover>
+                                <Button
+                                  onClick={handleAddAttendance}
+                                  disabled={!manualAddMemberId}
+                                >
+                                  <PlusCircle className="h-4 w-4" />
+                                </Button>
+                              </div>
+
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Thành viên</TableHead>
+                                    <TableHead>Thời gian</TableHead>
+                                    <TableHead className="w-[50px]"></TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {Array.from(attendance.entries()).map(
+                                    ([memberId, record]) => (
+                                      <TableRow key={memberId}>
+                                        <TableCell className="font-medium">
+                                          {record.memberName}
+                                        </TableCell>
+                                        <TableCell className="text-sm text-muted-foreground">
+                                          {record.timestamp?.seconds
+                                            ? new Date(
+                                                record.timestamp.seconds * 1000,
+                                              ).toLocaleTimeString("vi-VN", {
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                                timeZone: MATCH_TZ,
+                                              })
+                                            : "--:--"}
+                                        </TableCell>
+                                        <TableCell>
+                                          <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                            onClick={() =>
+                                              handleDeleteAttendance(
+                                                memberId,
+                                                record.memberName,
+                                              )
+                                            }
+                                          >
+                                            <Trash2 className="h-4 w-4" />
+                                          </Button>
+                                        </TableCell>
+                                      </TableRow>
+                                    ),
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </>
+                          )}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Quick Copy Link Buttons */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        copyLink(
+                          `${window.location.origin}${groupPath("public/pay")}`,
+                          "Link thanh toán chung đã được sao chép."
+                        )
+                      }
+                      title="Sao chép link thanh toán chung gửi thành viên"
+                    >
+                      <Copy className="mr-1.5 h-4 w-4" />
+                      Link thanh toán
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        copyLink(
+                          `${window.location.origin}${groupPath("public/attendance")}`,
+                          "Link điểm danh đã được sao chép."
+                        )
+                      }
+                      title="Sao chép link điểm danh gửi thành viên"
+                    >
+                      <LinkIcon className="mr-1.5 h-4 w-4" />
+                      Link điểm danh
+                    </Button>
+
+                    {/* Dropdown Menu */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm">
+                          <MoreHorizontal className="mr-1.5 h-4 w-4" />
+                          Xem thêm
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            window.open(
+                              `${window.location.origin}${groupPath("public/pay")}`,
+                              "_blank"
+                            )
+                          }
+                        >
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                          Mở trang thanh toán (khách)
                         </DropdownMenuItem>
-                      )}
-                      {hasFeature(groupId, group, "liveNotes") && (
-                        <DropdownMenuItem onSelect={() => setIsLiveStatsDialogOpen(true)}>
-                          <TrendingUp className="mr-2 h-4 w-4" />Thống kê nhanh
+                        {hasFeature(groupId, group, "ratings") && (
+                          <DropdownMenuItem onSelect={() => setIsRatingsDialogOpen(true)}>
+                            <Star className="mr-2 h-4 w-4" />Xem đánh giá
+                          </DropdownMenuItem>
+                        )}
+                        {hasFeature(groupId, group, "liveNotes") && (
+                          <DropdownMenuItem onSelect={() => setIsLiveStatsDialogOpen(true)}>
+                            <TrendingUp className="mr-2 h-4 w-4" />Thống kê nhanh
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem onSelect={() => setIsPosterDialogOpen(true)}>
+                          <Trophy className="mr-2 h-4 w-4" />Vinh danh dạng Poster
                         </DropdownMenuItem>
-                      )}
-                      <DropdownMenuItem onSelect={() => setIsPosterDialogOpen(true)}>
-                        <Trophy className="mr-2 h-4 w-4" />Vinh danh dạng Poster
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                   {hasFeature(groupId, group, "ratings") && (<Dialog open={isRatingsDialogOpen} onOpenChange={setIsRatingsDialogOpen}>
                     <DialogContent className="max-w-4xl">
                       <DialogHeader>
@@ -2253,6 +2351,22 @@ const Matches = () => {
                     </DialogContent>
                   </Dialog>
                 </div>
+                {selectedMatch.status === "PENDING" && (
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50/70 p-3 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                      <span>Trận đấu đang ở trạng thái điểm danh, chưa được chốt tính tiền chia bill.</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                      onClick={() => navigate(groupPath(`admin/setup/${selectedMatch.id}`))}
+                    >
+                      <Calculator className="mr-1.5 h-4 w-4" />
+                      Tính tiền ngay
+                    </Button>
+                  </div>
+                )}
                 <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
                   <Card className="shadow-card">
                     <CardHeader className="flex flex-row items-center justify-between pb-2">
