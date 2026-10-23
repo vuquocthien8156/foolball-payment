@@ -1,3 +1,5 @@
+import { hasFeature } from "@/lib/features";
+import { useGroup, useGroupPath } from "@/contexts/GroupContext";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -15,6 +17,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -43,6 +46,7 @@ import {
   Star,
   Check,
   ChevronsUpDown,
+  MoreHorizontal,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -132,6 +136,7 @@ interface Match {
   teamsConfig?: {
     id: string;
     name: string;
+    members?: { id: string }[];
   }[];
 }
 
@@ -342,6 +347,8 @@ const MatchListItem = ({
 };
 
 const Matches = () => {
+  const { groupId, group } = useGroup();
+  const groupPath = useGroupPath();
   const [matches, setMatches] = useState<Match[]>([]);
   const [members, setMembers] = useState<Map<string, string>>(new Map());
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
@@ -384,6 +391,8 @@ const Matches = () => {
   );
   const [isLoadingLiveStats, setIsLoadingLiveStats] = useState(false);
   const [isLiveStatsDialogOpen, setIsLiveStatsDialogOpen] = useState(false);
+  const [isRatingsDialogOpen, setIsRatingsDialogOpen] = useState(false);
+  const [isPosterDialogOpen, setIsPosterDialogOpen] = useState(false);
   const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
   const [pendingSharesMap, setPendingSharesMap] = useState<
     Map<
@@ -444,7 +453,7 @@ const Matches = () => {
   useEffect(() => {
     const fetchMembers = async () => {
       try {
-        const membersSnapshot = await getDocs(collection(db, "members"));
+        const membersSnapshot = await getDocs(query(collection(db, "members"), where("groupId", "==", groupId)));
         const membersMap = new Map(
           membersSnapshot.docs.map((doc) => [
             doc.id,
@@ -461,12 +470,13 @@ const Matches = () => {
       }
     };
     fetchMembers();
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     setIsLoadingMatches(true);
     const matchesQuery = query(
       collection(db, "matches"),
+      where("groupId", "==", groupId),
       orderBy("date", "desc"),
     );
     const unsubscribe = onSnapshot(
@@ -495,7 +505,7 @@ const Matches = () => {
       },
     );
     return () => unsubscribe();
-  }, [searchParams, selectedMatchId]);
+  }, [searchParams, selectedMatchId, groupId]);
 
   useEffect(() => {
     if (!selectedMatchId) return;
@@ -861,6 +871,7 @@ const Matches = () => {
     try {
       const q = cq(
         collectionGroup(db, "shares"),
+        where("groupId", "==", groupId),
         where("status", "==", "PENDING"),
       );
       const snap = await getDocs(q);
@@ -909,7 +920,7 @@ const Matches = () => {
     } finally {
       setIsLoadingPending(false);
     }
-  }, [matches, members]);
+  }, [matches, members, groupId]);
 
   const handleMarkPaidFromModal = async (shareId: string, matchId: string) => {
     try {
@@ -1254,18 +1265,19 @@ const Matches = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-background">
-      <div className="container mx-auto px-4 py-8 max-w-7xl">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold text-foreground">
+    <div className="h-full min-h-0">
+      <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-4">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold text-foreground">
             Quản lý Trận đấu
           </h1>
-          <Button onClick={() => navigate("/admin/setup")}>
+          <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => navigate(groupPath("admin/setup"))}>
             <PlusCircle className="mr-2 h-4 w-4" />
             Tạo trận đấu mới
           </Button>
           <Button
-            variant="destructive"
+            variant="outline"
             onClick={() => {
               setIsDebtModalOpen(true);
               fetchPendingSharesAcrossAllMatches();
@@ -1274,14 +1286,15 @@ const Matches = () => {
             <DollarSign className="mr-2 h-4 w-4" />
             Nợ chưa trả
           </Button>
+          </div>
         </div>
-        <div className="grid lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-3 lg:sticky lg:top-6 h-fit">
-            <Card className="shadow-card">
-              <CardHeader>
+        <div className="grid min-h-0 flex-1 grid-rows-[minmax(10rem,30%)_minmax(0,1fr)] gap-4 lg:grid-cols-12 lg:grid-rows-1">
+          <div className="min-h-0 min-w-0 lg:col-span-4 xl:col-span-3">
+            <Card className="flex h-full min-h-0 flex-col shadow-card">
+              <CardHeader className="shrink-0 p-4">
                 <CardTitle>Danh sách trận đấu</CardTitle>
               </CardHeader>
-              <CardContent className="p-0">
+              <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-0" role="region" aria-label="Danh sách trận đấu" tabIndex={0}>
                 {isLoadingMatches ? (
                   <div className="p-6 text-center">
                     <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
@@ -1301,7 +1314,7 @@ const Matches = () => {
                           isSelected={selectedMatchId === match.id}
                           onSelect={() => setSelectedMatchId(match.id)}
                           onDelete={() => setMatchIdToDelete(match.id)}
-                          onEdit={() => navigate(`/admin/setup/${match.id}`)}
+                          onEdit={() => navigate(groupPath(`admin/setup/${match.id}`))}
                         />
                       ))}
                     </div>
@@ -1335,7 +1348,7 @@ const Matches = () => {
               </CardContent>
             </Card>
           </div>
-          <div className="lg:col-span-9">
+          <div className="min-h-0 min-w-0 overflow-y-auto overscroll-contain lg:col-span-8 xl:col-span-9" role="region" aria-label="Chi tiết trận đấu" tabIndex={0}>
             {!selectedMatchId || !selectedMatch ? (
               <Card className="shadow-card">
                 <CardContent className="p-12 text-center">
@@ -1350,13 +1363,13 @@ const Matches = () => {
               </Card>
             ) : (
               <div>
-                <div className="flex items-center gap-2 flex-wrap mb-4">
+                <div className="sticky top-0 z-10 mb-4 flex flex-wrap items-center gap-2 rounded-lg border bg-background p-3">
                   <Dialog
                     open={isAttendanceDialogOpen}
                     onOpenChange={setIsAttendanceDialogOpen}
                   >
                     <DialogTrigger asChild>
-                      <Button variant="outline" className="border-dashed">
+                      <Button variant="outline">
                         <Users className="mr-2 h-4 w-4" />
                         Quản lý điểm danh
                       </Button>
@@ -1495,7 +1508,7 @@ const Matches = () => {
                       ) : (
                         <Button
                           onClick={() => handleUpdateMatchStatus("COMPLETED")}
-                          variant="destructive"
+                          variant="outline"
                         >
                           <XCircle className="h-4 w-4 mr-2" />
                           Hủy công khai
@@ -1503,13 +1516,30 @@ const Matches = () => {
                       )}
                     </>
                   )}
-                  <Dialog>
-                    <DialogTrigger asChild>
-                      <Button variant="outline">
-                        <Star className="mr-2 h-4 w-4" />
-                        Xem đánh giá
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="ml-auto">
+                        <MoreHorizontal className="mr-2 h-4 w-4" />
+                        Xem thêm
                       </Button>
-                    </DialogTrigger>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {hasFeature(groupId, group, "ratings") && (
+                        <DropdownMenuItem onSelect={() => setIsRatingsDialogOpen(true)}>
+                          <Star className="mr-2 h-4 w-4" />Xem đánh giá
+                        </DropdownMenuItem>
+                      )}
+                      {hasFeature(groupId, group, "liveNotes") && (
+                        <DropdownMenuItem onSelect={() => setIsLiveStatsDialogOpen(true)}>
+                          <TrendingUp className="mr-2 h-4 w-4" />Thống kê nhanh
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem onSelect={() => setIsPosterDialogOpen(true)}>
+                        <Trophy className="mr-2 h-4 w-4" />Vinh danh dạng Poster
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  {hasFeature(groupId, group, "ratings") && (<Dialog open={isRatingsDialogOpen} onOpenChange={setIsRatingsDialogOpen}>
                     <DialogContent className="max-w-4xl">
                       <DialogHeader>
                         <DialogTitle>
@@ -1906,17 +1936,12 @@ const Matches = () => {
                         </Tabs>
                       </div>
                     </DialogContent>
-                  </Dialog>
-                  <Dialog
+                  </Dialog>)}
+                  {hasFeature(groupId, group, "liveNotes") && (<Dialog
                     open={isLiveStatsDialogOpen}
                     onOpenChange={setIsLiveStatsDialogOpen}
                   >
-                    <DialogTrigger asChild>
-                      <Button variant="secondary">
-                        <TrendingUp className="mr-2 h-4 w-4" />
-                        Thống kê nhanh
-                      </Button>
-                    </DialogTrigger>
+
                     <DialogContent className="max-w-4xl">
                       <DialogHeader>
                         <DialogTitle>
@@ -2055,14 +2080,9 @@ const Matches = () => {
                         )}
                       </div>
                     </DialogContent>
-                  </Dialog>
-                  <Dialog>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" className="border-dashed">
-                        <Trophy className="mr-2 h-4 w-4" />
-                        Vinh danh dạng Poster
-                      </Button>
-                    </DialogTrigger>
+                  </Dialog>)}
+                  <Dialog open={isPosterDialogOpen} onOpenChange={setIsPosterDialogOpen}>
+
                     <DialogContent className="max-w-5xl p-0 overflow-hidden border-0 shadow-2xl">
                       {!topMvp && topScorers.length === 0 ? (
                         <div className="p-8 text-center text-muted-foreground">
@@ -2324,7 +2344,7 @@ const Matches = () => {
                     </CardContent>
                   </Card>
                 )}
-                <Card className="shadow-card mb-6">
+                {hasFeature(groupId, group, "ratings") && (<Card className="shadow-card mb-6">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <div>
                       <CardTitle className="text-sm font-medium">
@@ -2350,7 +2370,7 @@ const Matches = () => {
                       />
                     </div>
                   </CardHeader>
-                </Card>
+                </Card>)}
                 <Card className="shadow-card">
                   <CardHeader>
                     <CardTitle>Chi tiết</CardTitle>

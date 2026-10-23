@@ -1,12 +1,18 @@
-import React, { Suspense } from "react";
+import React, { Suspense, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "./contexts/AuthContext";
 import { PWAInstallProvider } from "./contexts/PWAInstallContext";
-import { useUserRoles } from "./hooks/useUserRoles";
+import { useGroupRole } from "./hooks/useGroupRole";
+import { usePlatformAccount } from "./hooks/usePlatformAccount";
+import { signOut } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { GroupProvider, useGroup, useGroupPath } from "./contexts/GroupContext";
+import { DEFAULT_GROUP_ID, groupPath, resolveLegacyRedirect } from "./lib/groups";
+import { FeatureKey, hasFeature } from "./lib/features";
 
 // Lazy load components
 const AdminLayout = React.lazy(() => import("./components/AdminLayout"));
@@ -26,6 +32,9 @@ const PublicRatings = React.lazy(() => import("./pages/PublicRatings"));
 const ScoringMatches = React.lazy(() => import("./pages/ScoringMatches"));
 const LiveNotes = React.lazy(() => import("./pages/LiveNotes"));
 const Config = React.lazy(() => import("./pages/Config"));
+const Groups = React.lazy(() => import("./pages/Groups"));
+const PlatformLogin = React.lazy(() => import("./pages/PlatformLogin"));
+const PlatformAccounts = React.lazy(() => import("./pages/PlatformAccounts"));
 
 const queryClient = new QueryClient();
 
@@ -35,15 +44,30 @@ const LoadingSplash = () => (
   </div>
 );
 
-const AdminProtectedRoute = ({ children }: { children: JSX.Element }) => {
+export const PlatformRoute = ({ ownerOnly = false, children }: { ownerOnly?: boolean; children: JSX.Element }) => {
   const { user } = useAuth();
-  const { roles, loading } = useUserRoles(user?.uid);
+  const { account, loading } = usePlatformAccount();
+  useEffect(() => {
+    if (user && !loading && !account) void signOut(auth);
+  }, [user, loading, account]);
+  if (!user) return <Navigate to="/platform/login" replace />;
+  if (loading) return <LoadingSplash />;
+  if (!account) return <p role="alert" className="p-6">Tài khoản không có quyền truy cập nền tảng. Đang đăng xuất…</p>;
+  if (ownerOnly && account.role !== "owner") return <Navigate to="/platform" replace />;
+  return children;
+};
 
-  if (!user) return <Navigate to="/login" replace />;
+const AdminProtectedRoute = ({ children }: { children: JSX.Element }) => {
+  const groupPath = useGroupPath();
+  const { user } = useAuth();
+  const { groupId } = useGroup();
+  const { role, loading } = useGroupRole(groupId);
+
+  if (!user) return <Navigate to="/platform/login" replace />;
   if (loading) return <LoadingSplash />;
 
-  const canAccess = roles.includes("admin") || roles.includes("superadmin");
-  if (!canAccess) return <Navigate to="/public" replace />;
+  const canAccess = role !== null;
+  if (!canAccess) return <Navigate to={groupPath("public")} replace />;
   return children;
 };
 
@@ -54,46 +78,51 @@ const TabGuard = ({
   tabKey: string;
   children: JSX.Element;
 }) => {
-  const { user } = useAuth();
-  const { roles, tabs, loading } = useUserRoles(user?.uid);
+  const groupPath = useGroupPath();
+  const { groupId } = useGroup();
+  const { isManager, tabs, loading } = useGroupRole(groupId);
   if (loading) return <LoadingSplash />;
-  const isSuper = roles.includes("superadmin");
-  const allowed = isSuper || tabs.includes(tabKey);
-  return allowed ? children : <Navigate to="/admin/dashboard" replace />;
+  const allowed = isManager || tabs.includes(tabKey);
+  return allowed ? children : <Navigate to={groupPath("admin")} replace />;
 };
 
 const AdminHomeRedirect = () => {
-  const { user } = useAuth();
-  const { roles, tabs, loading } = useUserRoles(user?.uid);
-  if (loading) return <LoadingSplash />;
-  const isSuper = roles.includes("superadmin");
-  if (isSuper) return <Navigate to="/admin/matches" replace />;
-  const order = ["dashboard", "scoring", "live", "matches", "members"];
-  const target = order.find((t) => tabs.includes(t));
+  const groupPath = useGroupPath();
+  const { groupId, group, loading: groupLoading } = useGroup();
+  const { isManager, tabs, loading } = useGroupRole(groupId);
+  if (loading || groupLoading) return <LoadingSplash />;
+  if (isManager) return <Navigate to={groupPath("admin/matches")} replace />;
+  const order = ["scoring", "live", "matches", "members"];
+  const target = order.find((t) => tabs.includes(t) &&
+    (t !== "scoring" || hasFeature(groupId, group, "scoring")) &&
+    (t !== "live" || hasFeature(groupId, group, "liveNotes")));
   return target ? (
     <Navigate
-      to={`/admin/${target === "dashboard" ? "dashboard" : target}`}
+      to={groupPath(`admin/${target}`)}
       replace
     />
   ) : (
-    <Navigate to="/public" replace />
+    <Navigate to={groupPath("public")} replace />
   );
 };
 
-const PublicRoute = ({ children }: { children: JSX.Element }) => {
-  const { user } = useAuth();
-  const { roles, loading } = useUserRoles(user?.uid);
+export const LegacyRedirect = () => {
+  const location = useLocation();
+  return <Navigate to={resolveLegacyRedirect(location.pathname, location.search) ?? groupPath(DEFAULT_GROUP_ID, "public")} replace />;
+};
+
+export const RequireFeature = ({ feature, children }: { feature: FeatureKey; children: JSX.Element }) => {
+  const { groupId, group, loading } = useGroup();
   if (loading) return <LoadingSplash />;
-  const isAdmin = roles.includes("admin") || roles.includes("superadmin");
-  if (user && isAdmin) return <Navigate to="/admin" replace />;
-  return children;
+  return hasFeature(groupId, group, feature) ? children : <NotFound />;
 };
 
 const App = () => {
   const { user, loading } = useAuth();
-  const { roles, loading: rolesLoading } = useUserRoles(user?.uid);
+  const { role, loading: rolesLoading } = useGroupRole(DEFAULT_GROUP_ID);
+  const { account, loading: platformLoading } = usePlatformAccount();
 
-  if (loading || rolesLoading) return <LoadingSplash />;
+  if (loading || rolesLoading || platformLoading) return <LoadingSplash />;
 
   return (
     <PWAInstallProvider>
@@ -104,28 +133,31 @@ const App = () => {
           <BrowserRouter>
             <Suspense fallback={<LoadingSplash />}>
               <Routes>
+                <Route path="/platform/login" element={<PlatformLogin />} />
+                <Route path="/platform" element={<PlatformRoute><Groups /></PlatformRoute>} />
+                <Route path="/platform/accounts" element={<PlatformRoute ownerOnly><PlatformAccounts /></PlatformRoute>} />
+                <Route path="/login" element={<LegacyRedirect />} />
+                <Route path="/public/*" element={<LegacyRedirect />} />
+                <Route path="/admin/*" element={<LegacyRedirect />} />
+                <Route path="/g/:groupId" element={<GroupProvider><Outlet /></GroupProvider>}>
                 <Route
-                  path="/login"
-                  element={
-                    <PublicRoute>
-                      <Login />
-                    </PublicRoute>
-                  }
+                  path="login"
+                  element={<Login />}
                 />
                 {/* Public Routes under /public */}
-                <Route path="/public">
+                <Route path="public">
                   <Route index element={<PublicPortal />} />
                   <Route path="pay" element={<Pay />} />
                   <Route path="payment-success" element={<PaymentSuccess />} />
                   <Route path="payment-cancel" element={<PaymentCancel />} />
                   <Route path="attendance" element={<Attendance />} />
-                  <Route path="team-locked" element={<TeamLocked />} />
-                  <Route path="ratings" element={<PublicRatings />} />
+                  <Route path="team-locked" element={<RequireFeature feature="teamPropose"><TeamLocked /></RequireFeature>} />
+                  <Route path="ratings" element={<RequireFeature feature="ratings"><PublicRatings /></RequireFeature>} />
                 </Route>
 
                 {/* Protected Admin Routes */}
                 <Route
-                  path="/admin"
+                  path="admin"
                   element={
                     <AdminProtectedRoute>
                       <AdminLayout />
@@ -179,7 +211,7 @@ const App = () => {
                     path="scoring"
                     element={
                       <TabGuard tabKey="scoring">
-                        <ScoringMatches />
+                        <RequireFeature feature="scoring"><ScoringMatches /></RequireFeature>
                       </TabGuard>
                     }
                   />
@@ -187,7 +219,7 @@ const App = () => {
                     path="live"
                     element={
                       <TabGuard tabKey="live">
-                        <LiveNotes />
+                        <RequireFeature feature="liveNotes"><LiveNotes /></RequireFeature>
                       </TabGuard>
                     }
                   />
@@ -200,15 +232,18 @@ const App = () => {
                     }
                   />
                 </Route>
+                </Route>
 
                 {/* Root path redirect */}
                 <Route
                   path="/"
                   element={
-                    user ? (
-                      <Navigate to="/admin" replace />
+                    user && account ? (
+                      <Navigate to="/platform" replace />
+                    ) : user && role ? (
+                      <Navigate to={groupPath(DEFAULT_GROUP_ID, "admin")} replace />
                     ) : (
-                      <Navigate to="/public" replace />
+                      <Navigate to={groupPath(DEFAULT_GROUP_ID, "public")} replace />
                     )
                   }
                 />

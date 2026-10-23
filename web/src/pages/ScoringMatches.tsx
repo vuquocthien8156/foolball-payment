@@ -1,3 +1,4 @@
+import { useGroup } from "@/contexts/GroupContext";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   collection,
@@ -48,8 +49,7 @@ import {
   defaultActionWeights,
 } from "@/lib/liveStats";
 import { useActionConfigs } from "@/hooks/useActionConfigs";
-import { useAuth } from "@/contexts/AuthContext";
-import { useUserRoles } from "@/hooks/useUserRoles";
+import { useGroupRole } from "@/hooks/useGroupRole";
 
 interface Match {
   id: string;
@@ -89,9 +89,8 @@ const quickNotes = [
 ];
 
 const ScoringMatches = () => {
-  const { user } = useAuth();
-  const { roles, loading: rolesLoading } = useUserRoles(user?.uid);
-  const isSuperAdmin = roles.includes("superadmin");
+  const { groupId } = useGroup();
+  const { isManager: isSuperAdmin, loading: rolesLoading } = useGroupRole(groupId);
   const canSeePeerScores = isSuperAdmin;
   const shouldHidePeerScores = rolesLoading ? true : !canSeePeerScores;
   const [matches, setMatches] = useState<Match[]>([]);
@@ -171,20 +170,20 @@ const ScoringMatches = () => {
 
   useEffect(() => {
     const fetchMembers = async () => {
-      const snapshot = await getDocs(collection(db, "members"));
+      const snapshot = await getDocs(query(collection(db, "members"), where("groupId", "==", groupId)));
       const map = new Map(
         snapshot.docs.map((doc) => [doc.id, doc.data().name as string])
       );
       setMembers(map);
     };
     fetchMembers();
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     setIsLoading(true);
     const matchesQuery = query(
       collection(db, "matches"),
-      where("status", "in", ["PUBLISHED", "COMPLETED"]),
+      where("groupId", "==", groupId), where("status", "in", ["PUBLISHED", "COMPLETED"]),
       orderBy("date", "desc")
     );
     const unsubscribe = onSnapshot(matchesQuery, (snapshot) => {
@@ -198,7 +197,7 @@ const ScoringMatches = () => {
       setIsLoading(false);
     });
     return () => unsubscribe();
-  }, [selectedMatchId]);
+  }, [selectedMatchId, groupId]);
 
   useEffect(() => {
     if (!selectedMatchId) return;
@@ -373,13 +372,13 @@ const ScoringMatches = () => {
 
     const fromShares = Array.from(
       new Set(shares.map((s) => s.teamId).filter(Boolean))
-    ).map((id) => [
+    ).map((id): [string, string] => [
       id as string,
       shares.find((s) => s.teamId === id)?.teamName || `Đội ${id}`,
     ]);
     if (fromShares.length) return fromShares;
 
-    const fromScores = Array.from(teamScore.keys()).map((id) => [
+    const fromScores = Array.from(teamScore.keys()).map((id): [string, string] => [
       id,
       `Đội ${id}`,
     ]);

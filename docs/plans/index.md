@@ -2,6 +2,9 @@
 
 ## Current group platform work
 
+Production execution: [Group production rollout v1](group-production-rollout-v1.md)
+records the user's 2026-10-22 authorization, ordered tasks and live evidence.
+
 Start with [Group platform — v3](group-platform-v3.md) (rev 5, 2026-10-20). It
 holds user decisions, constants, schemas, routing, data scope, payments, Slack,
 security stages, test strategy, runbook, progress, the **core scope, Football-only
@@ -15,9 +18,14 @@ acceptance, and an Evidence line.
    group, indexes.
 2. [Phase 2 — Platform accounts, groups, per-group Slack, security](group-phase-2-v1.md):
    owner-issued accounts, user-created groups with a sport, Slack bot + channel ID per group, Release A (MVP,
-   trusted users), then Release B (locked rules).
+   trusted users), then Release B (locked rules). Account-only login is selected
+   for this release (D15, 2026-10-21); member login is deferred.
 3. [Phase 3 — Simple group funds ledger (deferred)](group-phase-3-v1.md):
    collected, owner-recorded transfers back, balance.
+
+## UI refinements
+
+- [Matches UI refinement v1](matches-ui-v1.md): independent panel scrolling and grouped actions.
 
 ## Historical plans
 

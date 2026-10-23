@@ -1,0 +1,107 @@
+const express = require("express");
+const { randomInt } = require("node:crypto");
+const { makeGroupId, isValidSport, isValidGroupId } = require("./groups");
+const { createAuthMiddleware } = require("./auth");
+const validPassword = (value) => typeof value === "string" && value.length >= 8 && value.length <= 128;
+const validName = (value) => typeof value === "string" && value.trim().length >= 1 && value.trim().length <= 60;
+const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(() => res.status(500).json({ error: "INTERNAL_ERROR" }));
+function createPlatformRouter({ db, auth, FieldValue }) {
+  const router = express.Router();
+  const { requireUser, requirePlatform, requireOwner, requireGroupRole } = createAuthMiddleware({ db, auth });
+  router.use(requireUser);
+  router.get("/me", requirePlatform, (req, res) => {
+    const { email, displayName, role, status } = req.platform;
+    res.json({ uid: req.uid, email, displayName, role, status });
+  });
+  router.get("/accounts", requireOwner, wrap(async (_, res) => {
+    const snapshot = await db.collection("platformAccounts").get();
+    const accounts = snapshot.docs.map((doc) => ({ ...doc.data(), uid: doc.id }));
+    const millis = (value) => value?.toMillis ? value.toMillis() : Number(value || 0);
+    accounts.sort((a, b) => millis(b.createdAt) - millis(a.createdAt));
+    res.json(accounts);
+  }));
+  router.post("/accounts", requireOwner, wrap(async (req, res) => {
+    const { email, displayName, password } = req.body;
+    if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !validName(displayName) || !validPassword(password)) return res.status(400).json({ error: "INVALID_ACCOUNT" });
+    let user;
+    try { user = await auth.createUser({ email, displayName: displayName.trim(), password }); }
+    catch (error) {
+      if (error.code === "auth/email-already-exists") return res.status(409).json({ error: "EMAIL_EXISTS" });
+      return res.status(500).json({ error: "PROVISION_FAILED" });
+    }
+    try {
+      await db.collection("platformAccounts").doc(user.uid).set({ email, displayName: displayName.trim(), role: "user", status: "active", createdBy: req.uid, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() });
+    } catch {
+      try { await auth.deleteUser(user.uid); } catch { console.error("Account provisioning rollback failed"); }
+      return res.status(500).json({ error: "PROVISION_FAILED" });
+    }
+    res.status(201).json({ uid: user.uid, email });
+  }));
+  router.patch("/accounts/:uid", requireOwner, wrap(async (req, res) => {
+    const ref = db.collection("platformAccounts").doc(req.params.uid);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) return res.status(404).json({ error: "NOT_FOUND" });
+    if ((snapshot.data().role === "owner" && req.params.uid !== req.uid) || (req.params.uid === req.uid && req.body.status !== undefined)) return res.status(409).json({ error: "CANNOT_CHANGE_OWNER" });
+    const { status, displayName } = req.body;
+    if ((status !== undefined && !["active", "disabled"].includes(status)) || (displayName !== undefined && !validName(displayName))) return res.status(400).json({ error: "INVALID_ACCOUNT" });
+    await ref.update({ ...(status !== undefined ? { status } : {}), ...(displayName !== undefined ? { displayName: displayName.trim() } : {}), updatedAt: FieldValue.serverTimestamp() });
+    if (status === "disabled") await auth.revokeRefreshTokens(req.params.uid);
+    res.json({ uid: req.params.uid });
+  }));
+  router.post("/accounts/:uid/password", requireOwner, wrap(async (req, res) => {
+    if (!validPassword(req.body.password)) return res.status(400).json({ error: "INVALID_PASSWORD" });
+    if (!(await db.collection("platformAccounts").doc(req.params.uid).get()).exists) return res.status(404).json({ error: "NOT_FOUND" });
+    await auth.updateUser(req.params.uid, { password: req.body.password });
+    await auth.revokeRefreshTokens(req.params.uid);
+    res.status(204).send();
+  }));
+  router.get("/groups", requirePlatform, wrap(async (req, res) => {
+    let documents, memberships = [];
+    if (req.platform.role === "owner") documents = (await db.collection("groups").get()).docs;
+    else {
+      memberships = (await db.collection("groupMembers").where("uid", "==", req.uid).get()).docs.map((doc) => doc.data());
+      const refs = memberships.map((member) => db.collection("groups").doc(member.groupId));
+      documents = refs.length ? await db.getAll(...refs) : [];
+    }
+    const groups = documents.filter((doc) => doc.exists).map((doc) => {
+      const { name, sport, status } = doc.data();
+      return { id: doc.id, name, sport, status, role: req.platform.role === "owner" ? "owner" : memberships.find((member) => member.groupId === doc.id)?.role };
+    });
+    groups.sort((a, b) => a.name.localeCompare(b.name));
+    res.json(groups);
+  }));
+  router.post("/groups", requirePlatform, wrap(async (req, res) => {
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (name.length < 2 || name.length > 60) return res.status(400).json({ error: "INVALID_NAME" });
+    if (!isValidSport(req.body.sport)) return res.status(400).json({ error: "INVALID_SPORT" });
+    const id = await db.runTransaction(async (transaction) => {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const suffix = Array.from({ length: 4 }, () => randomInt(36).toString(36)).join("");
+        const gid = makeGroupId(name, suffix);
+        const ref = db.collection("groups").doc(gid);
+        if ((await transaction.get(ref)).exists) continue;
+        const timestamps = { createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
+        transaction.set(ref, { name, sport: req.body.sport, ownerUid: req.uid, status: "active", payoutEnabled: false, createdBy: req.uid, ...timestamps });
+        transaction.set(db.collection("groupMembers").doc(`${gid}_${req.uid}`), { groupId: gid, uid: req.uid, role: "manager", tabs: [], ...timestamps });
+        return gid;
+      }
+      return null;
+    });
+    if (!id) return res.status(503).json({ error: "GROUP_ID_COLLISION" });
+    res.status(201).json({ id });
+  }));
+  router.patch("/groups/:groupId", requireGroupRole({ manager: true }), wrap(async (req, res) => {
+    if (!isValidGroupId(req.params.groupId)) return res.status(400).json({ error: "INVALID_GROUP" });
+    const { name, sport, status } = req.body;
+    if (req.groupRole.role !== "owner" && (sport !== undefined || status !== undefined)) return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
+    if (sport !== undefined && !isValidSport(sport)) return res.status(400).json({ error: "INVALID_SPORT" });
+    if (name !== undefined && (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 60)) return res.status(400).json({ error: "INVALID_NAME" });
+    if (status !== undefined && !["active", "archived"].includes(status)) return res.status(400).json({ error: "INVALID_STATUS" });
+    const ref = db.collection("groups").doc(req.params.groupId);
+    if (!(await ref.get()).exists) return res.status(404).json({ error: "NOT_FOUND" });
+    await ref.update({ ...(name !== undefined ? { name: name.trim() } : {}), ...(sport !== undefined ? { sport } : {}), ...(status !== undefined ? { status } : {}), updatedAt: FieldValue.serverTimestamp() });
+    res.json({ id: req.params.groupId });
+  }));
+  return router;
+}
+module.exports = { createPlatformRouter };

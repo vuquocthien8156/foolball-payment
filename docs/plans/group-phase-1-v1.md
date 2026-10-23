@@ -1,6 +1,6 @@
 # Phase 1 — Football Zigvy Group Foundation
 
-Parent: [Group platform v3](group-platform-v3.md) (read §2–§9 first). Status: Not started.
+Parent: [Group platform v3](group-platform-v3.md) (read §2–§9 first). Status: Complete.
 Next: [Phase 2](group-phase-2-v1.md). Rev 2 (2026-10-20) rewrote this file in place.
 Rev 3 (same day): core scope only (master §15), sport type + feature registry
 (master §16, slices P1.3d/P1.3e). Rev 5 (same day): Football features stay on
@@ -60,7 +60,21 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   `orderBy desc + limit`, `collectionGroup matches nested`, `transaction commits
   writes`, `log records constraints`.
 - Acceptance: baseline numbers recorded below; fake passes its own tests.
-- Evidence: _empty_
+- Evidence (2026-10-20): before changes, `cd web && node --test tests/*.test.mjs`
+  passed 29, failed 0, skipped 0; after changes, passed 42, failed 0, skipped 0
+  (29 existing + 13 fake Firestore tests). Focused
+  `cd web && node --test tests/fake-firestore.test.mjs`: passed 13, failed 0.
+  Test-first run failed with `ERR_MODULE_NOT_FOUND` before the helper was created.
+  `cd web && npx --no-install tsc -p tsconfig.app.json --noEmit`: exit 2 before
+  and after, exactly the same 4 existing errors: `Matches.tsx:1121` TS2339
+  (`members`), `ScoringMatches.tsx:370` TS2322 (`string[][]` vs tuple array),
+  `SetupMatch.tsx:1076` and `:1077` TS2339 (`totalFixedAmount`, `remainingAmount`).
+  `cd web && npm run build`: exit 0 before and after; existing warnings for old
+  baseline-browser-mapping/Browserslist data and chunks over 500 kB remain.
+  `cd web && npx --no-install eslint tests/fake-firestore.mjs tests/fake-firestore.test.mjs`:
+  exit 0, 0 errors, 0 warnings. Both files are new, so no pre-edit lint baseline
+  exists for them; no existing source file was edited. Later slices must record
+  per-file lint errors before touching their existing source files.
 
 ## P1.0b Local emulator mode (needed for every browser check)
 
@@ -72,7 +86,9 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
 - `firebase.ts`: when `import.meta.env.VITE_USE_EMULATORS === "true"`, call
   `connectFirestoreEmulator(db, "127.0.0.1", 8080)` and
   `connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true })`; skip
-  messaging setup. Default (env unset) = unchanged behavior.
+  messaging and Analytics setup. Initialize with demo-only public config and
+  `projectId: "demo-football"` in this mode so browser, CLI, Auth, Firestore and
+  seed use the same project. Default (env unset) = unchanged behavior.
 - `firebase.json`: `"emulators": { "auth": { "port": 9099 }, "firestore": { "port": 8080 }, "functions": { "port": 5001 }, "ui": { "enabled": false } }`.
 - Local run (user or executor, never with production project):
   `firebase emulators:start --only auth,firestore,functions --project demo-football`
@@ -95,7 +111,12 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
 - Tests: `connects emulators only when flag true` (loadSource with mocked firebase modules),
   `seed-emulator refuses without FIRESTORE_EMULATOR_HOST`, `seed-emulator refuses without
   FIREBASE_AUTH_EMULATOR_HOST`, `seed --migrated sets groupId on every record`, `seed --legacy leaves Football records without groupId`.
-- Evidence: _empty_
+- Evidence (2026-10-20): `cd web && node --test tests/*.test.mjs`: 48 passed,
+  0 failed (6 emulator-mode tests). `npx --no-install eslint src/lib/firebase.ts
+  tests/emulator-mode.test.mjs` from web: 0 errors/warnings; pre-edit firebase.ts
+  lint also clean. `npx --no-install tsc -p tsconfig.app.json --noEmit`: the same
+  4 baseline errors, no new errors. `npm run build`: passed. Approved demo-project
+  and Analytics correction included. No emulator startup or live calls.
 
 ## P1.0c Silent mode (no real Slack, push, or payOS from the emulator)
 
@@ -134,7 +155,16 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
 - Test isolation rule (all later slices): any test that asserts a real Slack / push / payOS
   call runs `delete process.env.FUNCTIONS_EMULATOR` in its setup, so results do not depend
   on whether the suite runs under `firebase emulators:exec` (P1.9, P1.10, P2.8, P2.9, MVP e2e).
-- Evidence: _empty_
+- Evidence (2026-10-20): `cd web && node --test tests/*.test.mjs`: 49 passed,
+  0 failed. `server-mute.test.mjs` covers muted and normal Slack, both push sends,
+  checkout persistence and relative mock URL. Pre-implementation test failed
+  on missing mute module. Existing `payment-server.test.mjs` received only the
+  extracted handler's new `isMuted: () => false` dependency in its mock context;
+  its fake and assertions are unchanged. Outbound inventory matches the listed
+  sends; webhook verify remains local. `node --check` on all three server files
+  passes. Web ESLint on both test files passes; server files are outside web's
+  ESLint base (same 2 ignored-file warnings before edits). Full type check keeps
+  4 existing errors; build passes. No integrations invoked.
 
 ## P1.1 Group helpers
 
@@ -168,7 +198,11 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   and /platform`, `makeGroupId Vietnamese` (`"Cầu Lông Đà Nẵng"` → `cau-long-da-nang-xxxx`),
   `publicUrlFor default unchanged / other group path`.
 - Acceptance: tests pass; no other file changed.
-- Evidence: _empty_
+- Evidence (2026-10-20): full `cd web && node --test tests/*.test.mjs`: 59 passed,
+  0 failed (10 group-helper tests). Tests first failed on missing groups.ts.
+  `npx --no-install eslint src/lib/groups.ts tests/groups-helpers.test.mjs` clean;
+  `npx --no-install tsc -p tsconfig.app.json --noEmit` has only the 4 baseline
+  errors; `npm run build` passes. No source files outside the slice changed.
 
 ## P1.2 Migration script (fixture only)
 
@@ -199,7 +233,12 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   `group doc not overwritten`, `existing group doc without sport gets sport football`,
   `batches ≤400` (fixture with 900 shares).
 - Acceptance: tests pass; script never run against production by the executor.
-- Evidence: _empty_
+- Evidence (2026-10-20): `cd web && node --test tests/*.test.mjs`: 67 passed,
+  0 failed (8 migration tests covering all listed cases including 900 shares).
+  Tests first failed on missing script. Focused migration tests: 8/8.
+  ESLint on migration test clean; full type check keeps only 4 baseline errors;
+  build passes. Only exported run() was invoked against fake Firestore, never
+  the CLI or production. Missing groupId uses update; second apply writes zero.
 
 ## P1.3a Group context and routes
 
@@ -225,7 +264,18 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   P1.3d wraps them in `RequireFeature`.
 - Browser check: `/public`, `/public/pay`, `/admin/matches`, `/login`,
   `/public/attendance?x=1` all land on `/g/football-zigvy/...` with query.
-- Evidence: _empty_
+- Evidence (2026-10-20): full suite 72 passed, 0 failed (`cd web && node --test
+  tests/*.test.mjs`); 5 route/context tests pass. `npx --no-install eslint
+  src/App.tsx src/contexts/GroupContext.tsx tests/group-routes.test.mjs`: 0 errors,
+  2 new fast-refresh warnings for the required hook exports in GroupContext.
+  App.tsx pre-edit lint clean. Full tsc: same 4 baseline errors. Build passes,
+  with NotFound now both static (provider) and lazy (App), a Vite warning.
+  Local browser verified all listed redirects and preserved `?x=1`; signed-out
+  `/admin/matches` correctly reaches group login. Browser ran with demo-football
+  Auth/Firestore and the migrated seed only. Local processes needed sandbox
+  escalation for ports. Vite's default 8080 conflicts with Firestore; used
+  `npm run dev -- --host 127.0.0.1 --port 5173`. Functions not started for route
+  checks; no outbound integration requests were triggered.
 
 ## P1.3b Shared navigation links
 
@@ -244,7 +294,11 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   files still to fix in P1.3c/P1.3f (start with every matching file, e.g. `pages/TeamLocked.tsx`).
   The test fails if a file not in either list matches, or if a `PENDING` file no
   longer matches (forces list shrink). P1.3c and P1.3f empty `PENDING`.
-- Evidence: _empty_
+- Evidence (2026-10-20): `cd web && node --test tests/*.test.mjs`: 73 passed,
+  0 failed. New scan test first caught AdminLayout, then passed. Full tsc:
+  same 4 baseline errors; build passes. Targeted ESLint preserves the 2 pre-edit
+  Login.tsx no-explicit-any errors (now lines 55/56); other touched source and
+  test files clean. Changed only the four listed source files and scan test.
 
 ## P1.3c In-page navigation
 
@@ -253,7 +307,13 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   (~761), `web/src/pages/PublicPortal.tsx` (links ~501, ~517, ~532).
   `TeamLocked.tsx` is done in P1.3f.
 - Same replacement. Remove these files from `PENDING` in `no-legacy-paths.test.mjs`.
-- Evidence: _empty_
+- Evidence (2026-10-20): full suite 73 passed, 0 failed; legacy path scan now
+  has only TeamLocked in PENDING. Existing attendance/match-time tests received
+  explicit useGroupPath mocks for the new page dependency; assertions unchanged.
+  Tsc has only the same 4 baseline errors (line drift +2 in Matches/SetupMatch).
+  Build passes. Pre-edit ESLint: Attendance 0 errors/0 warnings, Matches 1/0,
+  PublicPortal 1/0, SetupMatch 5/1. Group-path callback dependency added rather
+  than suppressing its warning; existing findings retained.
 
 ## P1.3d Feature registry, Football routes and nav
 
@@ -284,7 +344,12 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   `RequireFeature` with a stub child and a stub `useGroup`, not the real 1000+ line pages,
   `nav has Scoring/Live for football-zigvy, not for badm-1`, `auto-redirect skips
   scoring/live for badm-1`, `auto-redirect waits for group load` (loading → no navigate).
-- Evidence: _empty_
+- Evidence (2026-10-20): full suite 78 passed, 0 failed; 5 feature tests cover
+  every registry case, RequireFeature, both nav states, hidden-only tabs and
+  loading redirect. Test-first failed on missing features.ts. Targeted ESLint
+  clean; full type check keeps 4 baseline errors; build passes. App's own home
+  redirect also filters Football tabs so it cannot bypass the nav filter.
+  Existing route test received only the new features-module mock.
 
 ## P1.3e Gate Football sections inside core pages
 
@@ -309,7 +374,14 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   and `core content still renders` (attendance list, portal pay link, matches list,
   Config page loads), `Config reads appConfig for football-zigvy`, `Config does not
   read appConfig for badm-1`. Keep `attendance.test.mjs` passing.
-- Evidence: _empty_
+- Evidence (2026-10-20): `cd web && node --test tests/*.test.mjs`: 83 passed,
+  0 failed, including 5 hidden-section tests and existing attendance tests.
+  Tests reproduced missing gates before source edits. Attendance, Portal,
+  Matches and Config now gate JSX only; Config also skips the passcode read
+  and clears loading for other groups. Full tsc: same 4 baseline errors.
+  `npm run build` passes. Targeted ESLint: same 2 pre-existing no-explicit-any
+  errors (Matches and Portal), no new findings; Config/Attendance/tests clean.
+  Existing attendance test gained explicit group/feature mocks, assertions kept.
 
 ## P1.3f Light group filter on Football pages
 
@@ -345,7 +417,13 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   `scoring still writes configs/scoringWeights` (global doc kept).
 - Indexes: `groupId + status + date desc` and `groupId + date desc` are already in
   P1.11; `status ==` without orderBy needs no composite. Verify with the emulator in P1.11.
-- Evidence: _empty_
+- Evidence (2026-10-20): `cd web && node --test tests/*.test.mjs`: 90 passed,
+  0 failed; 7 Football-page tests cover all listed queries, wrong-group match
+  selection, the team-lock link and global scoringWeights writes. Before edits,
+  six of the seven tests failed on missing filters/links. PENDING legacy paths
+  is now empty. Full tsc retains only 4 baseline errors; build passes. ESLint
+  before/after unchanged: LiveNotes 5 errors, ScoringMatches 5, TeamLocked 1,
+  PublicRatings 0; no new warnings.
 
 ## P1.4 Members
 
@@ -360,7 +438,13 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
 - Tests (mountPage + fake firestore): `members list query has groupId`,
   `create member writes groupId`, `paid history CG query has groupId`,
   `member from other group fetched by id is hidden`.
-- Evidence: _empty_
+- Evidence (2026-10-20): `cd web && node --test tests/*.test.mjs`: 95 passed,
+  0 failed; 5 member tests cover list/create, paid totals/history and other-group
+  member detail rejection. All five failed before edits. Added a member doc read
+  in MemberDetails to enforce the listed doc-id acceptance check; current code
+  had no such read (anchor drift: the other listed member references are writes).
+  Full tsc: same 4 baseline errors; build passes. Members ESLint unchanged at
+  1 error/1 warning before and after. No Auth calls ran.
 
 ## P1.5 Setup Match
 
@@ -380,7 +464,14 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   configs/last_match`, `non-default group does NOT read legacy config`,
   `new match and shares carry groupId`, `match from other group redirects`,
   `publish payload has groupId`. Re-run existing `match-time.test.mjs`.
-- Evidence: _empty_
+- Evidence (2026-10-20): `cd web && node --test tests/*.test.mjs`: 100 passed,
+  0 failed; focused Setup Match + match-time: 18 passed. Five new tests failed
+  before edits and cover settings/fallback, scoped members, match/share creates,
+  wrong-group id rejection and both notification payloads. Saved config writes
+  only the new path; existing match-time assertion moved to that path, with all
+  behavior assertions retained. Copied attendance URL now uses groupPath too.
+  Full tsc retains the same 4 baseline errors; build passes. SetupMatch ESLint
+  unchanged at 5 errors/1 warning before and after.
 
 ## P1.6 Matches page
 
@@ -392,7 +483,13 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
 - `LiveNotes.tsx`, `ScoringMatches.tsx`: done in P1.3f. `Dashboard.tsx`: deferred, untouched.
 - Tests: `matches query carries groupId`, `members query carries groupId`,
   `pending shares CG query carries groupId`, `new share writes carry groupId`.
-- Evidence: _empty_
+- Evidence (2026-10-20): full suite 104 passed, 0 failed; 4 admin-page tests,
+  including real page query results against two-group fixtures. Three query
+  tests failed before edits. Anchor drift: Matches has no share create path
+  in current code (only update/delete); no new creation behavior was invented.
+  AST guard records that fact and requires review if a create path is added.
+  Full tsc: same 4 baseline errors; build passes. Matches ESLint retains its
+  single pre-existing no-explicit-any error; test lint clean.
 
 ## P1.7 Public pages and attendance
 
@@ -412,7 +509,14 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
 - Tests: `attendance pending matches query has groupId`, `attendance members query has groupId`,
   `portal localStorage key scoped`, `notify payload has groupId`,
   `saveNotificationToken writes groupId`.
-- Evidence: _empty_
+- Evidence (2026-10-20): full suite 108 passed, 0 failed; 4 new public-page
+  tests failed before edits, now cover both attendance queries, notify payload,
+  both Portal queries, scoped localStorage and registration persistence.
+  Shared helper callers inventoried: Attendance, PublicPortal and Pay. Pay's
+  registration call received groupId in this slice to keep its required helper
+  signature valid; its existing tests received only a group-context mock.
+  Full tsc: same 4 baseline errors; build passes. Targeted lint retains only
+  Portal's pre-existing any error; notifications.ts was clean before and after.
 
 ## P1.8 Pay page
 
@@ -427,7 +531,13 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
 - `create-payment-link` body (fetch ~866 and `postJson` ~925): add `groupId`.
 - Tests: `pending debts query has groupId`, `localStorage key scoped`,
   `checkout payload has groupId`, `other-group match ignored`, `exempt member rating-only entries unchanged`.
-- Evidence: _empty_
+- Evidence (2026-10-20): full suite 111 passed, 0 failed; focused Pay tests 9/9.
+  Three new tests failed before edits, now cover individual/group checkout,
+  group-filtered share queries, wrong-group parent matches, scoped storage and
+  exempt-member rating-only entries. CG ratings and disabled rating writes kept.
+  Existing Pay fixtures gained default groupId and expected checkout groupId;
+  behavior assertions retained. Full tsc: same 4 baseline errors; build passes.
+  Pay ESLint unchanged at 7 errors/0 warnings (baseline reconstructed from HEAD).
 
 ## P1.9 Server payments
 
@@ -451,7 +561,12 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   `default return URL unchanged`, `webhook writes groupId to notification/rating/queue`,
   `legacy request without groupId → football`, `alreadyPaidShareCount counted`,
   `duplicate webhook still idempotent` (existing behavior).
-- Evidence: _empty_
+- Evidence (2026-10-20): full suite 118 passed, 0 failed; focused payment/mute
+  regressions 14/14. Seven new tests failed before edits and cover all listed
+  payment-group cases plus legacy share-id filtering. Extracted-handler fixtures
+  received group helpers and URL in their mock contexts. Mock payOS only; no
+  live calls. Full tsc: same 4 baseline errors; build passes; new/adjusted payment
+  tests lint clean. Return URLs remain unchanged for the default group.
 
 ## P1.10 Server notifications, jobs, tokens
 
@@ -485,11 +600,25 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   `member-action rejects member from other group`, `slackQueue entry has groupId`,
   `Slack skipped for non-default group`, `public URL per group`, `debtReminder groups by group`,
   `teams/propose and teams/lock reject non-football match 404`.
-- Evidence: _empty_
+- Evidence (2026-10-20): full suite 126 passed, 0 failed; 8 notification/job
+  tests cover token scoping, legacy tokens, all five conflicting-body guards,
+  member mismatch with supplied name, auto-attendance group isolation, queue
+  context, team guards and all six scheduled jobs. Tests failed before edits.
+  All 14 Slack send sites are default-group guarded and URLs use publicUrlFor.
+  Payment queues and debt reminders partition by group; attendance queues keep
+  group+match keys. Retry flags and cleanup behavior preserved. Silent-mode
+  regression updated only for its new collectGroupTokens mock. `node --check
+  server/index.js`, targeted test lint and build pass. Tsc keeps 4 baseline errors.
 
 ## P1.11 Indexes, rehearsal, runbook
 
 - Files: MODIFY `firestore.indexes.json`, CREATE `web/tests/indexes.test.mjs`, update this file.
+- Approved scope correction (2026-10-20): also MODIFY `web/src/pages/Login.tsx`
+  to group-filter the member list (moved forward from P2.7), and
+  `web/src/components/AdminLayout.tsx` to group-filter notifications and validate
+  a notification's match group before navigation (master §4–§5, missing from the
+  original slice list). Add regression tests in `group-routes.test.mjs` and
+  `admin-pages-group.test.mjs`. P2.7 retains its role/after-login changes.
 - Add (keep all existing entries):
 
 ```json
@@ -532,7 +661,23 @@ updateDoc, writeBatch, runTransaction, serverTimestamp, Timestamp, documentId`).
   Setup Match → attendance → Calculate & Publish → Pay (mock link) → history,
   all under `/g/football-zigvy/...`; legacy URLs redirect with query.
 - Write the runbook from master §11 steps 1–3, 5–7 into handoff notes for the user.
-- Evidence: _empty_
+- Evidence (2026-10-20): full suite 131 passed, 0 failed; build and server
+  syntax check pass; full tsc retains the same 4 baseline errors. Index JSON
+  has all 11 additions and no duplicates; migration rehearsal preserves totals
+  and paid/unpaid counts and its second apply writes zero. Added login and
+  notification guards under explicit user approval. SDK compatibility fix also
+  approved: modular FieldValue/Timestamp imports replace legacy namespace
+  references; regression suite first failed 4 cases, then passed.
+  Local browser verified scoped six-member list, seeded setup, attendance,
+  Calculate & Publish, mock checkout with query preserved, and match history.
+  Functions logs show muted push/Slack/payOS; no external sends. Non-default
+  public page shows only Attendance and Pay. Legacy redirects were verified
+  in P1.3a. Query inventory reviewed: reads are scoped or document-ID reads
+  with group checks; create refs and old commented code are not reads.
+  PENDING legacy-path list is empty. Proof: phase1-history.png in the task's
+  visualization folder. Baseline PaymentCancel retry still points to /pay,
+  outside the slice's navigation file map; recorded as an existing limitation.
+
 
 ## Phase 1 exit criteria
 
@@ -554,6 +699,116 @@ the handoff notes."
 
 ## Handoff notes
 
-Implementation: not started. Next slice: P1.0.
+Implementation: Phase 1 complete (2026-10-20). Next slice: P2.1.
+User approved continuous execution through Phases 1 and 2; no browser checks
+before both P1.0b and P1.0c.
 Record per conversation: slices done, changed files, test counts, decisions,
 anchor drift found, next slice.
+
+### P1.0 handoff — 2026-10-20
+
+- Branch: `docs/group-platform-plans`; started with a clean working tree.
+- Created `web/tests/fake-firestore.mjs` and `web/tests/fake-firestore.test.mjs`.
+  Updated this phase's Evidence/status/handoff and master §13/status only.
+  Existing `payment-server.test.mjs` and application code are unchanged.
+- Helper API: `createFakeFirestore(initialObjectOrMap)` returns
+  `{ db, firestore, records, log, FieldValue, Timestamp }`. `db` is the Admin SDK
+  style API; pass `firestore` as the `firebase/firestore` module mock in
+  `loadSource`/`mountPage`. Both use the same records. Server snapshots expose
+  boolean `exists`; client snapshots expose `exists()`. Query constraints are
+  objects: `{ type: "where", field, op, value }`,
+  `{ type: "orderBy", field, direction }`, `{ type: "limit", count }`.
+  Executed queries and committed writes are logged; snapshots and log data are
+  copied. Failed transactions/batches leave writes unapplied. Timestamp stubs
+  support `toDate`/`toMillis`; server time is fixed at `2026-10-20T00:00:00Z`.
+  Rules, contention/retries and indexes still need their planned emulator tests.
+- Checks: 42/42 full-suite tests, 13/13 helper tests, lint clean, build passes;
+  4 pre-existing TypeScript errors unchanged (details in P1.0 Evidence).
+- Anchor drift: none (no existing source changed). `docs/index.md` is absent;
+  used the requested plan index and master architecture before targeted reads.
+- Approval: user approved plan edits. No dependencies added, secrets accessed,
+  network integrations called, production operations run, commits or pushes.
+
+### P1.0b preflight — 2026-10-20
+
+- User approved continuing the plan; Phases 1 and 2 are active, Phase 3 stays
+  deferred under master §15. P1.0b source implementation has not started.
+- Blocking plan gap: P1.0b specifies emulator connections but leaves the app's
+  `initializeApp(firebaseConfig)` project ID as `foolball-payment`
+  (`web/src/lib/firebase.ts:13,21`). The seed script and CLI use `demo-football`.
+  These are different project namespaces; connecting to localhost alone does
+  not align the browser's database/Auth project with seeded data or Functions.
+  Firebase requires matching project IDs for emulator cross-service interaction:
+  https://firebase.google.com/docs/emulator-suite/connect_auth.
+- Correction approved by user (2026-10-20): when `VITE_USE_EMULATORS`
+  is true, initialize the web app with demo-only config (`projectId:
+  "demo-football"` and fake public config values), connect both emulators and
+  skip Analytics as well as Messaging so emulator mode has no live analytics
+  calls. When unset, preserve the existing initialization. Add tests proving
+  browser/CLI/seed project IDs match and emulator mode skips both integrations.
+  P1.0b updated in place. No P1.0b source edits or emulator
+  startup occurred during this preflight.
+
+### Continuous execution handoff — 2026-10-20
+
+- Completed P1.0, P1.0b, P1.0c, P1.1, P1.2, P1.3a–e. Evidence is recorded under
+  each slice. Latest full suite: 83 passed, 0 failed. Build passes; 4 existing
+  type errors remain. No deploy, production migration, real accounts or live
+  integrations, no commits/pushes.
+- User clarified account-level platform login is the main entry. Their existing
+  Firebase Auth identity (same UID/email/password) will be preserved: P1.2 maps
+  existing staff to default-group memberships; P2.3 grants the existing UID
+  platform owner rights without creating an Auth user. The retained group staff
+  login is a separate entry under the current plan. Phase 3 stays deferred.
+- Auth/Firestore demo emulators and local Vite were started for P1.3a browser
+  checks; revalidate process handles before using them. Do not start a second
+  emulator set solely because a previous observation timed out.
+
+### P1.11 browser preflight — SDK compatibility gap (2026-10-20)
+
+- P1.0–P1.10 complete; P1.11 automated checks pass (130/130 full suite).
+  Login member filtering and AdminLayout notification query/match guards were
+  added under the user's explicit P1.11 scope approval.
+- Local browser: signed in using the demo fixture; Football member list shows
+  only six Football records; seeded match setup loads; attendance writes succeed.
+- Blocking browser error: `/notify/member-action` returns 500 because
+  `admin.firestore.FieldValue` is undefined in the Functions emulator worker.
+  The same namespace is used by checkout, webhook and jobs in the baseline.
+  Instrumentation in the isolated `/tmp/football-group-emulators/server` copy
+  confirms namespace FieldValue undefined while
+  `require("firebase-admin/firestore").FieldValue` is a function. The installed
+  SDK is 12.7.0; plain Node resolves both APIs, so this is worker-specific.
+  No repository server change has been made for this gap.
+- Correction approved by user (2026-10-20): use modular FieldValue and
+  Timestamp imports from the already-installed `firebase-admin/firestore` in
+  server/index.js, replacing namespace references; add a compatibility
+  regression and adjust handler mocks. No dependency changes. Resume the
+  browser checklist after approval, then fill P1.11 Evidence and its runbook.
+- Emulators: session 83446, auth9099/firestore8080/functions5001, demo-football;
+  isolated source omits all actual env/credential files and injects dummy payOS
+  configuration and silent mode. Vite session 26138 on port5173. Revalidate
+  handles before resuming. Temp worker has SDK type-only diagnostic logs.
+- Seed readiness fixes: fixture loginEnabled true; attendanceCloseHours zero
+  keeps the pending fixture open. Emulator-mode tests cover both.
+- No production operations, real accounts, live integrations, commits or pushes.
+
+### Phase 1 completion and user runbook — 2026-10-20
+
+- All Phase 1 slices complete. Phase 2 remains required; no release/deploy
+  has happened. Owner keeps the same existing Firebase Auth UID/password.
+- User-only production sequence, after Phase 2 is finished and reviewed:
+  0. Export a Firestore backup with gcloud to a user-selected bucket.
+  1. Run `node server/scripts/migrate-default-group.js --owner-uid <UID>`
+     dry-run; review collection counts. Get UID from Firebase Authentication.
+  2. Repeat with `--apply --production`; repeat again and expect zero writes.
+     Migrate before deploying new code so Football lists are not empty.
+  3. Run `firebase deploy --only firestore:indexes`; wait for Enabled status.
+  4. Phase 2 adds the owner seed step; use the same UID without creating Auth.
+  5. Deploy rules/functions, then web, only after explicit release review.
+  6. Repeat migration apply to catch records from old clients during rollout.
+  7. Check legacy and group public/admin URLs, missing-index console messages,
+     and a sandbox payment if available. Restore exported backup if necessary.
+- These commands are preparation only; the executor ran none against production.
+- Browser SDK blocker resolved under user approval; no diagnostic probe remains
+  in the isolated source. Latest full suite 131/131; build passes, same four
+  pre-existing TypeScript errors.

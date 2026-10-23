@@ -1,7 +1,10 @@
-import { useLocation } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
+import { DEFAULT_GROUP_ID, groupPath, isValidGroupId } from "@/lib/groups";
 import { useEffect } from "react";
 
 const NotFound = () => {
+  const { groupId } = useParams();
+  const home = groupPath(groupId && isValidGroupId(groupId) ? groupId : DEFAULT_GROUP_ID, "public");
   const location = useLocation();
 
   useEffect(() => {
@@ -17,7 +20,7 @@ const NotFound = () => {
         <h1 className="mb-4 text-4xl font-bold">404</h1>
         <p className="mb-4 text-xl text-gray-600">Oops! Page not found</p>
         <a
-          href="/public"
+          href={home}
           className="text-blue-500 underline hover:text-blue-700"
         >
           Return to Home

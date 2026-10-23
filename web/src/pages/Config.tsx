@@ -1,3 +1,6 @@
+import { apiRequest } from "@/lib/api";
+import { hasFeature } from "@/lib/features";
+import { useGroup } from "@/contexts/GroupContext";
 import { useState, useEffect } from "react";
 import {
   Card,
@@ -21,6 +24,7 @@ const generateRandom = () =>
   Math.random().toString(36).slice(2, 8).toUpperCase();
 
 const Config = () => {
+  const { groupId, group } = useGroup();
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -31,7 +35,44 @@ const Config = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
+  const [channelId, setChannelId] = useState("");
+  const [channelLabel, setChannelLabel] = useState("");
+  const [botConfigured, setBotConfigured] = useState(false);
+  const [slackLoading, setSlackLoading] = useState(true);
+  const [slackBusy, setSlackBusy] = useState(false);
   useEffect(() => {
+    let cancelled = false;
+    setSlackLoading(true);
+    apiRequest("GET", `/groups/${groupId}/settings`).then((data) => {
+      if (cancelled) return;
+      setChannelId(data.channelId || ""); setChannelLabel(data.channelLabel || ""); setBotConfigured(data.botConfigured);
+    }).catch(() => { if (!cancelled) toast({ variant: "destructive", title: "Không thể tải cấu hình Slack" }); })
+      .finally(() => { if (!cancelled) setSlackLoading(false); });
+    return () => { cancelled = true; };
+  }, [groupId, toast]);
+  const handleSlackSave = async () => {
+    setSlackBusy(true);
+    try {
+      await apiRequest("PUT", `/groups/${groupId}/settings`, { channelId, channelLabel });
+      setChannelId(channelId.trim().toUpperCase()); toast({ title: "Đã lưu cấu hình Slack" });
+    } catch { toast({ variant: "destructive", title: "Không thể lưu cấu hình Slack", description: "Kiểm tra lại Channel ID." }); }
+    finally { setSlackBusy(false); }
+  };
+  const handleSlackTest = async () => {
+    setSlackBusy(true);
+    try {
+      const result = await apiRequest("POST", `/groups/${groupId}/settings/slack-test`);
+      toast({ title: result.muted ? "Chế độ test: không gửi thật lên Slack." : "Đã gửi tin nhắn thử" });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      const description = code === "SLACK_NOT_IN_CHANNEL" ? "Bot chưa ở trong channel. Hãy /invite bot vào channel." : code === "SLACK_CHANNEL_NOT_FOUND" ? "Không tìm thấy channel. Kiểm tra lại Channel ID. Nếu là private channel, hãy /invite bot vào channel." : "Gửi thử thất bại.";
+      toast({ variant: "destructive", title: "Không thể gửi thử", description });
+    } finally { setSlackBusy(false); }
+  };
+
+  const canProposeTeams = hasFeature(groupId, group, "teamPropose");
+  useEffect(() => {
+    if (!canProposeTeams) { setIsLoading(false); return; }
     const fetchPasscode = async () => {
       setIsLoading(true);
       try {
@@ -48,7 +89,7 @@ const Config = () => {
       }
     };
     fetchPasscode();
-  }, [toast]);
+  }, [toast, canProposeTeams]);
 
   const handleSave = async () => {
     if (!newPasscode.trim()) {
@@ -98,11 +139,20 @@ const Config = () => {
           </div>
           <div>
             <h1 className="text-3xl font-bold text-foreground">Cấu hình hệ thống</h1>
-            <p className="text-muted-foreground">Quản lý passcode cho các tính năng public</p>
+            <p className="text-muted-foreground">Cấu hình thông báo cho nhóm</p>
           </div>
         </div>
 
-        <Card className="shadow-card">
+        <Card className="shadow-card mb-6">
+          <CardHeader><CardTitle>Thông báo Slack</CardTitle><CardDescription>Mở channel → bấm tên channel → tab About → copy Channel ID (dạng C0123ABCD). Trong channel gõ /invite @&lt;tên bot&gt;. Để trống = không gửi Slack.</CardDescription></CardHeader>
+          <CardContent className="space-y-4">
+            {!botConfigured && <p role="status">Slack bot chưa được cấu hình trên server.</p>}
+            <div><Label htmlFor="slack-channel">Channel ID</Label><Input id="slack-channel" value={channelId} onChange={(event) => setChannelId(event.target.value)} disabled={slackLoading || slackBusy} /></div>
+            <div><Label htmlFor="slack-label">Tên hiển thị</Label><Input id="slack-label" value={channelLabel} onChange={(event) => setChannelLabel(event.target.value)} disabled={slackLoading || slackBusy} /></div>
+            <div className="flex gap-2"><Button onClick={handleSlackSave} disabled={slackLoading || slackBusy}>Lưu</Button><Button variant="outline" onClick={handleSlackTest} disabled={slackLoading || slackBusy || !botConfigured}>Gửi thử</Button></div>
+          </CardContent>
+        </Card>
+        {hasFeature(groupId, group, "teamPropose") && (<Card className="shadow-card">
           <CardHeader>
             <CardTitle>Passcode gửi đội hình</CardTitle>
             <CardDescription>
@@ -226,7 +276,7 @@ const Config = () => {
               Lưu passcode mới
             </Button>
           </CardContent>
-        </Card>
+        </Card>)}
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+import { hasFeature } from "@/lib/features";
+import { useGroup, useGroupPath } from "@/contexts/GroupContext";
 import { useState, useEffect, useCallback, useMemo, useRef, DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -48,15 +50,11 @@ import {
   collection,
   getDocs,
   doc,
-  runTransaction,
   Timestamp,
   query,
   orderBy,
   where,
   onSnapshot,
-  updateDoc,
-  addDoc,
-  serverTimestamp,
 } from "firebase/firestore";
 import { useToast } from "@/components/ui/use-toast";
 import { db } from "@/lib/firebase";
@@ -116,6 +114,8 @@ interface Team {
 }
 
 const Attendance = () => {
+  const { groupId, group } = useGroup();
+  const groupPath = useGroupPath();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -258,6 +258,7 @@ const Attendance = () => {
     try {
       const matchesQuery = query(
         collection(db, "matches"),
+        where("groupId", "==", groupId),
         where("status", "==", "PENDING"),
         orderBy("createdAt", "desc")
       );
@@ -276,7 +277,7 @@ const Attendance = () => {
       }
 
       const [membersSnapshot, attendanceSnapshot, notAttendanceSnapshot] = await Promise.all([
-        getDocs(query(collection(db, "members"), orderBy("name", "asc"))),
+        getDocs(query(collection(db, "members"), where("groupId", "==", groupId), orderBy("name", "asc"))),
         getDocs(collection(db, "matches", selectedMatch.id, "attendance")),
         getDocs(collection(db, "matches", selectedMatch.id, "not_attending")),
       ]);
@@ -303,7 +304,7 @@ const Attendance = () => {
     } finally {
       if (version === fetchVersion.current) setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, groupId]);
 
   useEffect(() => {
     const requests = fetchVersion;
@@ -367,7 +368,7 @@ const Attendance = () => {
   const handleRegisterNotification = async () => {
     setIsRegisteringNotif(true);
     try {
-      const token = await ensureNotificationToken(null);
+      const token = await ensureNotificationToken(null, groupId);
       if (token) {
         setNotifPermission("granted");
         toast({
@@ -406,75 +407,13 @@ const Attendance = () => {
     if (status === "attending" && attendance.has(memberId)) return;
     if (status === "not_attending" && notAttendance.has(memberId)) return;
 
-    // Capture prior state to determine action type for log + Slack.
-    const wasAttending = attendance.has(memberId);
-    const wasNotAttending = notAttendance.has(memberId);
-
     setIsSubmitting((prev) => new Set(prev).add(memberId));
-    const attendanceRef = doc(db, "matches", matchId, "attendance", memberId);
-    const notAttendanceRef = doc(
-      db,
-      "matches",
-      matchId,
-      "not_attending",
-      memberId
-    );
-
     try {
-      await runTransaction(db, async (transaction) => {
-        const record = {
-          timestamp: Timestamp.now(),
-          memberName: memberName,
-          userAgent: navigator.userAgent,
-        };
-
-        if (status === "attending") {
-          transaction.set(attendanceRef, record);
-          transaction.delete(notAttendanceRef);
-        } else {
-          transaction.set(notAttendanceRef, record);
-          transaction.delete(attendanceRef);
-        }
-      });
-
-      // Build action log entries (Q1: A — record both cancel + new state).
-      const logCol = collection(db, "matches", matchId, "attendanceLog");
-      const baseLog = {
+      await postApiJson(`/public/${groupId}/attendance`, {
+        matchId,
         memberId,
-        memberName,
-        userAgent: navigator.userAgent,
-        timestamp: serverTimestamp(),
-      };
-
-      const actionsForApi: string[] = [];
-
-      if (status === "attending") {
-        if (wasNotAttending) {
-          actionsForApi.push("CANCEL_NOT_ATTEND");
-        }
-        await addDoc(logCol, { ...baseLog, type: "ATTEND" });
-        actionsForApi.push("ATTEND");
-      } else {
-        if (wasAttending) {
-          await addDoc(logCol, { ...baseLog, type: "CANCEL_ATTEND" });
-          actionsForApi.push("CANCEL_ATTEND");
-        } else {
-          await addDoc(logCol, { ...baseLog, type: "NOT_ATTEND" });
-          actionsForApi.push("NOT_ATTEND");
-        }
-      }
-
-      // Fire Slack notifications (server queues / fires according to type).
-      Promise.all(
-        actionsForApi.map((action) =>
-          postApiJson("/notify/member-action", {
-            matchId,
-            memberId,
-            memberName,
-            action,
-          })
-        )
-      ).catch((err) => console.error("notify/member-action failed", err));
+        action: status,
+      });
 
       // Optimistic UI update
       if (status === "attending") {
@@ -578,9 +517,9 @@ const Attendance = () => {
   }, [attendance, attendanceMembers, match, membersMap]);
 
   useEffect(() => {
-    if (!match || teamBuilderInitialized || isLoading) return;
+    if (!hasFeature(groupId, group, "teamPropose") || !match || teamBuilderInitialized || isLoading) return;
     initializeTeamsFromMatch();
-  }, [initializeTeamsFromMatch, isLoading, match, teamBuilderInitialized]);
+  }, [initializeTeamsFromMatch, isLoading, match, teamBuilderInitialized, groupId, group]);
 
   useEffect(() => {
     if (!teamBuilderInitialized) return;
@@ -758,7 +697,7 @@ const Attendance = () => {
         <p className="text-muted-foreground mb-8">
           Vui lòng chờ quản trị viên tạo trận đấu mới.
         </p>
-        <Button onClick={() => navigate("/public")}>
+        <Button onClick={() => navigate(groupPath("public"))}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Quay lại
         </Button>
@@ -1161,9 +1100,9 @@ const Attendance = () => {
                     }
                     onClick={async (e) => {
                       e.stopPropagation();
-                      const memberRef = doc(db, "members", member.id);
-                      await updateDoc(memberRef, {
-                        autoAttendance: !member.autoAttendance,
+                      await postApiJson(`/public/${groupId}/auto-attendance`, {
+                        memberId: member.id,
+                        enabled: !member.autoAttendance,
                       });
                       fetchMatchAndMembers();
                     }}
@@ -1267,7 +1206,7 @@ const Attendance = () => {
           </div>
         )}
 
-        <Card className="mt-10 shadow-card">
+        {hasFeature(groupId, group, "teamPropose") && (<Card className="mt-10 shadow-card">
           <CardHeader>
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div className="space-y-1.5">
@@ -1493,7 +1432,7 @@ const Attendance = () => {
               )}
             </div>
           </CardContent>
-        </Card>
+        </Card>)}
       </div>
     </div>
   );

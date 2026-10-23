@@ -1,11 +1,13 @@
 // Slack notification helper.
-// Posts messages to a single Incoming Webhook configured via SLACK_WEBHOOK_URL.
+// Posts to a group channel or a configured Incoming Webhook.
 // Silent fail when not configured so the app keeps working without Slack.
 
 const axios = require("axios");
 const cfg = require("./slackConfig");
+const { isMuted } = require("./mute");
 
 const WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
+const BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 let rawUrl = process.env.SLACK_PUBLIC_WEB_URL || "https://foolball-payment.web.app/public";
 if (rawUrl.endsWith("/")) {
   rawUrl = rawUrl.slice(0, -1);
@@ -16,7 +18,7 @@ if (!rawUrl.endsWith("/public")) {
 const PUBLIC_WEB_URL = rawUrl;
 const TZ = cfg.TIMEZONE;
 
-const isConfigured = () => Boolean(WEBHOOK_URL);
+const isConfigured = (target) => target?.channelId ? Boolean(BOT_TOKEN) : Boolean(target?.webhookUrl || WEBHOOK_URL);
 
 const formatVnd = (n) => {
   if (typeof n !== "number") return "0";
@@ -91,27 +93,36 @@ const formatTimestamp = (ts) => {
  * @param {object} payload Slack message payload (text or blocks).
  * @returns {Promise<boolean>} true if posted, false if skipped/failed.
  */
-const postToSlack = async (payload) => {
-  if (!isConfigured()) {
-    console.warn("[slack] SLACK_WEBHOOK_URL not set — skipping");
-    return false;
+const postToSlackDetailed = async (payload, target) => {
+  if (isMuted()) { console.log("[muted] slack", payload.text ?? ""); return { ok: true, muted: true }; }
+  if (!isConfigured(target)) {
+    console.warn(target?.channelId ? "[slack] SLACK_BOT_TOKEN not set — skipping" : "[slack] SLACK_WEBHOOK_URL not set — skipping");
+    return { ok: false, error: "not_configured" };
   }
   try {
-    await axios.post(WEBHOOK_URL, payload, {
-      headers: { "Content-Type": "application/json" },
-      timeout: 10000,
+    if (target?.channelId) {
+      const res = await axios.post("https://slack.com/api/chat.postMessage", { ...payload, channel: target.channelId }, {
+        headers: { Authorization: `Bearer ${BOT_TOKEN}`, "Content-Type": "application/json; charset=utf-8" }, timeout: 10000,
+      });
+      if (res.data?.ok === false) {
+        console.warn("[slack] chat.postMessage failed:", res.data.error);
+        return { ok: false, error: res.data.error };
+      }
+    } else await axios.post(target?.webhookUrl || WEBHOOK_URL, payload, {
+      headers: { "Content-Type": "application/json" }, timeout: 10000,
     });
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error("[slack] post failed:", err.message);
-    return false;
+    return { ok: false, error: err.message };
   }
 };
+const postToSlack = async (payload, target) => (await postToSlackDetailed(payload, target)).ok;
 
 /**
  * Quick text message.
  */
-const sendText = (text) => postToSlack({ text });
+const sendText = (text, target) => postToSlack({ text }, target);
 
 /**
  * Block Kit message with sections + optional CTA button.
@@ -122,7 +133,7 @@ const sendText = (text) => postToSlack({ text });
  * @param {{label: string, url: string, style?: 'primary'|'danger'}} [opts.cta]
  * @param {string} [opts.fallbackText] Text shown in notifications.
  */
-const sendBlock = ({ headerText, bodyMarkdown, fields, cta, fallbackText }) => {
+const sendBlock = ({ headerText, bodyMarkdown, fields, cta, fallbackText }, target) => {
   const blocks = [];
 
   if (headerText) {
@@ -165,12 +176,13 @@ const sendBlock = ({ headerText, bodyMarkdown, fields, cta, fallbackText }) => {
   return postToSlack({
     text: fallbackText || headerText || "Football Notify",
     blocks,
-  });
+  }, target);
 };
 
 module.exports = {
   isConfigured,
   postToSlack,
+  postToSlackDetailed,
   sendText,
   sendBlock,
   formatVnd,

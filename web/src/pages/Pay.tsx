@@ -1,3 +1,5 @@
+import { groupIdOf, scopedKey } from "@/lib/groups";
+import { useGroup } from "@/contexts/GroupContext";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -173,6 +175,8 @@ declare global {
 }
 
 const Pay = () => {
+  const { groupId, group } = useGroup();
+  const usesTeams = group?.sport !== "badminton";
   const { canInstall, installPWA } = usePWAInstall();
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>("");
@@ -272,7 +276,7 @@ const Pay = () => {
       setIsLoadingMembers(true);
       try {
         const membersCollectionRef = collection(db, "members");
-        const membersSnapshot = await getDocs(membersCollectionRef);
+        const membersSnapshot = await getDocs(query(membersCollectionRef, where("groupId", "==", groupId)));
         const membersList = membersSnapshot.docs.map(
           (doc) =>
             ({
@@ -294,15 +298,15 @@ const Pay = () => {
     };
     fetchMembers();
     // [RATING_FLOW_DISABLED] — fetchTopPayers();
-  }, []);
+  }, [groupId]);
 
   // Effect to load last selected member from localStorage
   useEffect(() => {
-    const lastSelectedId = localStorage.getItem("lastSelectedMemberId");
+    const lastSelectedId = localStorage.getItem(scopedKey("lastSelectedMemberId", groupId));
     if (lastSelectedId) {
       setSelectedMemberId(lastSelectedId);
     }
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     const checkNotificationStatus = async () => {
@@ -338,13 +342,13 @@ const Pay = () => {
     const fetchGroupShares = async () => {
       try {
         const snapshots = await Promise.all(groupMemberIds.map((memberId) => getDocs(query(
-          collectionGroup(db, "shares"), where("memberId", "==", memberId), where("status", "==", "PENDING")
+          collectionGroup(db, "shares"), where("groupId", "==", groupId), where("memberId", "==", memberId), where("status", "==", "PENDING")
         ))));
         const shareDocs = snapshots.flatMap((snapshot) => snapshot.docs);
         const matchIds = [...new Set(shareDocs.map((snapshot) => snapshot.ref.parent.parent?.id).filter(Boolean))];
         const matches = await Promise.all(matchIds.map((id) => getDoc(doc(db, "matches", id))));
         if (cancelled) return;
-        const matchesMap = new Map(matches.filter((snapshot) => snapshot.exists())
+        const matchesMap = new Map(matches.filter((snapshot) => snapshot.exists() && groupIdOf(snapshot.data()) === groupId)
           .map((snapshot) => [snapshot.id, snapshot.data()]));
         const debts: Share[] = shareDocs.flatMap((snapshot) => {
           const data = snapshot.data();
@@ -375,7 +379,7 @@ const Pay = () => {
     };
     void fetchGroupShares();
     return () => { cancelled = true; };
-  }, [isGroupPayment, groupMemberIds, members]);
+  }, [isGroupPayment, groupMemberIds, members, groupId]);
 
   useEffect(() => {
     if (isGroupPayment) return;
@@ -409,7 +413,7 @@ const Pay = () => {
 
         // 1. Get all PENDING shares for the selected member
         const sharesQuery = query(
-          collectionGroup(db, "shares"),
+          collectionGroup(db, "shares"), where("groupId", "==", groupId),
           where("memberId", "==", selectedMemberId),
           where("status", "==", "PENDING")
         );
@@ -444,7 +448,7 @@ const Pay = () => {
           matchesSnapshot.docs.forEach((doc) => {
             const data = doc.data();
             // Only include PUBLISHED and not deleted
-            if (data.status === "PUBLISHED" && !data.isDeleted) {
+            if (groupIdOf(data) === groupId && data.status === "PUBLISHED" && !data.isDeleted) {
               matchesMap.set(doc.id, data);
             }
           });
@@ -489,7 +493,7 @@ const Pay = () => {
 
         // 6. Fetch MANUAL paid shares (within last 3 days)
         const manualPaidQuery = query(
-          collectionGroup(db, "shares"),
+          collectionGroup(db, "shares"), where("groupId", "==", groupId),
           where("memberId", "==", selectedMemberId),
           where("status", "==", "PAID"),
           where("channel", "==", "MANUAL")
@@ -516,7 +520,7 @@ const Pay = () => {
           const matchesSnapshot = await getDocs(matchesQuery);
           matchesSnapshot.docs.forEach((doc) => {
             const data = doc.data();
-            if (data.status === "PUBLISHED" && !data.isDeleted) {
+            if (groupIdOf(data) === groupId && data.status === "PUBLISHED" && !data.isDeleted) {
               matchesMap.set(doc.id, data);
             }
           });
@@ -581,6 +585,7 @@ const Pay = () => {
           // Query only PUBLISHED matches from last 3 days
           const recentMatchesQuery = query(
             collection(db, "matches"),
+            where("groupId", "==", groupId),
             where("status", "==", "PUBLISHED"),
             where("date", ">=", threeDaysAgoTimestamp)
           );
@@ -662,7 +667,7 @@ const Pay = () => {
 
     void fetchUnpaidShares();
     return () => { cancelled = true; };
-  }, [selectedMemberId, members, isGroupPayment]);
+  }, [selectedMemberId, members, isGroupPayment, groupId]);
 
   const clearPaymentSelection = () => {
     setUnpaidShares([]);
@@ -685,7 +690,7 @@ const Pay = () => {
       return;
     }
     setSelectedMemberId(memberId);
-    localStorage.setItem("lastSelectedMemberId", memberId);
+    localStorage.setItem(scopedKey("lastSelectedMemberId", groupId), memberId);
   };
 
   const handleViewTeamDetails = async (share: Share) => {
@@ -718,7 +723,7 @@ const Pay = () => {
         );
         const membersSnapshot = await getDocs(membersQuery);
         membersSnapshot.forEach((doc) => {
-          membersMap.set(doc.id, doc.data().name);
+          if (groupIdOf(doc.data()) === groupId) membersMap.set(doc.id, doc.data().name);
         });
       }
 
@@ -867,6 +872,7 @@ const Pay = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          groupId,
           ...(isGroupPayment
             ? { sharePaths: payableShareIds, memberIds: groupMemberIds, memberId: groupMemberIds[0] }
             : { shareIds: payableShareIds, memberId: selectedMemberId }),
@@ -984,6 +990,7 @@ const Pay = () => {
         });
       } else {
         const paymentLinkData = await postJson("/create-payment-link", {
+          groupId,
           shareIds: payableShareIds,
           memberId: selectedMemberId,
           ratings,
@@ -1018,7 +1025,7 @@ const Pay = () => {
 
     try {
       if (enabled) {
-        const token = await ensureNotificationToken(selectedMemberId);
+        const token = await ensureNotificationToken(selectedMemberId, groupId);
         if (token) {
           setCurrentToken(token);
           setIsNotificationEnabled(true);
@@ -1037,7 +1044,7 @@ const Pay = () => {
           setIsNotificationEnabled(false); // Keep switch off
         }
       } else {
-        await removeNotificationToken(currentToken, selectedMemberId);
+        await removeNotificationToken(currentToken, groupId);
         setIsNotificationEnabled(false);
         setCurrentToken(null);
         toast({
@@ -1266,7 +1273,7 @@ const Pay = () => {
                     <div className="mb-4">
                       <div className="flex items-center justify-between">
                         <h3 className="text-base sm:text-lg font-semibold">
-                          {isGroupPayment ? "Selected members' debts" : "Các trận cần xử lý / đánh giá"}
+                          {isGroupPayment ? "Các khoản của người đã chọn" : usesTeams ? "Các trận cần xử lý / đánh giá" : "Các khoản cần thanh toán"}
                         </h3>
                         <Button
                           variant="link"
@@ -1324,7 +1331,7 @@ const Pay = () => {
                                               variant="outline"
                                               className="border-amber-200 bg-amber-50 text-amber-700"
                                             >
-                                              Đã đánh dấu đã trả · chỉ đánh giá
+                                              {usesTeams ? "Đã đánh dấu đã trả · chỉ đánh giá" : "Đã thanh toán"}
                                             </Badge>
                                           )}
                                         {share.isRatingOnly && (
@@ -1332,7 +1339,7 @@ const Pay = () => {
                                             variant="secondary"
                                             className="bg-emerald-100 text-emerald-700"
                                           >
-                                            Miễn chia tiền · chỉ đánh giá
+                                            {usesTeams ? "Miễn chia tiền · chỉ đánh giá" : "Miễn chia tiền"}
                                           </Badge>
                                         )}
                                       </div>
@@ -1351,7 +1358,7 @@ const Pay = () => {
                                     <div>
                                       <h4 className="font-semibold text-foreground mb-2 flex items-center gap-2 text-sm sm:text-base">
                                         <Info className="h-4 w-4" />
-                                        Tóm tắt trận đấu
+                                        {usesTeams ? "Tóm tắt trận đấu" : "Chi phí buổi chơi"}
                                       </h4>
                                       <div className="flex justify-between">
                                         <span>Tổng chi phí:</span>
@@ -1360,6 +1367,7 @@ const Pay = () => {
                                           đ
                                         </span>
                                       </div>
+                                      {usesTeams && <>
                                       <div className="flex justify-between">
                                         <span>
                                           Đội {share.teamName} (
@@ -1379,6 +1387,7 @@ const Pay = () => {
                                         <span>Số người chia trong đội:</span>
                                         <span>{share.teamMemberCount} người</span>
                                       </div>
+                                      </>}
                                     </div>
 
                                     {/* Enhanced Calculation Details */}
@@ -1401,7 +1410,7 @@ const Pay = () => {
                                         </div>
 
                                         {/* Team Context */}
-                                        {share.calculationDetails.teamTotal !== undefined && (
+                                        {usesTeams && share.calculationDetails.teamTotal !== undefined && (
                                           <div className="space-y-1 text-xs sm:text-sm">
                                             <div className="flex justify-between">
                                               <span>Tổng tiền đội:</span>
@@ -1472,6 +1481,7 @@ const Pay = () => {
                                       </div>
                                     )}
 
+                                    {usesTeams && <>
                                     {/* Team Sheet Button */}
                                     <hr className="my-1 sm:my-2 border-dashed" />
                                     <Dialog>
@@ -1540,6 +1550,7 @@ const Pay = () => {
                                         )}
                                       </DialogContent>
                                     </Dialog>
+                                    </>}
                                   </div>
                                 </AccordionContent>
                               </AccordionItem>

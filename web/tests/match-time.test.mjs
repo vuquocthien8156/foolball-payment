@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadSource, mountPage } from "./helpers.mjs";
 
+const groups = loadSource("../src/lib/groups.ts").exports;
 const utils = loadSource("../src/lib/utils.ts").exports;
 const date = "2026-10-20";
 const time = "19:30";
@@ -24,7 +25,7 @@ function setup(matchId = "match-1", extra = {}, options = {}) {
   const write = (ref, data) => { writes.push({ path: ref.path, data }); };
   const firestore = {
     doc: (...args) => ref(...args, ...(args.length === 1 ? ["new-match"] : [])), collection: ref, query: (r) => r,
-    serverTimestamp: () => "server-time", Timestamp: {},
+    serverTimestamp: () => "server-time", Timestamp: {}, where: () => ({}),
     getDoc: async () => ({ exists: () => true, data: () => stored }),
     getDocs: async (ref) => ({ docs: ref.path === "members" ? [member, teams[1].members[0]].map((m) => ({ id: m.id, data: () => m })) : [], forEach(fn) { (ref.path.endsWith("/shares") ? options.existingShares || [] : []).forEach(fn); },
       ...(ref.path.endsWith("/shares") ? { docs: options.existingShares || [] } : {}) }),
@@ -43,6 +44,8 @@ function setup(matchId = "match-1", extra = {}, options = {}) {
     "@/hooks/use-toast": { toast() {} },
     "firebase/firestore": firestore,
     "@/lib/firebase": { db: {} },
+    "@/lib/groups": groups,
+    "@/contexts/GroupContext": { useGroup: () => ({ groupId: "football-zigvy" }), useGroupPath: () => (sub = "") => `/g/football-zigvy/${sub}` },
     "@/lib/api": { postApiJson: async (path, payload) => { notifications.push({ path, payload }); return {}; } },
     "@/lib/utils": utils,
   }, { window: { location: { origin: "http://localhost" } }, navigator: { clipboard: { writeText: async () => {} } } });
@@ -79,7 +82,7 @@ test("Save Config remembers time for new matches without reusing an old date", a
   assert.equal(newHost.states.get("time"), "20:45");
   assert.equal(newHost.states.get("date"), date);
   await host.page.handleSaveConfigToDb();
-  assert.equal(host.writes.find((w) => w.path === "configs/last_match").data.kickoffTime, time);
+  assert.equal(host.writes.find((w) => w.path === "groups/football-zigvy/settings/lastMatch").data.kickoffTime, time);
 });
 
 test("invalid or missing kickoff is rejected before any write", async () => {

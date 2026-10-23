@@ -5,11 +5,19 @@ const express = require("express");
 const cors = require("cors");
 const { PayOS } = require("@payos/node");
 const admin = require("firebase-admin");
+const { FieldValue, Timestamp, FieldPath } = require("firebase-admin/firestore");
 const axios = require("axios");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const slack = require("./lib/slack");
 const cfg = require("./lib/slackConfig");
+const { isMuted } = require("./lib/mute");
+const { createPlatformRouter } = require("./lib/platformRoutes");
+const { createGroupRouter } = require("./lib/groupRoutes");
+const { createPublicRouter } = require("./lib/publicRoutes");
+const { createAuthMiddleware, resolveGroupRole } = require("./lib/auth");
+const { createGroupTargets } = require("./lib/groupTargets");
+const { DEFAULT_GROUP_ID, groupIdOf, isValidGroupId, publicUrlFor } = require("./lib/groups");
 
 // --- Firebase Admin SDK Initialization ---
 // Ensure you have the service account key file in the `server` directory
@@ -36,8 +44,29 @@ app.use(express.json());
 // --- Routes ---
 
 const apiRoutes = express.Router();
+const triggerAuth = createAuthMiddleware({ db: admin.firestore(), auth: admin.auth() });
+const requireTriggerStaff = async (req, res, next) => {
+  try {
+    const db = admin.firestore();
+    let groupId;
+    if (req.path === "/notify/manual") {
+      groupId = req.body?.groupId || DEFAULT_GROUP_ID;
+    } else {
+      const matchId = req.body?.matchId;
+      if (typeof matchId !== "string" || !matchId || matchId.includes("/")) return res.status(400).json({ error: "INVALID_MATCH" });
+      const match = await db.collection("matches").doc(matchId).get();
+      if (!match.exists) return res.status(404).json({ error: "NOT_FOUND" });
+      groupId = groupIdOf(match.data());
+    }
+    if (!isValidGroupId(groupId)) return res.status(400).json({ error: "INVALID_GROUP" });
+    if (!await resolveGroupRole(db, req.uid, groupId)) return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
+    req.groupId = groupId;
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
 
-const FieldValue = admin.firestore.FieldValue;
 
 const chunkArray = (arr, size) =>
   arr.reduce((acc, _, idx) => {
@@ -45,13 +74,14 @@ const chunkArray = (arr, size) =>
     return acc;
   }, []);
 
-const collectAllTokens = async () => {
+const collectGroupTokens = async (groupId) => {
   const db = admin.firestore();
   const tokens = new Set();
 
   const tokenSnap = await db.collection("notificationTokens").get();
   tokenSnap.forEach((doc) => {
     const data = doc.data();
+    if (groupIdOf(data) !== groupId) return;
     const token = data.token || doc.id;
     if (token) tokens.add(token);
   });
@@ -59,6 +89,7 @@ const collectAllTokens = async () => {
   const membersSnap = await db.collection("members").get();
   membersSnap.forEach((doc) => {
     const data = doc.data();
+    if (groupIdOf(data) !== groupId) return;
     if (data.fcmToken) tokens.add(data.fcmToken);
   });
 
@@ -90,6 +121,10 @@ const cleanUpInvalidTokens = async (invalidTokens = []) => {
 };
 
 const sendPushToTokens = async (tokens, payload) => {
+  if (isMuted()) {
+    console.log(`[muted] push ${tokens.length} tokens`);
+    return { successCount: 0, failureCount: 0, invalidTokens: 0 };
+  }
   const messaging = admin.messaging();
   let successCount = 0;
   let failureCount = 0;
@@ -123,6 +158,8 @@ const sendPushToTokens = async (tokens, payload) => {
 };
 
 apiRoutes.post("/create-payment-link", async (req, res) => {
+  const groupId = req.body?.groupId || DEFAULT_GROUP_ID;
+  if (!isValidGroupId(groupId)) return res.status(400).json({ error: "INVALID_GROUP" });
   const { shareIds, sharePaths, memberId, memberIds, ratings } = req.body || {};
   const isGroupPayment = sharePaths !== undefined || memberIds !== undefined;
   const validId = (id) => typeof id === "string" && id.length > 0 && !id.includes("/");
@@ -146,10 +183,16 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
     } else {
       const querySnapshot = await db.collectionGroup("shares")
         .where("memberId", "==", memberId).where("status", "==", "PENDING").get();
-      selectedShareDocs = querySnapshot.docs.filter((doc) => shareIds.includes(doc.id));
+      selectedShareDocs = querySnapshot.docs.filter((doc) => shareIds.includes(doc.id) && groupIdOf(doc.data()) === groupId);
     }
     if (selectedShareDocs.length !== selections.length || selectedShareDocs.some((doc) => !doc.exists)) {
       return res.status(409).json({ error: "Some debts have changed. Reload and select them again." });
+    }
+    const matchPaths = [...new Set(selectedShareDocs.map((doc) => doc.ref.path.split("/").slice(0, 2).join("/")))];
+    const matches = await db.getAll(...matchPaths.map((path) => db.doc(path)));
+    if (selectedShareDocs.some((doc) => groupIdOf(doc.data()) !== groupId) ||
+        matches.some((doc) => doc.exists && groupIdOf(doc.data()) !== groupId)) {
+      return res.status(409).json({ error: "MIXED_GROUP" });
     }
     if (selectedShareDocs.some((doc) => {
       const data = doc.data();
@@ -159,8 +202,6 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
       return res.status(409).json({ error: "Selected debts must be pending, positive, and belong to the selected members." });
     }
     if (isGroupPayment) {
-      const matchPaths = [...new Set(selectedShareDocs.map((doc) => doc.ref.path.split("/").slice(0, 2).join("/")))];
-      const matches = await db.getAll(...matchPaths.map((path) => db.doc(path)));
       if (matches.some((doc) => !doc.exists || doc.data().isDeleted || doc.data().status !== "PUBLISHED")) {
         return res.status(409).json({ error: "Only published, active matches can be paid." });
       }
@@ -208,6 +249,7 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
       .collection("paymentRequests")
       .doc(String(orderCode));
     await paymentRequestRef.set({
+      groupId,
       orderCode,
       shareIds: fetchedShareIds,
       sharePaths: selectedShareDocs.map((doc) => doc.ref.path),
@@ -216,7 +258,7 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
       memberId,
       ratings: ratings || null, // Store ratings, can be null
       status: "PENDING",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     });
 
     // Use a batch to update all selected shares with the same orderCode
@@ -226,12 +268,17 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
     });
     await batch.commit();
 
+    if (isMuted()) {
+      console.log("[muted] payos", orderCode);
+      return res.json({ checkoutUrl: "/public/payment-cancel?mock=1&orderCode=" + orderCode, orderCode });
+    }
+
     const paymentData = {
       orderCode,
       amount: totalAmount,
       description,
-      returnUrl: process.env.PAYOS_RETURN_URL,
-      cancelUrl: process.env.PAYOS_CANCEL_URL,
+      returnUrl: groupId === DEFAULT_GROUP_ID ? process.env.PAYOS_RETURN_URL : new URL(process.env.PAYOS_RETURN_URL).origin + "/g/" + groupId + "/public/payment-success",
+      cancelUrl: groupId === DEFAULT_GROUP_ID ? process.env.PAYOS_CANCEL_URL : new URL(process.env.PAYOS_CANCEL_URL).origin + "/g/" + groupId + "/public/payment-cancel",
       // Removed bank: "ACB" - let PayOS auto-select based on merchant account
     };
 
@@ -323,6 +370,8 @@ const payosWebhookHandler = async (req, res) => {
           console.error(`Webhook: No shares found for orderCode ${orderCode}`);
           return;
         }
+        const groupId = paymentRequestData.groupId || groupIdOf(shareDocs[0].data());
+        const alreadyPaidShareCount = shareDocs.filter((doc) => doc.data().status === "PAID").length;
         const ownerIds = [...new Set(shareDocs.map((doc) => doc.data().memberId))];
         const ownerDocs = await transaction.getAll(...ownerIds.map((id) => db.collection("members").doc(id)));
         const ownerNames = new Map(ownerDocs.map((doc) => [doc.id, doc.exists ? doc.data().name : "A member"]));
@@ -342,10 +391,11 @@ const payosWebhookHandler = async (req, res) => {
                 .collection("ratings")
                 .doc();
               transaction.set(ratingRef, {
+                groupId,
                 ratedByMemberId,
                 playerRatings,
                 mvpPlayerId,
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                createdAt: FieldValue.serverTimestamp(),
                 orderCode, // Link back to the payment
               });
             }
@@ -375,11 +425,12 @@ const payosWebhookHandler = async (req, res) => {
               return;
             }
             transaction.set(notificationRef, {
+              groupId,
               message: `${ownerNames.get(shareData.memberId)} đã thanh toán ${shareData.amount.toLocaleString()} VND`,
               matchId: matchId,
               shareId: doc.id,
               isRead: false,
-              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              createdAt: FieldValue.serverTimestamp(),
             });
 
             totalPaid += shareData.amount || 0;
@@ -389,11 +440,12 @@ const payosWebhookHandler = async (req, res) => {
 
         // 5. Update the payment request status
         transaction.update(paymentRequestRef, {
+          alreadyPaidShareCount,
           status: "PAID",
-          paidAt: admin.firestore.FieldValue.serverTimestamp(),
+          paidAt: FieldValue.serverTimestamp(),
         });
 
-        paidContext = { memberName, totalPaid, affectedMatchIds };
+        paidContext = { groupId, memberName, totalPaid, affectedMatchIds };
       });
 
       console.log(
@@ -405,10 +457,11 @@ const payosWebhookHandler = async (req, res) => {
         await db
           .collection("paymentQueue")
           .add({
+            groupId: paidContext.groupId,
             memberName: paidContext.memberName,
             totalPaid: paidContext.totalPaid,
             affectedMatchIds: Array.from(paidContext.affectedMatchIds),
-            enqueuedAt: admin.firestore.FieldValue.serverTimestamp(),
+            enqueuedAt: FieldValue.serverTimestamp(),
           })
           .catch((e) => console.error("[slack] Queueing payment failed", e));
       }
@@ -430,7 +483,7 @@ apiRoutes.get("/payos-webhook", (req, res) => {
 apiRoutes.post("/payos-webhook", payosWebhookHandler);
 apiRoutes.put("/payos-webhook", payosWebhookHandler);
 
-apiRoutes.post("/send-match-notification", async (req, res) => {
+apiRoutes.post("/send-match-notification", triggerAuth.requireUser, requireTriggerStaff, async (req, res) => {
   const { matchId } = req.body;
 
   if (!matchId) {
@@ -445,6 +498,8 @@ apiRoutes.post("/send-match-notification", async (req, res) => {
     }
 
     const matchData = matchDoc.data();
+    const groupId = groupIdOf(matchData);
+    if (req.body.groupId && req.body.groupId !== groupId) return res.status(409).json({ error: "MIXED_GROUP" });
     const rostersSnapshot = await db
       .collection("matches")
       .doc(matchId)
@@ -469,13 +524,14 @@ apiRoutes.post("/send-match-notification", async (req, res) => {
     const uniqueMemberIds = Array.from(memberIds);
     const membersSnapshot = await db
       .collection("members")
-      .where(admin.firestore.FieldPath.documentId(), "in", uniqueMemberIds)
+      .where(FieldPath.documentId(), "in", uniqueMemberIds)
       .get();
 
     const tokens = [];
+    const groupTokens = new Set(await collectGroupTokens(groupId));
     membersSnapshot.forEach((memberDoc) => {
       const memberData = memberDoc.data();
-      if (memberData.fcmToken) {
+      if (groupIdOf(memberData) === groupId && memberData.fcmToken && groupTokens.has(memberData.fcmToken)) {
         tokens.push(memberData.fcmToken);
       }
     });
@@ -497,7 +553,13 @@ apiRoutes.post("/send-match-notification", async (req, res) => {
       tokens: tokens,
     };
 
-    const response = await admin.messaging().sendMulticast(message);
+    let response;
+    if (isMuted()) {
+      console.log(`[muted] push ${tokens.length} tokens`);
+      response = { successCount: 0, failureCount: 0, responses: [] };
+    } else {
+      response = await admin.messaging().sendMulticast(message);
+    }
     console.log("Successfully sent message:", response);
     res.status(200).json({
       success: true,
@@ -509,7 +571,7 @@ apiRoutes.post("/send-match-notification", async (req, res) => {
   }
 });
 
-apiRoutes.post("/notify/attendance-created", async (req, res) => {
+apiRoutes.post("/notify/attendance-created", triggerAuth.requireUser, requireTriggerStaff, async (req, res) => {
   const { matchId } = req.body;
   if (!matchId) {
     return res.status(400).json({ error: "matchId is required" });
@@ -517,11 +579,14 @@ apiRoutes.post("/notify/attendance-created", async (req, res) => {
 
   try {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
     const matchSnap = await db.collection("matches").doc(matchId).get();
     if (!matchSnap.exists) {
       return res.status(404).json({ error: "Match not found" });
     }
     const match = matchSnap.data();
+    const groupId = groupIdOf(match);
+    if (req.body.groupId && req.body.groupId !== groupId) return res.status(409).json({ error: "MIXED_GROUP" });
     const dateLabel = match.date
       ? slack.formatMatchDateOnly(match.date)
       : "trận mới";
@@ -546,13 +611,13 @@ apiRoutes.post("/notify/attendance-created", async (req, res) => {
 
         autoMembersSnap.forEach((doc) => {
           const memberData = doc.data();
-          if (memberData.inactive) return;
+          if (memberData.inactive || groupIdOf(memberData) !== groupId) return;
           autoAttendedNames.push(memberData.name || "Không rõ");
           const attendanceRef = attendanceCollectionRef.doc(doc.id);
           batch.set(
             attendanceRef,
             {
-              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+              timestamp: FieldValue.serverTimestamp(),
               memberName: memberData.name,
               userAgent: "Auto Attendance (System)",
             },
@@ -568,7 +633,7 @@ apiRoutes.post("/notify/attendance-created", async (req, res) => {
     }
     // -----------------------------
 
-    const tokens = await collectAllTokens();
+    const tokens = await collectGroupTokens(groupId);
     if (tokens.length === 0) {
       return res.status(200).json({ message: "No subscribers" });
     }
@@ -594,38 +659,43 @@ apiRoutes.post("/notify/attendance-created", async (req, res) => {
           ? "\n\n🚫 _Trận này tắt auto — mọi người tự điểm danh nhé!_"
           : "";
 
-    slack
-      .sendBlock({
-        headerText: "⚽ Đã mở điểm danh trận mới",
-        bodyMarkdown: `<!here>\n📅 *${slack.formatMatchDate(match.date)}*${
-          match.venueName ? `\n📍 ${match.venueName}` : ""
-        }${autoAttendSection}`,
-        fields: [
-          ...(match.totalAmount
-            ? [
-                {
-                  title: "💰 Tổng tiền dự kiến",
-                  value: `${slack.formatVnd(match.totalAmount)} VND`,
-                },
-              ]
-            : []),
-          ...(match.attendanceCloseHours
-            ? [
-                {
-                  title: "⏱️ Giờ đóng cổng",
-                  value: `${match.attendanceCloseHours}h trước ngày đá`,
-                },
-              ]
-            : []),
-        ],
-        cta: {
-          label: "Điểm danh ngay",
-          url: `${slack.PUBLIC_WEB_URL}/attendance`,
-          style: "primary",
-        },
-        fallbackText: `Trận mới ${dateLabel} đã mở điểm danh`,
-      })
-      .catch((e) => console.error("[slack] A1 failed", e));
+    {
+      const target = await targets.getSlackTarget(groupId);
+      if (target) {
+        slack
+          .sendBlock({
+            headerText: "⚽ Đã mở điểm danh trận mới",
+            bodyMarkdown: `<!here>\n📅 *${slack.formatMatchDate(match.date)}*${
+              match.venueName ? `\n📍 ${match.venueName}` : ""
+            }${autoAttendSection}`,
+            fields: [
+              ...(match.totalAmount
+                ? [
+                    {
+                      title: "💰 Tổng tiền dự kiến",
+                      value: `${slack.formatVnd(match.totalAmount)} VND`,
+                    },
+                  ]
+                : []),
+              ...(match.attendanceCloseHours
+                ? [
+                    {
+                      title: "⏱️ Giờ đóng cổng",
+                      value: `${match.attendanceCloseHours}h trước ngày đá`,
+                    },
+                  ]
+                : []),
+            ],
+            cta: {
+              label: "Điểm danh ngay",
+              url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/attendance`,
+              style: "primary",
+            },
+            fallbackText: `Trận mới ${dateLabel} đã mở điểm danh`,
+          }, target)
+          .catch((e) => console.error("[slack] A1 failed", e));
+      }
+    }
 
     res.status(200).json({ success: true, ...result });
   } catch (error) {
@@ -634,20 +704,23 @@ apiRoutes.post("/notify/attendance-created", async (req, res) => {
   }
 });
 
-apiRoutes.post("/notify/attendance-deleted", async (req, res) => {
+apiRoutes.post("/notify/attendance-deleted", triggerAuth.requireUser, requireTriggerStaff, async (req, res) => {
   const { matchId } = req.body;
   if (!matchId) {
     return res.status(400).json({ error: "matchId is required" });
   }
   try {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
     const matchSnap = await db.collection("matches").doc(matchId).get();
     const match = matchSnap.exists ? matchSnap.data() : null;
+    const groupId = groupIdOf(match);
+    if (req.body.groupId && req.body.groupId !== groupId) return res.status(409).json({ error: "MIXED_GROUP" });
     const dateLabel = match?.date
       ? slack.formatMatchDateOnly(match.date)
       : "trận điểm danh";
 
-    const tokens = await collectAllTokens();
+    const tokens = await collectGroupTokens(groupId);
     if (tokens.length === 0) {
       return res.status(200).json({ message: "No subscribers" });
     }
@@ -663,15 +736,20 @@ apiRoutes.post("/notify/attendance-deleted", async (req, res) => {
     });
 
     // Slack: A2 — attendance deleted
-    slack
-      .sendBlock({
-        headerText: "❌ Đã hủy trận điểm danh",
-        bodyMarkdown: `📅 Trận *${slack.formatMatchDate(match?.date)}* đã bị hủy.${
-          match?.venueName ? `\n📍 ${match.venueName}` : ""
-        }\n\n😢 Hẹn anh em trận sau nhé!`,
-        fallbackText: `Trận ${dateLabel} đã hủy điểm danh`,
-      })
-      .catch((e) => console.error("[slack] A2 failed", e));
+    {
+      const target = await targets.getSlackTarget(groupId);
+      if (target) {
+        slack
+          .sendBlock({
+            headerText: "❌ Đã hủy trận điểm danh",
+            bodyMarkdown: `📅 Trận *${slack.formatMatchDate(match?.date)}* đã bị hủy.${
+              match?.venueName ? `\n📍 ${match.venueName}` : ""
+            }\n\n😢 Hẹn anh em trận sau nhé!`,
+            fallbackText: `Trận ${dateLabel} đã hủy điểm danh`,
+          }, target)
+          .catch((e) => console.error("[slack] A2 failed", e));
+      }
+    }
 
     res.status(200).json({ success: true, ...result });
   } catch (error) {
@@ -679,6 +757,71 @@ apiRoutes.post("/notify/attendance-deleted", async (req, res) => {
     res.status(500).json({ error: "Failed to send notification" });
   }
 });
+
+const recordMemberAction = async ({ db, groupId, matchId, memberId, memberName: resolvedName, action, match }) => {
+  const targets = createGroupTargets({ db, env: process.env });
+  const matchDateLabel = slack.formatMatchDate(match?.date);
+
+  // CANCEL_ATTEND is time-sensitive and high-severity — send immediately
+  // with a red attachment so it stands out from normal attendance messages.
+  if (action === "CANCEL_ATTEND") {
+    const now = new Date();
+    const timeLabel = now.toLocaleString("vi-VN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      day: "2-digit",
+      month: "2-digit",
+      timeZone: cfg.TIMEZONE,
+    });
+    {
+      const target = await targets.getSlackTarget(groupId);
+      if (target) {
+        await slack
+          .postToSlack({
+            text: `‼️🔴 ${resolvedName} vừa HỦY điểm danh — trận ${matchDateLabel}`,
+            attachments: [
+              {
+                color: "danger",
+                blocks: [
+                  {
+                    type: "header",
+                    text: {
+                      type: "plain_text",
+                      text: "‼️ HỦY ĐIỂM DANH",
+                      emoji: true,
+                    },
+                  },
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: `📅 Trận *${matchDateLabel}*\n\n🔴 *${resolvedName}* đã hủy lúc *${timeLabel}*\n\n_Liên hệ để xác nhận hoặc tìm người thay thế._`,
+                    },
+                  },
+                ],
+              },
+            ],
+          }, target)
+          .catch((e) => console.error("[slack] immediate CANCEL_ATTEND failed", e));
+      }
+    }
+
+    return { success: true, mode: "immediate" };
+  }
+
+  // All other actions enqueue for batch flush.
+  await db.collection("slackQueue").add({
+    groupId,
+    type: action,
+    matchId,
+    memberId,
+    memberName: resolvedName,
+    matchDateLabel,
+    enqueuedAt: FieldValue.serverTimestamp(),
+  });
+
+  return { success: true, mode: "queued" };
+};
 
 apiRoutes.post("/notify/member-action", async (req, res) => {
   const { matchId, memberId, memberName, action } = req.body;
@@ -701,87 +844,36 @@ apiRoutes.post("/notify/member-action", async (req, res) => {
     const db = admin.firestore();
     const matchSnap = await db.collection("matches").doc(matchId).get();
     const match = matchSnap.exists ? matchSnap.data() : null;
+    const groupId = groupIdOf(match);
+    if (req.body.groupId && req.body.groupId !== groupId) return res.status(409).json({ error: "MIXED_GROUP" });
 
-    // Resolve member name if not provided
-    let resolvedName = memberName;
-    if (!resolvedName) {
-      const memberSnap = await db.collection("members").doc(memberId).get();
-      resolvedName = memberSnap.exists ? memberSnap.data().name : "Một thành viên";
-    }
+    const memberSnap = await db.collection("members").doc(memberId).get();
+    if (!memberSnap.exists) return res.status(404).json({ error: "Member not found" });
+    if (groupIdOf(memberSnap.data()) !== groupId) return res.status(409).json({ error: "MIXED_GROUP" });
+    const resolvedName = memberName || memberSnap.data().name || "Một thành viên";
 
-    const matchDateLabel = slack.formatMatchDate(match?.date);
-
-    // CANCEL_ATTEND is time-sensitive and high-severity — send immediately
-    // with a red attachment so it stands out from normal attendance messages.
-    if (action === "CANCEL_ATTEND") {
-      const now = new Date();
-      const timeLabel = now.toLocaleString("vi-VN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        day: "2-digit",
-        month: "2-digit",
-        timeZone: cfg.TIMEZONE,
-      });
-      await slack
-        .postToSlack({
-          text: `‼️🔴 ${resolvedName} vừa HỦY điểm danh — trận ${matchDateLabel}`,
-          attachments: [
-            {
-              color: "danger",
-              blocks: [
-                {
-                  type: "header",
-                  text: {
-                    type: "plain_text",
-                    text: "‼️ HỦY ĐIỂM DANH",
-                    emoji: true,
-                  },
-                },
-                {
-                  type: "section",
-                  text: {
-                    type: "mrkdwn",
-                    text: `📅 Trận *${matchDateLabel}*\n\n🔴 *${resolvedName}* đã hủy lúc *${timeLabel}*\n\n_Liên hệ để xác nhận hoặc tìm người thay thế._`,
-                  },
-                },
-              ],
-            },
-          ],
-        })
-        .catch((e) => console.error("[slack] immediate CANCEL_ATTEND failed", e));
-
-      return res.status(200).json({ success: true, mode: "immediate" });
-    }
-
-    // All other actions enqueue for batch flush.
-    await db.collection("slackQueue").add({
-      type: action,
-      matchId,
-      memberId,
-      memberName: resolvedName,
-      matchDateLabel,
-      enqueuedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    res.status(200).json({ success: true, mode: "queued" });
+    res.status(200).json(await recordMemberAction({ db, groupId, matchId, memberId, memberName: resolvedName, action, match }));
   } catch (error) {
     console.error("Error in /notify/member-action:", error);
     res.status(500).json({ error: "Failed to record action" });
   }
 });
 
-apiRoutes.post("/notify/match-published", async (req, res) => {
+apiRoutes.post("/notify/match-published", triggerAuth.requireUser, requireTriggerStaff, async (req, res) => {
   const { matchId } = req.body;
   if (!matchId) {
     return res.status(400).json({ error: "matchId is required" });
   }
   try {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
     const matchSnap = await db.collection("matches").doc(matchId).get();
     if (!matchSnap.exists) {
       return res.status(404).json({ error: "Match not found" });
     }
     const match = matchSnap.data();
+    const groupId = groupIdOf(match);
+    if (req.body.groupId && req.body.groupId !== groupId) return res.status(409).json({ error: "MIXED_GROUP" });
 
     const sharesSnap = await db
       .collection("matches")
@@ -795,7 +887,7 @@ apiRoutes.post("/notify/match-published", async (req, res) => {
     );
 
     // Push to FCM subscribers
-    const tokens = await collectAllTokens();
+    const tokens = await collectGroupTokens(groupId);
     let pushResult = { successCount: 0, failureCount: 0 };
     if (tokens.length > 0) {
       pushResult = await sendPushToTokens(tokens, {
@@ -816,38 +908,43 @@ apiRoutes.post("/notify/match-published", async (req, res) => {
         .collection("members")
         .doc(match.paidByMemberId)
         .get();
-      if (memberSnap.exists) {
+      if (memberSnap.exists && groupIdOf(memberSnap.data()) === groupId) {
         paidByName = memberSnap.data().name || null;
       }
     }
 
     // Slack: A6 — publish bill
-    slack
-      .sendBlock({
-        headerText: "📢 Bill trận đã công khai",
-        bodyMarkdown: `<!here>\n📅 *${slack.formatMatchDate(match.date)}*${
-          match.venueName ? `\n📍 ${match.venueName}` : ""
-        }${paidByName ? `\n💸 Người ứng tiền sân: *${paidByName}*` : ""}\n\n💳 Anh em vào thanh toán nhé!`,
-        fields: [
-          {
-            title: "💰 Tổng tiền",
-            value: `${slack.formatVnd(totalAmount)} VND`,
-          },
-          {
-            title: "👥 Số người chia",
-            value: `${totalShares} người`,
-          },
-        ],
-        cta: {
-          label: "Vào thanh toán",
-          url: `${slack.PUBLIC_WEB_URL}/pay`,
-          style: "primary",
-        },
-        fallbackText: `Bill trận ${slack.formatMatchDate(
-          match.date
-        )} đã công khai`,
-      })
-      .catch((e) => console.error("[slack] A6 failed", e));
+    {
+      const target = await targets.getSlackTarget(groupId);
+      if (target) {
+        slack
+          .sendBlock({
+            headerText: "📢 Bill trận đã công khai",
+            bodyMarkdown: `<!here>\n📅 *${slack.formatMatchDate(match.date)}*${
+              match.venueName ? `\n📍 ${match.venueName}` : ""
+            }${paidByName ? `\n💸 Người ứng tiền sân: *${paidByName}*` : ""}\n\n💳 Anh em vào thanh toán nhé!`,
+            fields: [
+              {
+                title: "💰 Tổng tiền",
+                value: `${slack.formatVnd(totalAmount)} VND`,
+              },
+              {
+                title: "👥 Số người chia",
+                value: `${totalShares} người`,
+              },
+            ],
+            cta: {
+              label: "Vào thanh toán",
+              url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/pay`,
+              style: "primary",
+            },
+            fallbackText: `Bill trận ${slack.formatMatchDate(
+              match.date
+            )} đã công khai`,
+          }, target)
+          .catch((e) => console.error("[slack] A6 failed", e));
+      }
+    }
 
     res.status(200).json({ success: true, ...pushResult });
   } catch (error) {
@@ -856,13 +953,14 @@ apiRoutes.post("/notify/match-published", async (req, res) => {
   }
 });
 
-apiRoutes.post("/notify/manual", async (req, res) => {
+apiRoutes.post("/notify/manual", triggerAuth.requireUser, requireTriggerStaff, async (req, res) => {
   const { title, body } = req.body;
+  const groupId = req.body.groupId || DEFAULT_GROUP_ID;
   if (!title || !body) {
     return res.status(400).json({ error: "title and body are required" });
   }
   try {
-    const tokens = await collectAllTokens();
+    const tokens = await collectGroupTokens(groupId);
     if (tokens.length === 0) {
       return res.status(200).json({ message: "No subscribers" });
     }
@@ -901,6 +999,7 @@ apiRoutes.post("/teams/propose", async (req, res) => {
 
   try {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
 
     // Validate passcode against appConfig/publicPasscode.
     const { passcode } = req.body;
@@ -919,6 +1018,8 @@ apiRoutes.post("/teams/propose", async (req, res) => {
       return res.status(404).json({ error: "Match not found" });
     }
     const match = matchSnap.data();
+    const groupId = groupIdOf(match);
+    if (groupId !== DEFAULT_GROUP_ID) return res.status(404).json({ error: "NOT_FOUND" });
 
     // Token expires at match time — after kickoff the lineup is locked anyway.
     let expiresAt = null;
@@ -944,9 +1045,9 @@ apiRoutes.post("/teams/propose", async (req, res) => {
       proposedTeam: {
         token,
         teamsConfig: cleanTeams,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
         expiresAt: expiresAt
-          ? admin.firestore.Timestamp.fromDate(expiresAt)
+          ? Timestamp.fromDate(expiresAt)
           : null,
       },
     });
@@ -960,22 +1061,27 @@ apiRoutes.post("/teams/propose", async (req, res) => {
         return `${teamIcon} *${t.name}* (${t.members.length}):\n${names}`;
       });
 
-    const lockUrl = `${slack.PUBLIC_WEB_URL}/team-locked?token=${token}&matchId=${matchId}`;
+    const lockUrl = `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/team-locked?token=${token}&matchId=${matchId}`;
 
-    slack
-      .sendBlock({
-        headerText: "🏃 Đội hình đề xuất",
-        bodyMarkdown: `<!here>\n📅 Trận *${slack.formatMatchDate(match.date)}*${
-          match.venueName ? `\n📍 ${match.venueName}` : ""
-        }\n\n${lines.join("\n\n")}\n\n👇 Bấm nút bên dưới để chốt đội hình:`,
-        cta: {
-          label: "Chốt đội hình",
-          url: lockUrl,
-          style: "primary",
-        },
-        fallbackText: "Đội hình đề xuất",
-      })
-      .catch((e) => console.error("[slack] team-propose failed", e));
+    {
+      const target = await targets.getSlackTarget(groupId);
+      if (target) {
+        slack
+          .sendBlock({
+            headerText: "🏃 Đội hình đề xuất",
+            bodyMarkdown: `<!here>\n📅 Trận *${slack.formatMatchDate(match.date)}*${
+              match.venueName ? `\n📍 ${match.venueName}` : ""
+            }\n\n${lines.join("\n\n")}\n\n👇 Bấm nút bên dưới để chốt đội hình:`,
+            cta: {
+              label: "Chốt đội hình",
+              url: lockUrl,
+              style: "primary",
+            },
+            fallbackText: "Đội hình đề xuất",
+          }, target)
+          .catch((e) => console.error("[slack] team-propose failed", e));
+      }
+    }
 
     res.status(200).json({ success: true, token });
   } catch (error) {
@@ -992,6 +1098,7 @@ apiRoutes.post("/teams/lock", async (req, res) => {
 
   try {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
     const matchRef = db.collection("matches").doc(matchId);
 
     const result = await db.runTransaction(async (txn) => {
@@ -1000,6 +1107,7 @@ apiRoutes.post("/teams/lock", async (req, res) => {
         return { ok: false, reason: "Match not found", code: 404 };
       }
       const match = matchSnap.data();
+      if (groupIdOf(match) !== DEFAULT_GROUP_ID) return { ok: false, reason: "NOT_FOUND", code: 404 };
       const proposed = match.proposedTeam;
 
       if (!proposed) {
@@ -1072,7 +1180,7 @@ apiRoutes.post("/teams/lock", async (req, res) => {
 
       const lockedTeam = {
         teamsConfig: merged,
-        lockedAt: admin.firestore.Timestamp.now(),
+        lockedAt: Timestamp.now(),
         userAgent: req.get("user-agent") || "Unknown",
         ip:
           req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
@@ -1083,7 +1191,7 @@ apiRoutes.post("/teams/lock", async (req, res) => {
       txn.update(matchRef, {
         teamsConfig: merged,
         lockedTeam,
-        proposedTeam: admin.firestore.FieldValue.delete(),
+        proposedTeam: FieldValue.delete(),
       });
 
       return { ok: true, lockedTeam, matchData: match };
@@ -1098,22 +1206,28 @@ apiRoutes.post("/teams/lock", async (req, res) => {
     // Post-transaction: bắn Slack confirmation.
     const matchSnapAfter = await matchRef.get();
     const matchAfter = matchSnapAfter.data();
+    const groupId = groupIdOf(matchAfter);
     const teamSummary = (matchAfter.teamsConfig || [])
       .filter((t) => (t.members || []).length > 0)
       .map((t) => `*${t.name}* (${(t.members || []).length})`)
       .join(" · ");
 
-    slack
-      .sendBlock({
-        headerText: "✅ Đội hình đã được chốt",
-        bodyMarkdown: `📅 Trận *${slack.formatMatchDate(matchAfter.date)}*${
-          matchAfter.venueName ? `\n📍 ${matchAfter.venueName}` : ""
-        }\n\n🏁 ${teamSummary}\n\n🕐 _Chốt lúc ${slack.formatTimestamp(
-          result.lockedTeam.lockedAt
-        )}_`,
-        fallbackText: "Đội hình đã được chốt",
-      })
-      .catch((e) => console.error("[slack] team-locked failed", e));
+    {
+      const target = await targets.getSlackTarget(groupId);
+      if (target) {
+        slack
+          .sendBlock({
+            headerText: "✅ Đội hình đã được chốt",
+            bodyMarkdown: `📅 Trận *${slack.formatMatchDate(matchAfter.date)}*${
+              matchAfter.venueName ? `\n📍 ${matchAfter.venueName}` : ""
+            }\n\n🏁 ${teamSummary}\n\n🕐 _Chốt lúc ${slack.formatTimestamp(
+              result.lockedTeam.lockedAt
+            )}_`,
+            fallbackText: "Đội hình đã được chốt",
+          }, target)
+          .catch((e) => console.error("[slack] team-locked failed", e));
+      }
+    }
 
     res.status(200).json({ success: true, lockedTeam: result.lockedTeam });
   } catch (error) {
@@ -1126,6 +1240,12 @@ apiRoutes.post("/teams/lock", async (req, res) => {
 apiRoutes.post("/slack/interactions", (req, res) => {
   return res.status(200).send("");
 });
+
+apiRoutes.use("/public", createPublicRouter({ db: admin.firestore(), FieldValue, Timestamp,
+  onMemberAction: (params) => recordMemberAction({ db: admin.firestore(), ...params }),
+}));
+apiRoutes.use("/groups", createGroupRouter({ db: admin.firestore(), auth: admin.auth(), FieldValue, slack }));
+apiRoutes.use("/platform", createPlatformRouter({ db: admin.firestore(), auth: admin.auth(), FieldValue }));
 
 // Mount the API router under the /api prefix
 app.use("/api", apiRoutes);
@@ -1205,6 +1325,7 @@ exports.checkAttendanceClose = onSchedule(
   },
   async () => {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
     const now = new Date();
     const warnWindowMs =
       cfg.ATTENDANCE_WARN_HOURS_BEFORE_CLOSE * 60 * 60 * 1000;
@@ -1216,6 +1337,7 @@ exports.checkAttendanceClose = onSchedule(
 
     for (const docSnap of pendingSnap.docs) {
       const data = docSnap.data();
+      const groupId = groupIdOf(data);
       if (data.isDeleted) continue;
       const closing = computeClosingTime(data.date, data.attendanceCloseHours);
       if (!closing) continue;
@@ -1246,24 +1368,29 @@ exports.checkAttendanceClose = onSchedule(
               }`
             : `${remainingMin} phút`;
 
-        await slack
-          .sendBlock({
-            headerText: "⏰ Sắp đóng cổng điểm danh",
-            bodyMarkdown: `<!channel>\n📅 Trận *${slack.formatMatchDate(data.date)}*${
-              data.venueName ? `\n📍 ${data.venueName}` : ""
-            }\n\n🚪 Cổng đóng lúc *${slack.formatTimestamp(closing)}* — ⏳ còn *${remainingLabel}*\n👥 Hiện đã có *${attCount} người* điểm danh.\n\n🏃 Ai chưa điểm danh thì vào nhanh nhé!`,
-            cta: {
-              label: "Điểm danh ngay",
-              url: `${slack.PUBLIC_WEB_URL}/attendance`,
-              style: "primary",
-            },
-            fallbackText: "Sắp đóng cổng điểm danh",
-          })
-          .catch((e) => console.error("[slack] A3 failed", e));
+        {
+          const target = await targets.getSlackTarget(groupId);
+          if (target) {
+            await slack
+              .sendBlock({
+                headerText: "⏰ Sắp đóng cổng điểm danh",
+                bodyMarkdown: `<!channel>\n📅 Trận *${slack.formatMatchDate(data.date)}*${
+                  data.venueName ? `\n📍 ${data.venueName}` : ""
+                }\n\n🚪 Cổng đóng lúc *${slack.formatTimestamp(closing)}* — ⏳ còn *${remainingLabel}*\n👥 Hiện đã có *${attCount} người* điểm danh.\n\n🏃 Ai chưa điểm danh thì vào nhanh nhé!`,
+                cta: {
+                  label: "Điểm danh ngay",
+                  url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/attendance`,
+                  style: "primary",
+                },
+                fallbackText: "Sắp đóng cổng điểm danh",
+              }, target)
+              .catch((e) => console.error("[slack] A3 failed", e));
+          }
+        }
 
         await docSnap.ref.update({
           attendanceWarnedNotified: true,
-          attendanceWarnedAt: admin.firestore.FieldValue.serverTimestamp(),
+          attendanceWarnedAt: FieldValue.serverTimestamp(),
         });
       }
 
@@ -1284,23 +1411,28 @@ exports.checkAttendanceClose = onSchedule(
           (d) => d.data().memberName || "Không rõ"
         );
 
-        await slack
-          .sendBlock({
-            headerText: "🔒 Đã chốt danh sách điểm danh",
-            bodyMarkdown: `📅 Trận *${slack.formatMatchDate(data.date)}*${
-              data.venueName ? `\n📍 ${data.venueName}` : ""
-            }\n\n👥 *${attSnap.size} người tham gia*${
-              attendees.length > 0
-                ? `:\n${attendees.map((n) => `   👤 ${n}`).join("\n")}`
-                : ""
-            }${notAttSnap.size > 0 ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_` : ""}\n\n⚽ Hẹn anh em ra sân!`,
-            fallbackText: `Chốt ${attSnap.size} người tham gia`,
-          })
-          .catch((e) => console.error("[slack] A4 failed", e));
+        {
+          const target = await targets.getSlackTarget(groupId);
+          if (target) {
+            await slack
+              .sendBlock({
+                headerText: "🔒 Đã chốt danh sách điểm danh",
+                bodyMarkdown: `📅 Trận *${slack.formatMatchDate(data.date)}*${
+                  data.venueName ? `\n📍 ${data.venueName}` : ""
+                }\n\n👥 *${attSnap.size} người tham gia*${
+                  attendees.length > 0
+                    ? `:\n${attendees.map((n) => `   👤 ${n}`).join("\n")}`
+                    : ""
+                }${notAttSnap.size > 0 ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_` : ""}\n\n⚽ Hẹn anh em ra sân!`,
+                fallbackText: `Chốt ${attSnap.size} người tham gia`,
+              }, target)
+              .catch((e) => console.error("[slack] A4 failed", e));
+          }
+        }
 
         await docSnap.ref.update({
           attendanceClosedNotified: true,
-          attendanceClosedAt: admin.firestore.FieldValue.serverTimestamp(),
+          attendanceClosedAt: FieldValue.serverTimestamp(),
         });
       }
     }
@@ -1318,6 +1450,7 @@ exports.flushAttendQueue = onSchedule(
   },
   async () => {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
     const staleCutoff = new Date(
       Date.now() - cfg.QUEUE_STALE_HOURS * 60 * 60 * 1000
     );
@@ -1336,9 +1469,11 @@ exports.flushAttendQueue = onSchedule(
         staleDocs.push(d.ref);
         return;
       }
-      const key = data.matchId;
+      const key = `${groupIdOf(data)}:${data.matchId}`;
       if (!byMatch.has(key))
         byMatch.set(key, {
+          groupId: groupIdOf(data),
+          matchId: data.matchId,
           matchDateLabel: data.matchDateLabel,
           names: [],
           docs: [],
@@ -1347,7 +1482,9 @@ exports.flushAttendQueue = onSchedule(
       byMatch.get(key).docs.push(d.ref);
     });
 
-    for (const [matchId, group] of byMatch) {
+    for (const [, group] of byMatch) {
+      const matchId = group.matchId;
+      const groupId = group.groupId;
       const attSnap = await db
         .collection("matches")
         .doc(matchId)
@@ -1361,18 +1498,23 @@ exports.flushAttendQueue = onSchedule(
       group.docs.forEach((ref) => batch.delete(ref));
       await batch.commit();
 
-      await slack
-        .sendBlock({
-          headerText: `✅ ${group.names.length} người vừa điểm danh`,
-          bodyMarkdown: `📅 Trận *${group.matchDateLabel}*\n\n${namesText}\n\n👥 Tổng đã điểm danh: *${totalAttended} người*\n\n🙌 Ai chưa điểm danh thì vào nhé!`,
-          cta: {
-            label: "Điểm danh ngay",
-            url: `${slack.PUBLIC_WEB_URL}/attendance`,
-            style: "primary",
-          },
-          fallbackText: `${group.names.length} người vừa điểm danh`,
-        })
-        .catch((e) => console.error("[slack] flushAttend failed", e));
+      {
+        const target = await targets.getSlackTarget(groupId);
+        if (target) {
+          await slack
+            .sendBlock({
+              headerText: `✅ ${group.names.length} người vừa điểm danh`,
+              bodyMarkdown: `📅 Trận *${group.matchDateLabel}*\n\n${namesText}\n\n👥 Tổng đã điểm danh: *${totalAttended} người*\n\n🙌 Ai chưa điểm danh thì vào nhé!`,
+              cta: {
+                label: "Điểm danh ngay",
+                url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/attendance`,
+                style: "primary",
+              },
+              fallbackText: `${group.names.length} người vừa điểm danh`,
+            }, target)
+            .catch((e) => console.error("[slack] flushAttend failed", e));
+        }
+      }
     }
 
     if (staleDocs.length > 0) {
@@ -1396,6 +1538,7 @@ exports.flushAttendanceChangeQueue = onSchedule(
   },
   async () => {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
     const staleCutoff = new Date(
       Date.now() - cfg.QUEUE_STALE_HOURS * 60 * 60 * 1000
     );
@@ -1414,9 +1557,11 @@ exports.flushAttendanceChangeQueue = onSchedule(
         staleDocs.push(d.ref);
         return;
       }
-      const key = data.matchId;
+      const key = `${groupIdOf(data)}:${data.matchId}`;
       if (!byMatch.has(key))
         byMatch.set(key, {
+          groupId: groupIdOf(data),
+          matchId: data.matchId,
           matchDateLabel: data.matchDateLabel,
           notAttend: [],
           cancelNotAttend: [],
@@ -1429,6 +1574,7 @@ exports.flushAttendanceChangeQueue = onSchedule(
     });
 
     for (const [, group] of byMatch) {
+      const groupId = group.groupId;
       const sections = [];
       if (group.notAttend.length > 0) {
         sections.push(
@@ -1451,13 +1597,18 @@ exports.flushAttendanceChangeQueue = onSchedule(
       group.docs.forEach((ref) => batch.delete(ref));
       await batch.commit();
 
-      await slack
-        .sendBlock({
-          headerText,
-          bodyMarkdown: `📅 Trận *${group.matchDateLabel}*\n\n${sections.join("\n\n")}`,
-          fallbackText: headerText,
-        })
-        .catch((e) => console.error("[slack] flushChange failed", e));
+      {
+        const target = await targets.getSlackTarget(groupId);
+        if (target) {
+          await slack
+            .sendBlock({
+              headerText,
+              bodyMarkdown: `📅 Trận *${group.matchDateLabel}*\n\n${sections.join("\n\n")}`,
+              fallbackText: headerText,
+            }, target)
+            .catch((e) => console.error("[slack] flushChange failed", e));
+        }
+      }
     }
 
     if (staleDocs.length > 0) {
@@ -1480,14 +1631,22 @@ exports.flushPaymentQueue = onSchedule(
   },
   async () => {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
     const snap = await db.collection("paymentQueue").get();
     if (snap.empty) return;
 
+    const byGroup = new Map();
+    snap.forEach((doc) => {
+      const groupId = groupIdOf(doc.data());
+      if (!byGroup.has(groupId)) byGroup.set(groupId, []);
+      byGroup.get(groupId).push(doc);
+    });
+    for (const [groupId, groupDocs] of byGroup) {
     const payments = [];
     const affectedMatchIds = new Set();
     const docsToDelete = [];
 
-    snap.forEach((doc) => {
+    groupDocs.forEach((doc) => {
       const data = doc.data();
       payments.push({
         memberName: data.memberName,
@@ -1564,13 +1723,18 @@ exports.flushPaymentQueue = onSchedule(
     });
 
     // Send C1: Batched payment summary
-    await slack
-      .sendBlock({
-        headerText: "💵 Cập nhật thanh toán",
-        bodyMarkdown: `${paymentLines.join("\n")}\n\n${matchLines.join("\n")}`,
-        fallbackText: `Có ${payments.length} lượt thanh toán mới`,
-      })
-      .catch((e) => console.error("[slack] Batched C1 failed", e));
+    {
+      const target = await targets.getSlackTarget(groupId);
+      if (target) {
+        await slack
+          .sendBlock({
+            headerText: "💵 Cập nhật thanh toán",
+            bodyMarkdown: `${paymentLines.join("\n")}\n\n${matchLines.join("\n")}`,
+            fallbackText: `Có ${payments.length} lượt thanh toán mới`,
+          }, target)
+          .catch((e) => console.error("[slack] Batched C1 failed", e));
+      }
+    }
 
     // Send C2 for each match that just became fully paid
     for (const s of matchSummaries) {
@@ -1578,32 +1742,38 @@ exports.flushPaymentQueue = onSchedule(
       if (s.matchData?.fullyPaidNotified) continue;
 
       const matchTotal = s.matchData?.totalAmount || 0;
-      await slack
-        .sendBlock({
-          headerText: "🎉 Trận đã thu đủ tiền!",
-          bodyMarkdown: `📅 *${slack.formatMatchDate(s.matchData?.date)}*${
-            s.matchData?.venueName ? `\n📍 ${s.matchData.venueName}` : ""
-          }\n\n💰 Tổng thu: *${slack.formatVnd(matchTotal)} VND*\n👥 ${
-            s.totalCount
-          } người\n\n🎊 Cảm ơn cả đội đã thanh toán đầy đủ!`,
-          fallbackText: `Trận ${slack.formatMatchDate(
-            s.matchData?.date
-          )} đã thu đủ`,
-        })
-        .then(async () => {
-          await db
-            .collection("matches")
-            .doc(s.matchId)
-            .update({ fullyPaidNotified: true })
-            .catch((e) =>
-              console.error(
-                `[slack] Failed to update fullyPaidNotified for match ${s.matchId}`,
-                e
-              )
-            );
-        })
-        .catch((e) => console.error("[slack] C2 failed", e));
+      {
+        const target = await targets.getSlackTarget(groupId);
+        if (target) {
+          await slack
+            .sendBlock({
+              headerText: "🎉 Trận đã thu đủ tiền!",
+              bodyMarkdown: `📅 *${slack.formatMatchDate(s.matchData?.date)}*${
+                s.matchData?.venueName ? `\n📍 ${s.matchData.venueName}` : ""
+              }\n\n💰 Tổng thu: *${slack.formatVnd(matchTotal)} VND*\n👥 ${
+                s.totalCount
+              } người\n\n🎊 Cảm ơn cả đội đã thanh toán đầy đủ!`,
+              fallbackText: `Trận ${slack.formatMatchDate(
+                s.matchData?.date
+              )} đã thu đủ`,
+            }, target)
+            .then(async () => {
+              await db
+                .collection("matches")
+                .doc(s.matchId)
+                .update({ fullyPaidNotified: true })
+                .catch((e) =>
+                  console.error(
+                    `[slack] Failed to update fullyPaidNotified for match ${s.matchId}`,
+                    e
+                  )
+                );
+            })
+            .catch((e) => console.error("[slack] C2 failed", e));
+        }
+      }
     }
+      }
   }
 );
 
@@ -1615,6 +1785,7 @@ exports.debtReminder = onSchedule(
   { schedule: cfg.DEBT_REMINDER_CRON, timeZone: TZ },
   async () => {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
 
     // Step 1: get PUBLISHED matches
     const matchesSnap = await db
@@ -1628,8 +1799,15 @@ exports.debtReminder = onSchedule(
     }
 
     // Build map: matchId -> { dateLabel, venueName }
+    const matchesByGroup = new Map();
+    matchesSnap.forEach((doc) => {
+      const groupId = groupIdOf(doc.data());
+      if (!matchesByGroup.has(groupId)) matchesByGroup.set(groupId, []);
+      matchesByGroup.get(groupId).push(doc);
+    });
+    for (const [groupId, groupMatches] of matchesByGroup) {
     const matchMeta = new Map();
-    matchesSnap.forEach((d) => {
+    groupMatches.forEach((d) => {
       const data = d.data();
       if (data.isDeleted) return;
       matchMeta.set(d.id, {
@@ -1638,7 +1816,7 @@ exports.debtReminder = onSchedule(
       });
     });
 
-    if (matchMeta.size === 0) return;
+    if (matchMeta.size === 0) continue;
 
     // Step 2: get all PENDING shares across published matches
     const pendingSnap = await db
@@ -1648,13 +1826,14 @@ exports.debtReminder = onSchedule(
 
     if (pendingSnap.empty) {
       console.log("[C3] No pending shares");
-      return;
+      continue;
     }
 
     // Group by memberId, only include shares from published matches
     const byMember = new Map();
     pendingSnap.forEach((d) => {
       const data = d.data();
+      if (groupIdOf(data) !== groupId) return;
       const matchId = data.matchId || d.ref.parent.parent?.id;
       if (!matchId || !matchMeta.has(matchId)) return;
       if (!byMember.has(data.memberId)) {
@@ -1671,7 +1850,7 @@ exports.debtReminder = onSchedule(
 
     if (byMember.size === 0) {
       console.log("[C3] No member owes anything for published matches");
-      return;
+      continue;
     }
 
     // Resolve member names
@@ -1681,10 +1860,10 @@ exports.debtReminder = onSchedule(
     for (const chunk of chunkArray(memberIds, 30)) {
       const memberSnap = await db
         .collection("members")
-        .where(admin.firestore.FieldPath.documentId(), "in", chunk)
+        .where(FieldPath.documentId(), "in", chunk)
         .get();
       memberSnap.forEach((m) => {
-        nameMap.set(m.id, m.data().name || "Không rõ");
+        if (groupIdOf(m.data()) === groupId) nameMap.set(m.id, m.data().name || "Không rõ");
       });
     }
 
@@ -1724,25 +1903,31 @@ exports.debtReminder = onSchedule(
     // First message has header; followups labelled (cont.)
     for (let i = 0; i < chunks.length; i++) {
       const isFirst = i === 0;
-      await slack
-        .sendBlock({
-          headerText: isFirst
-            ? "📌 Nhắc nợ định kỳ"
-            : `📌 Nhắc nợ định kỳ (tiếp ${i + 1}/${chunks.length})`,
-          bodyMarkdown: `${isFirst ? `${headerMd}\n\n` : ""}${chunks[i]}`,
-          ...(isFirst
-            ? {
-                cta: {
-                  label: "💳 Vào thanh toán",
-                  url: `${slack.PUBLIC_WEB_URL}/pay`,
-                  style: "primary",
-                },
-              }
-            : {}),
-          fallbackText: "Nhắc nợ định kỳ",
-        })
-        .catch((e) => console.error("[slack] C3 failed", e));
+      {
+        const target = await targets.getSlackTarget(groupId);
+        if (target) {
+          await slack
+            .sendBlock({
+              headerText: isFirst
+                ? "📌 Nhắc nợ định kỳ"
+                : `📌 Nhắc nợ định kỳ (tiếp ${i + 1}/${chunks.length})`,
+              bodyMarkdown: `${isFirst ? `${headerMd}\n\n` : ""}${chunks[i]}`,
+              ...(isFirst
+                ? {
+                    cta: {
+                      label: "💳 Vào thanh toán",
+                      url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/pay`,
+                      style: "primary",
+                    },
+                  }
+                : {}),
+              fallbackText: "Nhắc nợ định kỳ",
+            }, target)
+            .catch((e) => console.error("[slack] C3 failed", e));
+        }
+      }
     }
+      }
   }
 );
 
@@ -1758,6 +1943,7 @@ exports.dailyAttendanceReminder = onSchedule(
   { schedule: cfg.DAILY_REMINDER_CRON, timeZone: TZ },
   async () => {
     const db = admin.firestore();
+    const targets = createGroupTargets({ db, env: process.env });
     const now = new Date();
     // YYYY-MM-DD in TZ — cron fires at 9 AM ICT so UTC date usually matches,
     // but we anchor on TZ explicitly to stay correct if cron timing changes.
@@ -1776,6 +1962,7 @@ exports.dailyAttendanceReminder = onSchedule(
 
     for (const docSnap of pendingSnap.docs) {
       const data = docSnap.data();
+      const groupId = groupIdOf(data);
       if (data.isDeleted) continue;
       if (!data.date?.toDate) continue;
 
@@ -1866,20 +2053,25 @@ exports.dailyAttendanceReminder = onSchedule(
           ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_`
           : "";
 
-      await slack
-        .sendBlock({
-          headerText: "🔔 Nhắc nhở điểm danh",
-          bodyMarkdown: `${mention}📅 Trận *${slack.formatMatchDate(data.date)}*${
-            data.venueName ? `\n📍 ${data.venueName}` : ""
-          }\n\n${daysLabel} đến trận.${attendeesSection}${absentSection}\n\n🏃 Anh em check nhanh giúp nhé!`,
-          cta: {
-            label: "Điểm danh ngay",
-            url: `${slack.PUBLIC_WEB_URL}/attendance`,
-            style: "primary",
-          },
-          fallbackText: "Nhắc nhở điểm danh",
-        })
-        .catch((e) => console.error("[slack] daily-reminder failed", e));
+      {
+        const target = await targets.getSlackTarget(groupId);
+        if (target) {
+          await slack
+            .sendBlock({
+              headerText: "🔔 Nhắc nhở điểm danh",
+              bodyMarkdown: `${mention}📅 Trận *${slack.formatMatchDate(data.date)}*${
+                data.venueName ? `\n📍 ${data.venueName}` : ""
+              }\n\n${daysLabel} đến trận.${attendeesSection}${absentSection}\n\n🏃 Anh em check nhanh giúp nhé!`,
+              cta: {
+                label: "Điểm danh ngay",
+                url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/attendance`,
+                style: "primary",
+              },
+              fallbackText: "Nhắc nhở điểm danh",
+            }, target)
+            .catch((e) => console.error("[slack] daily-reminder failed", e));
+        }
+      }
 
       await docSnap.ref.update({ lastDailyReminderDate: todayKey });
     }

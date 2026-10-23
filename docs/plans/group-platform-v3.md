@@ -9,7 +9,7 @@ a channel ID per group (`chat.postMessage`), not a webhook URL per group.
 Rev 5 (same day, in place): D13 changed — Football features (Scoring, Live
 notes, Ratings, team propose/lock) stay **on for Football Zigvy**; other sports
 hide them. They get a light group filter (P1.3f), not a full per-group port.
-Status: Current planning record. No phase has been implemented.
+Status: Phase 1 complete; Phase 2 P2.1–P2.13 implemented; MVP/Release B browser gates pending.
 Supersedes: [v2](group-free-collections-v2.md) and [v1](group-free-collections-v1.md).
 Navigation: [Plan index](index.md).
 
@@ -35,6 +35,14 @@ conflict in the phase handoff notes, and ask the user. Do not invent a new rule.
 | D12 | Reads of group data (members, matches, shares, ratings) stay public like today; each group's public page is reachable by its URL. Only writes are group-scoped in rules. Member docs (incl. `loginEmail`, `authUid`, `fcmToken`) stay publicly readable. | **Confirmed** by user (rev 3): the app is a simple money-collection tool; public reads keep it easy to use |
 | D13 | Core features (§15) work for every group. Football features (Scoring, Live notes, Ratings/MVP, team propose/lock + passcode) stay **on for Football Zigvy exactly as today** and are hidden for every other group. Phase 1 gives them a light group filter (P1.3f: list queries filter by `groupId`, single-doc reads check the group) so they never show another group's data. Their settings stay global (`configs/scoringWeights`, `actionConfigs`, `appConfig/publicPasscode`), which is why they are limited to Football Zigvy (§16 `onlyGroups`). A new football group gets them only after a later per-group port (§15). Dashboard and the funds ledger stay hidden/deferred. | User (rev 3; changed rev 5: "football type thì vẫn giữ chức năng như cũ", option B) |
 | D14 | Every group has a sport type (`sport`), chosen when the group is created. A code-level feature registry decides which sport-specific features a group sees (§16). Core features show for every sport. | User (rev 3) |
+
+D15 (2026-10-21, user confirmed): this release uses account-only login.
+Members remain player/payment records. Member-login provisioning and staff-login
+APIs are deferred. Legacy login URLs redirect to `/platform/login`; the existing
+owner keeps the same Auth UID/email/password and receives platform owner metadata
+through the user-run seed-owner script. Existing member/Auth data is preserved.
+This decision supersedes the original P2.10 staff-login slice and the member-login
+route below; P2.7's legacy role fallback remains display-only for compatibility.
 
 ## 1. Target user journey
 
@@ -93,7 +101,7 @@ Authorization rules (apply on server and in Firestore rules):
 | `/platform/login` | `PlatformLogin.tsx` (email + password, no member list) | none |
 | `/platform` | `Groups.tsx` (my groups, create group) | active platform account |
 | `/platform/accounts` | `PlatformAccounts.tsx` | owner |
-| `/g/:groupId/login` | existing `Login.tsx`, members filtered by groupId | none |
+| `/g/:groupId/login` | redirect to `/platform/login` with query (D15) | none |
 | `/g/:groupId/public/*` | core public pages (index, pay, payment-success, payment-cancel, attendance); `team-locked`, `ratings` behind `RequireFeature` (Football Zigvy only, §16) | group exists and active |
 | `/g/:groupId/admin/*` | core admin pages (setup, setup/:matchId, members, matches, config); `scoring`, `live` behind `RequireFeature` (Football Zigvy only, §16) | `canUseTab` per tab |
 | `/public/*`, `/admin/*`, `/login` | Legacy redirect to `/g/football-zigvy/...` with the same sub-path and **the same query string** | — |
@@ -213,7 +221,11 @@ browser console for "requires an index" links. Do not add npm scripts
 Implementation approval ≠ deploy approval. Deploy, migration `--apply`, owner
 seed, and real account creation are always run by the user (see §11).
 
-## 11. Production runbook (user runs; executor only prepares)
+## 11. Production runbook
+
+The original user-only restriction below was superseded for this rollout by
+explicit user authorization on 2026-10-22. Follow the evidence and remaining
+gates in [production rollout v1](group-production-rollout-v1.md).
 
 > **Order matters: migrate (steps 1–2) BEFORE deploying new code (step 5).** New
 > code only shows records with `groupId`; deployed first, every Football list looks
@@ -224,10 +236,14 @@ seed, and real account creation are always run by the user (see §11).
 1. `node server/scripts/migrate-default-group.js --owner-uid <UID>` (dry-run; review counts).
    UID source: Firebase console → Authentication → your account, or the `userRoles`
    doc whose roles include `superadmin`.
-2. Same command with `--apply`. Re-run: second run must report 0 writes.
+2. Same command with `--apply --production`. Re-run: second run must report 0 writes.
 3. `firebase deploy --only firestore:indexes`; wait until all indexes show "Enabled".
-4. `node server/scripts/seed-owner.js --uid <UID> --email <email> --apply` (Phase 2).
-5. `firebase deploy --only firestore:rules,functions` then `cd web && npm run deploy`.
+4. `node server/scripts/seed-owner.js --uid <UID> --email <email> --apply --production` (Phase 2). Keep the existing Auth UID; this script only grants platform metadata.
+5. For current Release B/S3 code: `firebase deploy --only functions`, then
+   `cd web && npm run deploy` (hosting), then `firebase deploy --only firestore:rules`
+   from the repository root. Functions + hosting must precede locked S3 rules,
+   so public clients use the new validated endpoints first. Refresh old cached
+   PWA clients after rollout. These are user-only steps, never run by this agent.
 6. Re-run step 2 (catches docs created by old clients during the deploy window).
 7. Smoke test: open `/public`, `/g/football-zigvy/public`, `/admin`, one payment in payOS sandbox if available; check console for missing-index errors.
 
@@ -251,10 +267,10 @@ Scripts use `GOOGLE_APPLICATION_CREDENTIALS` like the server. They refuse to run
 | Plan rev 3 | Written 2026-10-20 | D10/D12 confirmed; D13 core scope; D14 sport type |
 | Plan rev 4 | Written 2026-10-20 | D7 confirmed: Slack bot token + channel ID per group |
 | Plan rev 5 | Written 2026-10-20 | D13 changed (option B): Football features stay for Football Zigvy, light filter P1.3f; silent mode P1.0c; runbook backup step 0 + migrate-before-deploy |
-| Phase 1 | Not started | — |
-| Phase 2 | Not started | Depends on Phase 1 |
+| Phase 1 | Complete | 2026-10-20: 131 tests pass; build passes; same 4 baseline type errors. Emulator browser checklist and migration rehearsal complete; see phase Evidence/handoff. |
+| Phase 2 | P2.1–P2.13 implemented; browser gates pending | 2026-10-22: 179 unit tests, 19 S3 rules tests and both fake MVP scenarios pass; build passes; 4 baseline type errors unchanged. Account-only scope D15. Disabled accounts denied even with memberships (approved correction). Required MVP/Release B browser checks blocked by saved origin-policy denial; phase not yet complete. |
 | Phase 3 | Deferred (§15) | Depends on Phase 2 |
-| Deploy / production migration / real accounts | Not authorized | Separate explicit user action |
+| Production rollout | Authorized 2026-10-22; in progress | Backup and idempotent migration completed; owner seeded, test group created, indexes deployed, S1 transition released. Functions/hosting/S3 and browser proof still pending; see [rollout v1](group-production-rollout-v1.md). No real Auth test accounts. |
 
 ## 14. Open questions (non-blocking unless noted)
 

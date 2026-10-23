@@ -1,3 +1,6 @@
+import { groupIdOf, scopedKey } from "@/lib/groups";
+import { hasFeature } from "@/lib/features";
+import { useGroup, useGroupPath } from "@/contexts/GroupContext";
 import {
   Card,
   CardDescription,
@@ -42,6 +45,8 @@ interface TopHighlight {
 const MIN_MVP_VOTES = 2;
 
 const PublicPortal = () => {
+  const { groupId, group } = useGroup();
+  const groupPath = useGroupPath();
   const [highlight, setHighlight] = useState<TopHighlight | null>(null);
   const [isLoadingHighlight, setIsLoadingHighlight] = useState(false);
   const [scoreboard, setScoreboard] = useState<
@@ -52,23 +57,25 @@ const PublicPortal = () => {
   useEffect(() => {
     const requestNotify = async () => {
       if (typeof Notification === "undefined") return;
-      const prompted = localStorage.getItem("publicNotifyPrompted");
+      const prompted = localStorage.getItem(scopedKey("publicNotifyPrompted", groupId));
       if (prompted && Notification.permission === "denied") return;
-      const token = await ensureNotificationToken(null);
-      localStorage.setItem("publicNotifyPrompted", "1");
+      const token = await ensureNotificationToken(null, groupId);
+      localStorage.setItem(scopedKey("publicNotifyPrompted", groupId), "1");
       if (token) {
         console.info("[notify] Token registered from /public");
       }
     };
     requestNotify();
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
+    if (!hasFeature(groupId, group, "ratings")) { setIsLoadingHighlight(false); return; }
     const fetchHighlight = async () => {
       setIsLoadingHighlight(true);
       try {
         const matchesQuery = query(
           collection(db, "matches"),
+          where("groupId", "==", groupId),
           where("status", "==", "PUBLISHED"),
           orderBy("date", "desc"),
           limit(3)
@@ -193,7 +200,7 @@ const PublicPortal = () => {
           await Promise.all(
             memberIds.map(async (id) => {
               const snap = await getDoc(doc(db, "members", id));
-              if (snap.exists()) {
+              if (snap.exists() && groupIdOf(snap.data()) === groupId) {
                 nameCache.set(id, snap.data().name || "Không rõ");
               }
             })
@@ -229,14 +236,15 @@ const PublicPortal = () => {
     };
 
     fetchHighlight();
-  }, []);
+  }, [groupId, group]);
 
   useEffect(() => {
+    if (!hasFeature(groupId, group, "scoring")) { setIsLoadingScoreboard(false); return; }
     const fetchScoreboard = async () => {
       setIsLoadingScoreboard(true);
       try {
         const matchesSnapshot = await getDocs(
-          query(collection(db, "matches"), orderBy("date", "desc"), limit(25))
+          query(collection(db, "matches"), where("groupId", "==", groupId), orderBy("date", "desc"), limit(25))
         );
 
         const winsMap = new Map<
@@ -314,7 +322,7 @@ const PublicPortal = () => {
     };
 
     fetchScoreboard();
-  }, []);
+  }, [groupId, group]);
 
   if (isLoadingHighlight) {
     return (
@@ -338,13 +346,13 @@ const PublicPortal = () => {
           <div className="inline-flex items-center justify-center p-4 bg-primary rounded-2xl shadow-card mb-4">
             <Trophy className="h-10 w-10 text-white" />
           </div>
-          <h1 className="text-4xl font-bold text-foreground">Football Tools</h1>
+          <h1 className="text-4xl font-bold text-foreground">{group?.sport === "badminton" ? group.name : "Football Tools"}</h1>
           <p className="text-muted-foreground mt-2">
             Vui lòng chọn hành động bạn muốn thực hiện.
           </p>
         </div>
 
-        <Card className="shadow-card overflow-hidden">
+        {hasFeature(groupId, group, "ratings") && (<Card className="shadow-card overflow-hidden">
           <div className="bg-gradient-to-r from-amber-500 via-orange-400 to-yellow-400 p-4 text-white">
             <CardTitle className="text-lg">Vinh danh trận gần nhất</CardTitle>
             <CardDescription className="text-white/80">
@@ -411,9 +419,9 @@ const PublicPortal = () => {
               )}
             </div>
           </div>
-        </Card>
+        </Card>)}
 
-        <Card className="shadow-card">
+        {hasFeature(groupId, group, "scoring") && (<Card className="shadow-card">
           <CardHeader>
             <CardTitle>Bảng tỉ số</CardTitle>
           </CardHeader>
@@ -495,10 +503,10 @@ const PublicPortal = () => {
               </p>
             )}
           </div>
-        </Card>
+        </Card>)}
 
         <div className="space-y-6">
-          <Link to="/public/attendance" className="block">
+          <Link to={groupPath("public/attendance")} className="block">
             <Card className="shadow-card hover:shadow-card-hover transition-all cursor-pointer group">
               <CardHeader className="flex flex-row items-center gap-4">
                 <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center group-hover:scale-110 transition-transform shadow-card">
@@ -514,7 +522,7 @@ const PublicPortal = () => {
             </Card>
           </Link>
 
-          <Link to="/public/pay" className="block">
+          <Link to={groupPath("public/pay")} className="block">
             <Card className="shadow-card hover:shadow-card-hover transition-all cursor-pointer group">
               <CardHeader className="flex flex-row items-center gap-4">
                 <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center group-hover:scale-110 transition-transform shadow-card">
@@ -529,7 +537,7 @@ const PublicPortal = () => {
               </CardHeader>
             </Card>
           </Link>
-          <Link to="/public/ratings" className="block">
+          {hasFeature(groupId, group, "ratings") && (<Link to={groupPath("public/ratings")} className="block">
             <Card className="shadow-card hover:shadow-card-hover transition-all cursor-pointer group">
               <CardHeader className="flex flex-row items-center gap-4">
                 <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center group-hover:scale-110 transition-transform shadow-card">
@@ -543,7 +551,7 @@ const PublicPortal = () => {
                 </div>
               </CardHeader>
             </Card>
-          </Link>
+          </Link>)}
         </div>
       </div>
     </div>

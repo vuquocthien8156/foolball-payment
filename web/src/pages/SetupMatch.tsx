@@ -1,3 +1,5 @@
+import { DEFAULT_GROUP_ID, groupIdOf, settingsDocPath } from "@/lib/groups";
+import { useGroup, useGroupPath } from "@/contexts/GroupContext";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -51,6 +53,8 @@ import {
   getDoc,
   Timestamp,
   updateDoc,
+  query,
+  where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { postApiJson } from "@/lib/api";
@@ -144,7 +148,7 @@ interface SavedTeamConfig {
 interface MatchConfig {
   totalAmount?: string | number; // Keep for backward compatibility
   expenseItems?: ExpenseItem[];
-  teamCount: 2 | 3;
+  teamCount: 1 | 2 | 3;
   teamsConfig: SavedTeamConfig[];
   date?: Timestamp;
   kickoffTime?: string;
@@ -168,6 +172,9 @@ const removeDiacritics = (str: string) => {
 };
 
 const SetupMatch = () => {
+  const { groupId, group, loading: groupLoading } = useGroup();
+  const usesTeams = group?.sport !== "badminton";
+  const groupPath = useGroupPath();
   const { matchId } = useParams();
   const navigate = useNavigate();
 
@@ -175,7 +182,7 @@ const SetupMatch = () => {
   const [date, setDate] = useState(todayLocalKey);
   const [time, setTime] = useState("19:00");
   const [expenseItems, setExpenseItems] = useState<ExpenseItem[]>([
-    { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [], teamPercents: { A: 50, B: 50, C: 0 }, type: "SHARED" },
+    { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [], teamPercents: { A: usesTeams ? 50 : 100, B: usesTeams ? 50 : 0, C: 0 }, type: usesTeams ? "SHARED" : "EQUAL" },
   ]);
   const [teamCount, setTeamCount] = useState<2 | 3>(2);
   const [isLoading, setIsLoading] = useState(true);
@@ -183,7 +190,7 @@ const SetupMatch = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
-  const isBusy = isLoading || isSaving || isSavingConfig || isUpdatingConfig || isCreating;
+  const isBusy = groupLoading || isLoading || isSaving || isSavingConfig || isUpdatingConfig || isCreating;
   const [existingStatus, setExistingStatus] = useState<
     "PENDING" | "COMPLETED" | "PUBLISHED" | undefined
   >("PENDING");
@@ -193,7 +200,7 @@ const SetupMatch = () => {
   const [venueName, setVenueName] = useState("");
   const [mapIframe, setMapIframe] = useState("");
   const [attendanceCloseHours, setAttendanceCloseHours] = useState(12);
-  const [sufficientPlayerCount, setSufficientPlayerCount] = useState<number | "">(14);
+  const [sufficientPlayerCount, setSufficientPlayerCount] = useState<number | "">(usesTeams ? 14 : "");
   const [paidByMemberId, setPaidByMemberId] = useState<string>("");
   const [paidByPopoverOpen, setPaidByPopoverOpen] = useState(false);
   const [activePopoverId, setActivePopoverId] = useState<string | null>(null);
@@ -201,15 +208,16 @@ const SetupMatch = () => {
   const [pool, setPool] = useState<Member[]>([]);
   const [attendance, setAttendance] = useState<Set<string>>(new Set());
   const [teams, setTeams] = useState<Team[]>([
-    { id: "A", name: "Đội A", color: "bg-blue-500", members: [], percent: 50 },
+    { id: "A", name: usesTeams ? "Đội A" : "Người tham gia", color: "bg-blue-500", members: [], percent: usesTeams ? 50 : 100 },
     { id: "B", name: "Đội B", color: "bg-red-500", members: [], percent: 50 },
     { id: "C", name: "Đội C", color: "bg-yellow-500", members: [], percent: 0 },
   ]);
 
-  const activeTeams = teams.slice(0, teamCount);
+  const activeTeams = teams.slice(0, usesTeams ? teamCount : 1);
   const totalPercent = activeTeams.reduce((sum, t) => sum + t.percent, 0);
 
   const getTeamEffectivePercent = (teamId: string) => {
+    if (!usesTeams) return teamId === "A" ? 100 : 0;
     const totalExpenseAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
     if (totalExpenseAmount <= 0) return teamId === "C" ? 0 : 50;
 
@@ -224,10 +232,11 @@ const SetupMatch = () => {
   };
 
   const fetchData = useCallback(async () => {
+    if (groupLoading) return;
     setIsLoading(true);
     try {
       const membersCollectionRef = collection(db, "members");
-      const membersSnapshot = await getDocs(membersCollectionRef);
+      const membersSnapshot = await getDocs(query(membersCollectionRef, where("groupId", "==", groupId)));
       const membersList = membersSnapshot.docs
         .map((doc) => ({ id: doc.id, ...doc.data() } as Member))
         .filter((m) => !m.inactive);
@@ -239,7 +248,7 @@ const SetupMatch = () => {
       if (matchId) {
         const matchRef = doc(db, "matches", matchId);
         const matchSnap = await getDoc(matchRef);
-        if (matchSnap.exists()) {
+        if (matchSnap.exists() && groupIdOf(matchSnap.data()) === groupId) {
           configSource = matchSnap.data() as MatchConfig;
           if ((configSource as any).status) {
             setExistingStatus((configSource as any).status);
@@ -258,13 +267,17 @@ const SetupMatch = () => {
           toast({
             variant: "destructive",
             title: "Lỗi",
-            description: "Không tìm thấy trận đấu.",
+            description: "Match not found",
           });
-          navigate("/admin/setup");
+          navigate(groupPath("admin/setup"));
+          return;
         }
       } else {
-        const configRef = doc(db, "configs", "last_match");
-        const configSnap = await getDoc(configRef);
+        const configRef = doc(db, ...settingsDocPath(groupId, "lastMatch"));
+        let configSnap = await getDoc(configRef);
+        if (!configSnap.exists() && groupId === DEFAULT_GROUP_ID) {
+          configSnap = await getDoc(doc(db, "configs", "last_match"));
+        }
         if (configSnap.exists()) {
           configSource = configSnap.data() as MatchConfig;
         }
@@ -296,7 +309,7 @@ const SetupMatch = () => {
           },
         ];
 
-        const newTeams = defaultTeams.map((originalTeam) => {
+        let newTeams = defaultTeams.map((originalTeam) => {
           const savedTeam = savedConfig.teamsConfig.find(
             (st) => st.id === originalTeam.id
           );
@@ -330,6 +343,11 @@ const SetupMatch = () => {
           };
         });
 
+        if (!usesTeams) {
+          const participants = new Map(newTeams.flatMap((team) => team.members).map((member) => [member.id, member]));
+          newTeams = newTeams.map((team) => ({ ...team, name: team.id === "A" ? "Người tham gia" : team.name, percent: team.id === "A" ? 100 : 0, members: team.id === "A" ? [...participants.values()] : [] }));
+        }
+
         const membersInNewTeams = new Set(
           newTeams.flatMap((t) => t.members.map((m) => m.id))
         );
@@ -345,7 +363,7 @@ const SetupMatch = () => {
           setExpenseItems(
             savedConfig.expenseItems.map((item) => ({
               ...item,
-              type: item.type || "SHARED",
+              type: usesTeams ? item.type || "SHARED" : item.type === "INDIVIDUAL" ? "INDIVIDUAL" : "EQUAL",
               teamPercents: item.teamPercents || { ...initialTeamPercents },
             }))
           );
@@ -357,22 +375,22 @@ const SetupMatch = () => {
               description: "Tiền sân",
               amount: parseFloat(savedConfig.totalAmount.toString()) || 0,
               exemptMemberIds: [],
-              type: "SHARED",
+              type: usesTeams ? "SHARED" : "EQUAL",
               teamPercents: { ...initialTeamPercents },
             },
           ]);
         } else {
           setExpenseItems([
-            { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [], type: "SHARED", teamPercents: { ...initialTeamPercents } },
+            { id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [], type: usesTeams ? "SHARED" : "EQUAL", teamPercents: { ...initialTeamPercents } },
           ]);
         }
 
-        setTeamCount(savedConfig.teamCount || 2);
+        setTeamCount(savedConfig.teamCount === 3 ? 3 : 2);
         setIsTestMatch(savedConfig.isTest || false);
         setVenueName(savedConfig.venueName || "");
         setMapIframe(savedConfig.mapIframe || "");
         setAttendanceCloseHours(savedConfig.attendanceCloseHours ?? 12);
-        setSufficientPlayerCount(savedConfig.sufficientPlayerCount ?? 14);
+        setSufficientPlayerCount(savedConfig.sufficientPlayerCount ?? (usesTeams ? 14 : ""));
         setPaidByMemberId(savedConfig.paidByMemberId || "");
         setSkipAutoAttendance(savedConfig.skipAutoAttendance || false);
         setTeams(newTeams);
@@ -386,6 +404,10 @@ const SetupMatch = () => {
         }
       } else {
         setPool(membersList);
+        if (!usesTeams) {
+          setTeams((current) => current.map((team) => ({ ...team, name: team.id === "A" ? "Người tham gia" : team.name, percent: team.id === "A" ? 100 : 0, members: [] })));
+          setExpenseItems([{ id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [], type: "EQUAL", teamPercents: { A: 100, B: 0, C: 0 } }]);
+        }
       }
     } catch (error) {
       console.error("Error fetching data: ", error);
@@ -397,7 +419,7 @@ const SetupMatch = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [matchId, navigate]);
+  }, [matchId, navigate, groupPath, groupId, usesTeams, groupLoading]);
 
   useEffect(() => {
     fetchData();
@@ -445,6 +467,14 @@ const SetupMatch = () => {
 
     setPool(nextPool);
     setTeams(nextTeams);
+  };
+
+  const toggleParticipant = (member: Member, selected: boolean) => {
+    setTeams((current) => current.map((team) => team.id === "A" ? {
+      ...team,
+      members: selected ? [...team.members.filter((entry) => entry.id !== member.id), member] : team.members.filter((entry) => entry.id !== member.id),
+    } : team));
+    setPool((current) => selected ? current.filter((entry) => entry.id !== member.id) : [...current.filter((entry) => entry.id !== member.id), member]);
   };
 
   const handlePercentChange = (teamId: string, value: number) => {
@@ -513,8 +543,8 @@ const SetupMatch = () => {
       description: "",
       amount: 0,
       exemptMemberIds: [],
-      type: "SHARED",
-      teamPercents: defaultPercents,
+      type: usesTeams ? "SHARED" : "EQUAL",
+      teamPercents: usesTeams ? defaultPercents : { A: 100, B: 0, C: 0 },
     };
     setExpenseItems([...expenseItems, newExpense]);
   };
@@ -709,7 +739,7 @@ const SetupMatch = () => {
       const configToSave = {
         kickoffTime: time,
         expenseItems: expenseItems,
-        teamCount,
+        teamCount: usesTeams ? teamCount : 1,
         venueName: venueName || null,
         mapIframe: mapIframe || null,
         attendanceCloseHours,
@@ -728,7 +758,7 @@ const SetupMatch = () => {
         })),
       };
       const batch = writeBatch(db);
-      batch.set(doc(db, "configs", "last_match"), configToSave);
+      batch.set(doc(db, ...settingsDocPath(groupId, "lastMatch")), configToSave);
       if (matchId) {
         batch.update(doc(db, "matches", matchId), { date: kickoff, updatedAt: serverTimestamp() });
       }
@@ -760,7 +790,7 @@ const SetupMatch = () => {
         date: createMatchDate(date, time),
         totalAmount: totalAmount,
         expenseItems: expenseItems,
-        teamCount,
+        teamCount: usesTeams ? teamCount : 1,
         isTest: isTestMatch,
         venueName: venueName || null,
         mapIframe: mapIframe || null,
@@ -788,7 +818,7 @@ const SetupMatch = () => {
       await updateDoc(matchRef, matchData);
       toast({
         title: "Đã lưu!",
-        description: "Chỉ cập nhật cấu hình/đội hình, chưa tính tiền.",
+        description: usesTeams ? "Chỉ cập nhật cấu hình/đội hình, chưa tính tiền." : "Đã cập nhật thông tin và người tham gia, chưa tính tiền.",
       });
     } catch (error) {
       toast({
@@ -807,10 +837,11 @@ const SetupMatch = () => {
       const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
       const matchRef = doc(collection(db, "matches"));
       const matchData = {
+        groupId,
         date: createMatchDate(date, time),
         totalAmount: totalAmount,
         expenseItems: expenseItems,
-        teamCount,
+        teamCount: usesTeams ? teamCount : 1,
         status: "PENDING",
         isTest: isTestMatch,
         venueName: venueName || null,
@@ -832,7 +863,7 @@ const SetupMatch = () => {
         })),
       };
       await setDoc(matchRef, matchData);
-      const attendanceLink = `${window.location.origin}/attendance`;
+      const attendanceLink = `${window.location.origin}${groupPath("public/attendance")}`;
       navigator.clipboard.writeText(attendanceLink);
       toast({
         title: "Tạo thành công!",
@@ -840,11 +871,11 @@ const SetupMatch = () => {
           "Đã tạo trận điểm danh. Link điểm danh chung đã được sao chép.",
       });
       // Fire push notification cho members
-      postApiJson("/notify/attendance-created", { matchId: matchRef.id }).catch(
+      postApiJson("/notify/attendance-created", { matchId: matchRef.id, groupId }).catch(
         (error) =>
           console.error("Failed to send attendance created notification", error)
       );
-      navigate(`/admin/setup/${matchRef.id}`);
+      navigate(groupPath(`admin/setup/${matchRef.id}`));
     } catch (error) {
       toast({
         variant: "destructive",
@@ -885,7 +916,7 @@ const SetupMatch = () => {
         if (totalMembers === 0) {
           toast({
             title: `Lỗi phân chia ở Khoản ${i + 1}`,
-            description: `Không thể chia đều "${expense.description || "Khoản chi phí"}" vì các đội chưa có thành viên nào`,
+            description: `Không thể chia đều "${expense.description || "Khoản chi phí"}" khi chưa có người tham gia`,
             variant: "destructive",
           });
           return;
@@ -933,7 +964,7 @@ const SetupMatch = () => {
         teamId: string;
         totalAmount: number;
         expenseBreakdown: { expenseId: string; description: string; amount: number }[];
-        calculationDetails?: object;
+        calculationDetails?: Share["calculationDetails"] & { isEqual?: boolean; isIndividual?: boolean };
       }>();
 
       expenseItems.forEach((expense) => {
@@ -1138,10 +1169,11 @@ const SetupMatch = () => {
       const batch = writeBatch(db);
 
       const matchData = {
+        groupId,
         date: createMatchDate(date, time),
         totalAmount: numericTotalAmount,
         expenseItems: expenseItems,
-        teamCount,
+        teamCount: usesTeams ? teamCount : 1,
         isTest: isTestMatch,
         venueName: venueName || null,
         mapIframe: mapIframe || null,
@@ -1175,18 +1207,18 @@ const SetupMatch = () => {
 
       shares.forEach((share) => {
         const shareRef = doc(collection(matchRef, "shares"));
-        batch.set(shareRef, { ...share, createdAt: serverTimestamp() });
+        batch.set(shareRef, { ...share, groupId, createdAt: serverTimestamp() });
       });
 
       await batch.commit();
       if (publish && existingStatus !== "PUBLISHED") {
-        void postApiJson("/notify/match-published", { matchId: matchRef.id }).catch((error) => {
+        void postApiJson("/notify/match-published", { matchId: matchRef.id, groupId }).catch((error) => {
           console.error("Failed to send match-published notification", error);
         });
       }
       setExistingStatus(nextStatus);
       toast({ title: "Saved", description: publish ? "Match calculated and published. Members can now see their debts in Pay." : "Match calculated. Publish it when you are ready to collect payment." });
-      if (!matchId) navigate(`/admin/setup/${matchRef.id}`);
+      if (!matchId) navigate(groupPath(`admin/setup/${matchRef.id}`));
     } catch (error) {
       toast({
         title: "Lỗi!",
@@ -1225,7 +1257,7 @@ const SetupMatch = () => {
     setPool(remainingInPool);
     toast({
       title: "Tải thành công!",
-      description: `Đã thêm ${attendingMembers.length} thành viên vào Đội A.`,
+      description: usesTeams ? `Đã thêm ${attendingMembers.length} thành viên vào Đội A.` : `Đã thêm ${attendingMembers.length} người đã điểm danh.`,
     });
   };
 
@@ -1238,7 +1270,7 @@ const SetupMatch = () => {
     setTeams(resetTeams);
 
     toast({
-      title: "Đã reset!",
+      title: "Đã đặt lại danh sách!",
       description: "Tất cả thành viên đã được đưa về danh sách.",
     });
   };
@@ -1264,12 +1296,12 @@ const SetupMatch = () => {
             </div>
             <div>
               <h1 className="text-3xl font-bold text-foreground">
-                {matchId ? "Chỉnh sửa trận đấu" : "Tạo trận đấu mới"}
+                {usesTeams ? (matchId ? "Chỉnh sửa trận đấu" : "Tạo trận đấu mới") : (matchId ? "Chỉnh sửa buổi cầu lông" : "Tạo buổi cầu lông")}
               </h1>
               <p className="text-muted-foreground">
                 {matchId
                   ? `ID: ${matchId}`
-                  : "Phân chia đội và tính tiền tự động"}
+                  : usesTeams ? "Phân chia đội và tính tiền tự động" : "Chọn người tham gia và chia chi phí buổi cầu lông"}
               </p>
             </div>
           </div>
@@ -1277,11 +1309,11 @@ const SetupMatch = () => {
 
         <Card className="mb-6 shadow-card">
           <CardHeader>
-            <CardTitle>Thông tin trận đấu</CardTitle>
+            <CardTitle>{usesTeams ? "Thông tin trận đấu" : "Thông tin buổi chơi"}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-7">
             <div className="space-y-2">
-              <Label htmlFor="date">Ngày đá</Label>
+              <Label htmlFor="date">{usesTeams ? "Ngày đá" : "Ngày chơi"}</Label>
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -1295,7 +1327,7 @@ const SetupMatch = () => {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="time">Giờ đá</Label>
+              <Label htmlFor="time">{usesTeams ? "Giờ đá" : "Giờ bắt đầu"}</Label>
               <Input
                 id="time"
                 disabled={isBusy}
@@ -1304,6 +1336,7 @@ const SetupMatch = () => {
                 onChange={(e) => setTime(e.target.value)}
               />
             </div>
+            {usesTeams && (
             <div className="space-y-2">
               <Label htmlFor="teamCount">Số đội</Label>
               <div className="flex gap-2">
@@ -1323,6 +1356,7 @@ const SetupMatch = () => {
                 </Button>
               </div>
             </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="is-test-match">Trận test</Label>
               <div className="flex items-center gap-3 h-10">
@@ -1356,7 +1390,7 @@ const SetupMatch = () => {
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Chi phí trận đấu</CardTitle>
+                <CardTitle>{usesTeams ? "Chi phí trận đấu" : "Chi phí buổi chơi"}</CardTitle>
                 <CardDescription>
                   Thêm các khoản chi phí (tiền sân, tiền nước, v.v.), cấu hình tỷ lệ chia cho từng mục hoặc đòi tiền riêng.
                 </CardDescription>
@@ -1419,6 +1453,7 @@ const SetupMatch = () => {
                 <div className="flex items-center gap-4 py-1 flex-wrap">
                   <span className="text-sm font-medium">Hình thức chia:</span>
                   <div className="flex gap-2 flex-wrap">
+                    {usesTeams && (
                     <Button
                       type="button"
                       variant={(!expense.type || expense.type === "SHARED") ? "default" : "outline"}
@@ -1427,6 +1462,7 @@ const SetupMatch = () => {
                     >
                       Chia theo đội
                     </Button>
+                    )}
                     <Button
                       type="button"
                       variant={expense.type === "EQUAL" ? "default" : "outline"}
@@ -1441,12 +1477,12 @@ const SetupMatch = () => {
                       size="sm"
                       onClick={() => handleUpdateExpense(expense.id, "type", "INDIVIDUAL")}
                     >
-                      Đòi riêng member
+                      Thu riêng một người
                     </Button>
                   </div>
                 </div>
 
-                {(!expense.type || expense.type === "SHARED") && (
+                {usesTeams && (!expense.type || expense.type === "SHARED") && (
                   <div className="space-y-3 pt-2">
                     <Label>Tỷ lệ chia giữa các đội (%)</Label>
                     <div className="flex flex-wrap gap-4 items-center">
@@ -1498,7 +1534,7 @@ const SetupMatch = () => {
 
                 {(!expense.type || expense.type === "SHARED" || expense.type === "EQUAL") && (
                   <div className="space-y-2 pt-2">
-                    <Label>Miễn chia (chọn members không phải trả khoản này)</Label>
+                    <Label>Miễn chia (chọn người không phải trả khoản này)</Label>
                     <Popover
                       open={activePopoverId === `exempt-${expense.id}`}
                       onOpenChange={(open) =>
@@ -1512,7 +1548,7 @@ const SetupMatch = () => {
                           aria-expanded={activePopoverId === `exempt-${expense.id}`}
                           className="w-full justify-between font-normal"
                         >
-                          Chọn member để miễn chia...
+                          Chọn người được miễn chia...
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
@@ -1680,7 +1716,7 @@ const SetupMatch = () => {
               Địa điểm & Cấu hình điểm danh
             </CardTitle>
             <CardDescription>
-              Lưu vào Cấu Hình để dùng làm mặc định cho các trận tiếp theo.
+              Lưu cấu hình để dùng làm mặc định cho lần tiếp theo.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-6 md:grid-cols-2">
@@ -1691,7 +1727,7 @@ const SetupMatch = () => {
                   <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="venue-name"
-                    placeholder="Sân bóng Phú Thọ"
+                    placeholder={usesTeams ? "Sân bóng Phú Thọ" : "Tên sân cầu lông"}
                     value={venueName}
                     onChange={(e) => setVenueName(e.target.value)}
                     className="pl-10"
@@ -1701,7 +1737,7 @@ const SetupMatch = () => {
               <div className="space-y-2">
                 <Label htmlFor="close-hours" className="flex items-center gap-2">
                   <Clock className="h-4 w-4" />
-                  Đóng điểm danh trước ngày đá (giờ)
+                  {usesTeams ? "Đóng điểm danh trước ngày đá (giờ)" : "Đóng điểm danh trước ngày chơi (giờ)"}
                 </Label>
                 <Input
                   id="close-hours"
@@ -1829,6 +1865,7 @@ const SetupMatch = () => {
           </CardContent>
         </Card>
 
+        {usesTeams && (
         <Card className="mb-6 shadow-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1857,7 +1894,9 @@ const SetupMatch = () => {
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+        )}
+
+        <div className={cn("grid gap-4 md:grid-cols-2 mb-6", usesTeams && "lg:grid-cols-4")}>
           <Card
             className="shadow-card"
             onDragOver={(e) => e.preventDefault()}
@@ -1871,6 +1910,7 @@ const SetupMatch = () => {
               <CardDescription>
                 Có {attendance.size} thành viên đã điểm danh.
               </CardDescription>
+              {!usesTeams && <Button variant="outline" size="sm" disabled={isBusy} onClick={handleLoadAttendance}>Thêm người đã điểm danh</Button>}
               <div className="flex flex-wrap gap-2 mt-2">
                 <Button
                   variant="destructive"
@@ -1879,7 +1919,7 @@ const SetupMatch = () => {
                   className="w-full"
                 >
                   <RotateCcw className="h-4 w-4 mr-2" />
-                  Reset Đội
+                  {usesTeams ? "Đặt lại đội" : "Bỏ chọn tất cả"}
                 </Button>
               </div>
               <div className="relative pt-2">
@@ -1917,6 +1957,7 @@ const SetupMatch = () => {
                       {attendance.has(member.id) && (
                         <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
                       )}
+                      {!usesTeams && <Button variant="outline" size="sm" onClick={() => toggleParticipant(member, true)} aria-label={`Thêm ${member.name}`}>Thêm</Button>}
                     </div>
                   </div>
                 ))
@@ -2055,7 +2096,7 @@ const SetupMatch = () => {
                     return (
                       <>
                         <div className="flex justify-between items-center text-sm font-semibold">
-                          <span>Tổng tiền đội:</span>
+                          <span>{usesTeams ? "Tổng tiền đội:" : "Tổng chi phí:"}</span>
                           <span className="text-primary font-bold">
                             {teamTotalAmount.toLocaleString()} VND
                           </span>
@@ -2095,6 +2136,7 @@ const SetupMatch = () => {
                       {attendance.has(member.id) && (
                         <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
                       )}
+                      {!usesTeams && <Button variant="ghost" size="sm" onClick={() => toggleParticipant(member, false)} aria-label={`Bỏ ${member.name}`}>Bỏ</Button>}
                       <div className="font-semibold text-primary">
                         {calculatedShares[member.id] ? (
                           <TooltipProvider>
@@ -2131,7 +2173,7 @@ const SetupMatch = () => {
                       >
                         Miễn chia tiền
                       </Badge>
-                    ) : (
+                    ) : usesTeams ? (
                       <>
                         <div className="relative">
                           <Percent className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
@@ -2154,7 +2196,7 @@ const SetupMatch = () => {
                             <MessageSquarePlus className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                             <Input
                               type="text"
-                              placeholder="Lý do (vd: đá ít)"
+                              placeholder={usesTeams ? "Lý do (vd: đá ít)" : "Lý do (vd: chơi ít)"}
                               value={member.reason || ""}
                               onChange={(e) =>
                                 handleMemberReasonChange(
@@ -2168,7 +2210,7 @@ const SetupMatch = () => {
                           </div>
                         )}
                       </>
-                    )}
+                    ) : null}
                   </div>
                 ))}
               </CardContent>
@@ -2176,19 +2218,19 @@ const SetupMatch = () => {
           ))}
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-4 justify-end">
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 rounded-lg border bg-background p-4 shadow-sm">
           <Button
             variant="outline"
             onClick={() =>
               copyLink(
-                `${window.location.origin}/pay`,
+                `${window.location.origin}${groupPath("public/pay")}`,
                 "Link thanh toán chung đã được sao chép."
               )
             }
             disabled={isSaving}
           >
             <Copy className="h-4 w-4 mr-2" />
-            Sao chép link thanh toán chung
+            Sao chép link thanh toán
           </Button>
           <Button
             onClick={handleCreateMatchForAttendance}
@@ -2201,7 +2243,7 @@ const SetupMatch = () => {
             ) : (
               <LinkIcon className="h-4 w-4 mr-2" />
             )}
-            Tạo & Lấy Link Điểm Danh
+            {usesTeams ? "Tạo trận & lấy link điểm danh" : "Tạo buổi & lấy link điểm danh"}
           </Button>
           <Button
             onClick={handleSaveConfigToDb}
@@ -2227,10 +2269,10 @@ const SetupMatch = () => {
             </Button>
           )}
           <Button onClick={() => void handleSave(false)} variant="outline" disabled={isBusy}>
-            Calculate only
+            Chỉ tính tiền
           </Button>
-          <Button onClick={() => void handleSave(true)} size="lg" disabled={isBusy}>
-            {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</> : "Calculate & Publish"}
+          <Button onClick={() => void handleSave(true)} disabled={isBusy}>
+            {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Đang lưu...</> : "Tính tiền & công khai"}
           </Button>
         </div>
       </div>

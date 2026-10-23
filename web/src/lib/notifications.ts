@@ -1,58 +1,31 @@
-import {
-  deleteDoc,
-  doc,
-  serverTimestamp,
-  setDoc,
-  getDoc,
-} from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
+import { apiRequest, postApiJson } from "@/lib/api";
 import { db, requestNotificationPermission } from "@/lib/firebase";
 
 export const saveNotificationToken = async (
   token: string,
-  memberId?: string | null
+  memberId: string | null | undefined,
+  groupId: string
 ) => {
-  const tokenRef = doc(db, "notificationTokens", token);
-  await setDoc(
-    tokenRef,
-    {
-      token,
-      memberId: memberId || null,
-      updatedAt: serverTimestamp(),
-      userAgent: navigator.userAgent,
-    },
-    { merge: true }
-  );
-
-  if (memberId) {
-    const memberRef = doc(db, "members", memberId);
-    await setDoc(
-      memberRef,
-      { fcmToken: token, fcmTokenUpdatedAt: serverTimestamp() },
-      { merge: true }
-    );
-  }
+  await postApiJson(`/public/${groupId}/notification-token`, {
+    token,
+    memberId: memberId || null,
+  });
 };
 
 export const removeNotificationToken = async (
   token: string | null,
-  memberId?: string | null
+  groupId: string
 ) => {
   if (token) {
-    await deleteDoc(doc(db, "notificationTokens", token));
-  }
-  if (memberId) {
-    await setDoc(
-      doc(db, "members", memberId),
-      { fcmToken: null, fcmTokenUpdatedAt: serverTimestamp() },
-      { merge: true }
-    );
+    await apiRequest("DELETE", `/public/${groupId}/notification-token`, { token });
   }
 };
 
-export const ensureNotificationToken = async (memberId?: string | null) => {
+export const ensureNotificationToken = async (memberId: string | null | undefined, groupId: string) => {
   const token = await requestNotificationPermission();
   if (!token) return null;
-  await saveNotificationToken(token, memberId);
+  await saveNotificationToken(token, memberId, groupId);
   return token;
 };
 

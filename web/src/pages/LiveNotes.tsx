@@ -1,3 +1,5 @@
+import { useGroup } from "@/contexts/GroupContext";
+import { groupIdOf } from "@/lib/groups";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   collection,
@@ -10,6 +12,7 @@ import {
   doc,
   Timestamp,
   deleteDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import {
@@ -87,6 +90,7 @@ interface LiveEvent {
 }
 
 const LiveNotes = () => {
+  const { groupId } = useGroup();
   const {
     okActions,
     badActions,
@@ -196,7 +200,7 @@ const LiveNotes = () => {
     const fetchMatches = async () => {
       setIsLoadingMatches(true);
       try {
-        const q = query(collection(db, "matches"), orderBy("date", "desc"));
+        const q = query(collection(db, "matches"), where("groupId", "==", groupId), orderBy("date", "desc"));
         const snap = await getDocs(q);
         const candidates = snap.docs
           .map((d) => ({ id: d.id, ...d.data() } as Match))
@@ -241,18 +245,18 @@ const LiveNotes = () => {
       }
     };
     fetchMatches();
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     const fetchMembers = async () => {
-      const snap = await getDocs(collection(db, "members"));
+      const snap = await getDocs(query(collection(db, "members"), where("groupId", "==", groupId)));
       const map = new Map(
         snap.docs.map((d) => [d.id, d.data().name as string])
       );
       setMembersMap(map);
     };
     fetchMembers();
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     if (!selectedMatchId) {
@@ -265,7 +269,7 @@ const LiveNotes = () => {
     const fetchMatchConfig = async () => {
       try {
         const matchSnap = await getDoc(doc(db, "matches", selectedMatchId));
-        if (matchSnap.exists()) {
+        if (matchSnap.exists() && groupIdOf(matchSnap.data()) === groupId) {
           const data = matchSnap.data() as Match;
           const teams = data.teamsConfig || [];
           setTeamsConfig(teams);
@@ -275,6 +279,7 @@ const LiveNotes = () => {
           });
           setMemberOrder(orderMap);
         } else {
+          setSelectedMatchId("");
           setTeamsConfig([]);
           setMemberOrder(new Map());
         }
@@ -285,7 +290,7 @@ const LiveNotes = () => {
       }
     };
     fetchMatchConfig();
-  }, [selectedMatchId]);
+  }, [selectedMatchId, groupId]);
 
   useEffect(() => {
     if (!actionsLoading) {

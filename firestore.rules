@@ -1,11 +1,82 @@
-rules_version='2'
-
+rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow public read/write access to members for now during development
-    match /{document=**} {
-      allow read, write: if true;
+    function signedIn() { return request.auth != null; }
+    function accountAllowsAccess() {
+      return !exists(/databases/$(database)/documents/platformAccounts/$(request.auth.uid)) ||
+        get(/databases/$(database)/documents/platformAccounts/$(request.auth.uid)).data.status == 'active';
+    }
+    function isOwner() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/platformAccounts/$(request.auth.uid)).data.role == 'owner' &&
+        get(/databases/$(database)/documents/platformAccounts/$(request.auth.uid)).data.status == 'active';
+    }
+    function isStaff(gid) {
+      return gid is string && signedIn() && accountAllowsAccess() &&
+        (isOwner() || exists(/databases/$(database)/documents/groupMembers/$(gid + '_' + request.auth.uid)));
     }
 
+    match /members/{id} {
+      allow read: if true;
+      allow create: if isStaff(request.resource.data.groupId);
+      allow update: if isStaff(resource.data.groupId) && request.resource.data.groupId == resource.data.groupId;
+      allow delete: if isStaff(resource.data.groupId);
+    }
+    match /matches/{id} {
+      allow read: if true;
+      allow create: if isStaff(request.resource.data.groupId);
+      allow update: if isStaff(resource.data.groupId) && request.resource.data.groupId == resource.data.groupId;
+      allow delete: if isStaff(resource.data.groupId);
+    }
+    match /matches/{id}/{sub}/{doc} {
+      function parentGroup() { return get(/databases/$(database)/documents/matches/$(id)).data.groupId; }
+      allow read: if true;
+      allow create: if isStaff(parentGroup()) &&
+        (!(sub in ['shares', 'ratings']) || request.resource.data.groupId == parentGroup());
+      allow update, delete: if isStaff(parentGroup());
+    }
+    match /{path=**}/shares/{id} { allow read: if true; }
+    match /{path=**}/ratings/{id} { allow read: if true; }
+    match /configs/{id} {
+      allow read: if id in ['last_match', 'scoringWeights'] && isStaff('football-zigvy');
+      allow write: if id == 'scoringWeights' && isStaff('football-zigvy');
+    }
+    match /appConfig/{id} {
+      allow read, write: if id == 'publicPasscode' && isStaff('football-zigvy');
+    }
+    match /actionConfigs/{id} { allow read: if true; allow write: if false; }
+    match /userRoles/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /notificationTokens/{id} { allow read, write: if false; }
+    match /notifications/{id} {
+      allow read, update: if isStaff(resource.data.groupId);
+      allow create, delete: if false;
+    }
+    match /paymentRequests/{id} { allow read, write: if false; }
+    match /paymentQueue/{id} { allow read, write: if false; }
+    match /slackQueue/{id} { allow read, write: if false; }
+
+    // Platform records: server (Admin SDK) only.
+    match /platformAccounts/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+    match /groupMembers/{id} {
+      // get works even when the doc is missing (id ends with "_<uid>").
+      allow get: if signedIn() && id.matches('.*_' + request.auth.uid);
+      allow list: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+    match /groupSecrets/{gid} { allow read, write: if false; }
+    match /groups/{gid} {
+      allow read: if true;
+      allow write: if false;
+      match /settings/{name} {
+        allow read: if name in ['lastMatch', 'slack'] && isStaff(gid);
+        allow write: if name == 'lastMatch' && isStaff(gid);
+      }
+    }
   }
 }

@@ -1,3 +1,5 @@
+import { useGroup } from "@/contexts/GroupContext";
+import { groupIdOf } from "@/lib/groups";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Card,
@@ -136,6 +138,7 @@ const topByField = (
 };
 
 const PublicRatings = () => {
+  const { groupId } = useGroup();
   const { labelMap, weights, loading: actionsLoading } = useActionConfigs();
   const labelFor = useCallback(
     (key: string) => labelMap.get(key) || eventLabels[key] || key,
@@ -282,19 +285,19 @@ const PublicRatings = () => {
 
   useEffect(() => {
     const fetchMembers = async () => {
-      const membersSnapshot = await getDocs(collection(db, "members"));
+      const membersSnapshot = await getDocs(query(collection(db, "members"), where("groupId", "==", groupId)));
       const membersMap = new Map(
         membersSnapshot.docs.map((doc) => [doc.id, doc.data().name as string])
       );
       setMembers(membersMap);
     };
     fetchMembers();
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     const matchesQuery = query(
       collection(db, "matches"),
-      where("status", "==", "PUBLISHED"),
+      where("groupId", "==", groupId), where("status", "==", "PUBLISHED"),
       orderBy("date", "desc")
     );
 
@@ -328,7 +331,7 @@ const PublicRatings = () => {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     if (!selectedMatchId && matches.length > 0) {
@@ -455,9 +458,10 @@ const PublicRatings = () => {
     const checkRatingsPublished = async () => {
       const matchRef = doc(db, "matches", selectedMatchId);
       const matchSnap = await getDoc(matchRef);
-      if (matchSnap.exists()) {
+      if (matchSnap.exists() && groupIdOf(matchSnap.data()) === groupId) {
         setIsMatchFullyPaid(matchSnap.data().ratingsPublished || false);
       } else {
+        setSelectedMatchId(null);
         setIsMatchFullyPaid(false);
       }
     };
@@ -571,7 +575,7 @@ const PublicRatings = () => {
       unsubscribeRatings();
       unsubscribeAdminRatings();
     };
-  }, [selectedMatchId, members]);
+  }, [selectedMatchId, members, groupId]);
 
   useEffect(() => {
     if (members.size === 0) return;
@@ -598,7 +602,7 @@ const PublicRatings = () => {
 
       const matchesQuery = query(
         collection(db, "matches"),
-        where("status", "==", "PUBLISHED")
+        where("groupId", "==", groupId), where("status", "==", "PUBLISHED")
       );
       const matchesSnapshot = await getDocs(matchesQuery);
 
@@ -801,7 +805,7 @@ const PublicRatings = () => {
     };
 
     fetchOverallStats();
-  }, [members]);
+  }, [members, groupId]);
 
   const sortedFinalRatings = useMemo(() => {
     return Array.from(combinedRatings.entries()).sort(

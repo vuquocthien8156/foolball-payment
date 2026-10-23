@@ -3,6 +3,7 @@ import { test } from "node:test";
 import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
+import groups from "../../server/lib/groups.js";
 
 const source = fs.readFileSync(new URL("../../server/index.js", import.meta.url), "utf8");
 const root = ts.createSourceFile("index.js", source, ts.ScriptTarget.Latest, true);
@@ -66,7 +67,7 @@ function setup(overrides = {}) {
     },
   };
   const firestore = Object.assign(() => db, { FieldValue: { serverTimestamp: () => "server-time" } });
-  const context = { admin: { firestore }, payos: {
+  const context = { ...groups, URL, FieldValue: firestore.FieldValue, admin: { firestore }, isMuted: () => false, payos: {
     paymentRequests: { create: async (data) => { payments.push(data); return { checkoutUrl: "https://checkout.test/order" }; } },
     webhooks: { verify: async (body) => body },
   }, process: { env: { PAYOS_RETURN_URL: "http://localhost/success", PAYOS_CANCEL_URL: "http://localhost/cancel" } },

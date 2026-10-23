@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadSource, mountPage } from "./helpers.mjs";
 
+const groups = loadSource("../src/lib/groups.ts").exports;
 const utils = loadSource("../src/lib/utils.ts").exports;
 const members = [{ id: "alice", name: "Alice" }, { id: "bob", name: "Bob" }];
 const date = { toDate: () => new Date("2026-10-20T12:00:00Z") };
@@ -9,7 +10,7 @@ const shares = [
   { path: "matches/m1/shares/same-id", memberId: "alice", matchId: "m1", amount: 10000, status: "PENDING" },
   { path: "matches/m2/shares/same-id", memberId: "bob", matchId: "m2", amount: 20000, status: "PENDING" },
 ];
-const document = (path, data) => ({ id: path.split("/").at(-1), ref: { path, parent: { parent: { id: path.split("/")[1] } } }, exists: () => !!data, data: () => data });
+const document = (path, data) => ({ id: path.split("/").at(-1), ref: { path, parent: { parent: { id: path.split("/")[1] } } }, exists: () => !!data, data: () => ({ groupId: "football-zigvy", ...data }) });
 const snapshot = (items) => ({ docs: items, forEach: (fn) => items.forEach(fn) });
 
 function setup(isGroupPayment, wait = async () => {}, matchOverrides = {}) {
@@ -35,7 +36,8 @@ function setup(isGroupPayment, wait = async () => {}, matchOverrides = {}) {
   };
   const host = mountPage("Pay", { selectedMemberId: "alice", members, isGroupPayment, groupMemberIds: ["alice", "bob"] }, {
     "firebase/firestore": firestore, "@/lib/firebase": { db: {} },
-    "@/lib/utils": utils, "@/hooks/use-toast": { toast() {} },
+    "@/contexts/GroupContext": { useGroup: () => ({ groupId: "football-zigvy" }) },
+    "@/lib/utils": utils, "@/lib/groups": groups, "@/hooks/use-toast": { toast() {} },
     "@/lib/notifications": { fetchStoredMemberToken: async () => null },
     "@/contexts/PWAInstallContext": { usePWAInstall: () => ({}) },
     "@/components/Rating": { Rating: "Rating" },
@@ -71,7 +73,7 @@ test("single-member mode keeps the original request format", async () => {
   await host.flush({ runEffects: true });
   assert.equal(host.page.totalAmount, 10000, "selecting the same person retains their debts");
   await host.page.handlePayment();
-  assert.deepEqual(requests[0], { shareIds: ["same-id"], memberId: "alice", ratings: [] });
+  assert.deepEqual(requests[0], { groupId: "football-zigvy", shareIds: ["same-id"], memberId: "alice", ratings: [] });
 });
 
 test("switching between individual and group mode clears old selections", async () => {

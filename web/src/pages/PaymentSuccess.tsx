@@ -1,9 +1,11 @@
 import { CheckCircle, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useGroupPath } from "@/contexts/GroupContext";
 import { Link } from "react-router-dom";
 
 const PaymentSuccess = () => {
+  const groupPath = useGroupPath();
   return (
     <div className="min-h-screen bg-primary flex items-center justify-center p-4">
       <Card className="w-full max-w-md text-center shadow-card-hover">
@@ -19,7 +21,7 @@ const PaymentSuccess = () => {
             nhận.
           </p>
           <Button asChild size="lg" className="w-full">
-            <Link to="/public">
+            <Link to={groupPath("public")}>
               <Home className="mr-2 h-5 w-5" />
               Về trang chủ
             </Link>

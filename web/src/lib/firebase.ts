@@ -1,8 +1,8 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
-import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
 // Your web app's Firebase configuration
@@ -18,14 +18,25 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+const useEmulators = import.meta.env.VITE_USE_EMULATORS === "true";
+const app = initializeApp(useEmulators ? {
+  apiKey: "demo-api-key",
+  authDomain: "demo-football.firebaseapp.com",
+  projectId: "demo-football",
+  appId: "demo-football-app",
+} : firebaseConfig);
+const analytics = useEmulators ? null : getAnalytics(app);
 const db = getFirestore(app);
 const auth = getAuth(app);
-const messaging = getMessaging(app);
+if (useEmulators) {
+  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+}
+const messaging = useEmulators ? null : getMessaging(app);
 
 // Function to request permission and get token
 export const requestNotificationPermission = async () => {
+  if (!messaging) return null;
   try {
     if (typeof Notification === "undefined") {
       console.warn("Notifications are not supported in this browser.");
@@ -58,7 +69,7 @@ export const requestNotificationPermission = async () => {
 };
 
 // Listen for foreground messages
-onMessage(messaging, (payload) => {
+if (messaging) onMessage(messaging, (payload) => {
   console.log("Message received. ", payload);
   // You can display a toast notification here
   // For example, using a library like react-toastify or a custom component

@@ -1,3 +1,4 @@
+import { useGroupPath } from "@/contexts/GroupContext";
 import { useEffect, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { FireConfetti } from "@/components/FireConfetti";
 type Status = "loading" | "success" | "error";
 
 const TeamLocked = () => {
+  const groupPath = useGroupPath();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [status, setStatus] = useState<Status>("loading");
@@ -119,7 +121,7 @@ const TeamLocked = () => {
 
               <div className="pt-2">
                 <Button
-                  onClick={() => navigate("/public/attendance")}
+                  onClick={() => navigate(groupPath("public/attendance"))}
                   className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold shadow-[0_4px_14px_rgba(16,185,129,0.3)] transition-all duration-300 group"
                 >
                   <ArrowLeft className="h-4 w-4 mr-2 transition-transform group-hover:-translate-x-1" />
@@ -149,7 +151,7 @@ const TeamLocked = () => {
 
               <div className="pt-2">
                 <Button
-                  onClick={() => navigate("/public/attendance")}
+                  onClick={() => navigate(groupPath("public/attendance"))}
                   variant="outline"
                   className="w-full border-slate-800 bg-slate-950/50 hover:bg-slate-900 text-slate-300 hover:text-white transition-all duration-300 group"
                 >
