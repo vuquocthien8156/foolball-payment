@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import {
   Calendar,
@@ -334,25 +335,15 @@ const SetupMatch = () => {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [isSaveTemplateOpen, setIsSaveTemplateOpen] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState("");
+  const [isDefaultTemplate, setIsDefaultTemplate] = useState(false);
+  const [templateScheduleEnabled, setTemplateScheduleEnabled] = useState(false);
+  const [templateScheduleDay, setTemplateScheduleDay] = useState(2);
+  const [templateScheduleHour, setTemplateScheduleHour] = useState(9);
+  const [templateMatchDay, setTemplateMatchDay] = useState(4);
+  const [templateMatchTime, setTemplateMatchTime] = useState("19:00");
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
 
-  const loadTemplates = useCallback(async () => {
-    try {
-      if (typeof apiRequest !== "function") return;
-      const data = await apiRequest("GET", `/groups/${groupId}/templates`);
-      if (Array.isArray(data)) {
-        setTemplates(data);
-      }
-    } catch (e) {
-      console.error("Failed to load templates", e);
-    }
-  }, [groupId]);
-
-  useEffect(() => {
-    loadTemplates();
-  }, [loadTemplates]);
-
-  const applyTemplate = (tpl: any) => {
+  const applyTemplate = useCallback((tpl: any) => {
     setSelectedTemplateId(tpl.id);
     if (tpl.venueName !== undefined) setVenueName(tpl.venueName || "");
     if (tpl.mapIframe !== undefined) setMapIframe(tpl.mapIframe || "");
@@ -373,7 +364,29 @@ const SetupMatch = () => {
       title: "Đã áp dụng mẫu",
       description: `Đã điền thông tin từ mẫu "${tpl.name}".`,
     });
-  };
+  }, [usesTeams]);
+
+  const loadTemplates = useCallback(async () => {
+    try {
+      if (typeof apiRequest !== "function") return;
+      const data = await apiRequest("GET", `/groups/${groupId}/templates`);
+      if (Array.isArray(data)) {
+        setTemplates(data);
+        if (!matchId && !selectedTemplateId) {
+          const defaultTpl = data.find((t: any) => t.isDefault);
+          if (defaultTpl) {
+            applyTemplate(defaultTpl);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load templates", e);
+    }
+  }, [groupId, matchId, selectedTemplateId, applyTemplate]);
+
+  useEffect(() => {
+    loadTemplates();
+  }, [loadTemplates]);
 
   const handleSaveAsTemplate = async () => {
     if (!newTemplateName.trim()) return;
@@ -382,6 +395,7 @@ const SetupMatch = () => {
       const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
       const payload = {
         name: newTemplateName.trim(),
+        isDefault: isDefaultTemplate,
         venueName: venueName || "",
         totalAmount,
         mapIframe: mapIframe || "",
@@ -392,6 +406,15 @@ const SetupMatch = () => {
         kickoffTime: time,
         teamCount: usesTeams ? teamCount : 1,
         expenseItems,
+        schedule: templateScheduleEnabled
+          ? {
+              enabled: true,
+              dayOfWeek: templateScheduleDay,
+              createHour: templateScheduleHour,
+              matchDayOfWeek: templateMatchDay,
+              matchTime: templateMatchTime,
+            }
+          : null,
       };
       const res = await apiRequest(
         "POST",
@@ -401,12 +424,27 @@ const SetupMatch = () => {
       toast({ title: "Đã lưu mẫu trận đấu thành công" });
       setIsSaveTemplateOpen(false);
       setNewTemplateName("");
+      setIsDefaultTemplate(false);
+      setTemplateScheduleEnabled(false);
       await loadTemplates();
       if (res?.id) setSelectedTemplateId(res.id);
     } catch {
       toast({ variant: "destructive", title: "Không thể lưu mẫu trận đấu" });
     } finally {
       setIsSavingTemplate(false);
+    }
+  };
+
+  const handleSetTemplateAsDefault = async (tpl: any) => {
+    try {
+      await apiRequest("POST", `/groups/${groupId}/templates`, {
+        ...tpl,
+        isDefault: true,
+      });
+      toast({ title: `Đã đặt "${tpl.name}" làm mẫu mặc định của nhóm` });
+      await loadTemplates();
+    } catch {
+      toast({ variant: "destructive", title: "Không thể cập nhật mẫu mặc định" });
     }
   };
 
@@ -1627,14 +1665,14 @@ const SetupMatch = () => {
                 if (tpl) applyTemplate(tpl);
               }}
             >
-              <SelectTrigger className="w-56 h-9">
+              <SelectTrigger className="w-60 h-9 text-xs">
                 <SelectValue placeholder="Chọn mẫu để điền nhanh..." />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">-- Chọn mẫu trận đấu --</SelectItem>
                 {templates.map((tpl) => (
                   <SelectItem key={tpl.id} value={tpl.id}>
-                    {tpl.name}
+                    {tpl.isDefault ? `⭐ [Mặc định] ${tpl.name}` : tpl.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1642,14 +1680,34 @@ const SetupMatch = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            {selectedTemplateId && (() => {
+              const cur = templates.find((t) => t.id === selectedTemplateId);
+              if (cur && !cur.isDefault) {
+                return (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSetTemplateAsDefault(cur)}
+                    className="text-xs h-9 gap-1"
+                    title="Đặt mẫu đang chọn làm mặc định"
+                  >
+                    ⭐ Đặt làm mặc định
+                  </Button>
+                );
+              }
+              return null;
+            })()}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsSaveTemplateOpen(true)}
+              onClick={() => {
+                setIsDefaultTemplate(false);
+                setIsSaveTemplateOpen(true);
+              }}
               className="gap-1.5"
             >
               <Save className="h-3.5 w-3.5" />
-              Lưu cấu hình hiện tại thành mẫu
+              Lưu cấu hình thành mẫu
             </Button>
             {selectedTemplateId && (
               <Button
@@ -1666,7 +1724,7 @@ const SetupMatch = () => {
         </div>
 
         <Dialog open={isSaveTemplateOpen} onOpenChange={setIsSaveTemplateOpen}>
-          <DialogContent>
+          <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Lưu mẫu cấu hình trận đấu</DialogTitle>
               <DialogDescription>
@@ -1683,6 +1741,119 @@ const SetupMatch = () => {
                   value={newTemplateName}
                   onChange={(e) => setNewTemplateName(e.target.value)}
                 />
+              </div>
+
+              <div className="flex items-center space-x-2 pt-1 border-t">
+                <Checkbox
+                  id="tpl-default"
+                  checked={isDefaultTemplate}
+                  onCheckedChange={(c) => setIsDefaultTemplate(Boolean(c))}
+                />
+                <Label htmlFor="tpl-default" className="text-xs font-normal cursor-pointer">
+                  Đặt làm mẫu mặc định (Tự động tải khi mở Tạo trận đấu mới)
+                </Label>
+              </div>
+
+              <div className="space-y-3 pt-2 border-t">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="tpl-sched" className="text-xs font-semibold cursor-pointer">
+                      Lịch tạo trận tự động định kỳ
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Tự động tạo trận theo mẫu này và mở điểm danh hàng tuần
+                    </p>
+                  </div>
+                  <Switch
+                    id="tpl-sched"
+                    checked={templateScheduleEnabled}
+                    onCheckedChange={setTemplateScheduleEnabled}
+                  />
+                </div>
+
+                {templateScheduleEnabled && (
+                  <div className="grid grid-cols-2 gap-2 p-2.5 bg-muted/40 rounded-lg text-xs">
+                    <div>
+                      <Label className="text-[11px]">Thứ mở điểm danh</Label>
+                      <Select
+                        value={String(templateScheduleDay)}
+                        onValueChange={(v) => setTemplateScheduleDay(Number(v))}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[
+                            { value: 1, label: "Thứ 2" },
+                            { value: 2, label: "Thứ 3" },
+                            { value: 3, label: "Thứ 4" },
+                            { value: 4, label: "Thứ 5" },
+                            { value: 5, label: "Thứ 6" },
+                            { value: 6, label: "Thứ 7" },
+                            { value: 0, label: "Chủ nhật" },
+                          ].map((d) => (
+                            <SelectItem key={d.value} value={String(d.value)}>
+                              {d.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Giờ thông báo</Label>
+                      <Select
+                        value={String(templateScheduleHour)}
+                        onValueChange={(v) => setTemplateScheduleHour(Number(v))}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Array.from({ length: 16 }, (_, i) => i + 7).map((h) => (
+                            <SelectItem key={h} value={String(h)}>
+                              {h < 10 ? `0${h}:00` : `${h}:00`}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Thứ đá trận</Label>
+                      <Select
+                        value={String(templateMatchDay)}
+                        onValueChange={(v) => setTemplateMatchDay(Number(v))}
+                      >
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[
+                            { value: 1, label: "Thứ 2" },
+                            { value: 2, label: "Thứ 3" },
+                            { value: 3, label: "Thứ 4" },
+                            { value: 4, label: "Thứ 5" },
+                            { value: 5, label: "Thứ 6" },
+                            { value: 6, label: "Thứ 7" },
+                            { value: 0, label: "Chủ nhật" },
+                          ].map((d) => (
+                            <SelectItem key={d.value} value={String(d.value)}>
+                              {d.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Giờ thi đấu</Label>
+                      <Input
+                        type="time"
+                        value={templateMatchTime}
+                        onChange={(e) => setTemplateMatchTime(e.target.value)}
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <DialogFooter>
@@ -3025,17 +3196,17 @@ const SetupMatch = () => {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    onClick={handleSaveConfigToDb}
+                    onClick={() => {
+                      setIsDefaultTemplate(true);
+                      setNewTemplateName(venueName ? `Sân ${venueName}` : "Mẫu mặc định");
+                      setIsSaveTemplateOpen(true);
+                    }}
                     disabled={isBusy}
                     variant="ghost"
                     size="sm"
                     className="text-muted-foreground hover:text-foreground"
                   >
-                    {isSavingConfig ? (
-                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                    ) : (
-                      <BookmarkPlus className="h-4 w-4 mr-1.5" />
-                    )}
+                    <BookmarkPlus className="h-4 w-4 mr-1.5" />
                     Lưu làm mẫu mặc định
                   </Button>
                 </TooltipTrigger>

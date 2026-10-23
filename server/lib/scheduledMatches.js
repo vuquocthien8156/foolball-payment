@@ -128,64 +128,96 @@ async function checkAndRunScheduledMatches({ db, FieldValue, slack = null, targe
 
   for (const groupDoc of groupsSnap.docs) {
     const groupId = groupDoc.id;
+    const schedulesToRun = [];
+
+    // 1. Check legacy settings/schedule
     const scheduleSnap = await db.collection("groups").doc(groupId).collection("settings").doc("schedule").get();
-    if (!scheduleSnap.exists) continue;
+    if (scheduleSnap.exists && scheduleSnap.data().enabled) {
+      schedulesToRun.push({
+        ref: scheduleSnap.ref,
+        ...scheduleSnap.data(),
+        templateId: scheduleSnap.data().templateId || null,
+        isTemplateSchedule: false,
+      });
+    }
 
-    const schedule = scheduleSnap.data();
-    if (!schedule.enabled) continue;
-
-    const scheduledDay = Number(schedule.dayOfWeek);
-    const scheduledHour = Number(schedule.createHour ?? 9);
-
-    if (currentDayOfWeek === scheduledDay && currentHour >= scheduledHour) {
-      if (schedule.lastTriggeredDate === todayStr) {
-        continue; // Already executed today
+    // 2. Check templates with embedded schedule
+    const templatesSnap = await db.collection("groups").doc(groupId).collection("templates").get();
+    templatesSnap.docs.forEach((tDoc) => {
+      const tData = tDoc.data();
+      if (tData.schedule?.enabled) {
+        schedulesToRun.push({
+          ref: tDoc.ref,
+          ...tData.schedule,
+          templateId: tDoc.id,
+          lastTriggeredDate: tData.schedule.lastTriggeredDate,
+          isTemplateSchedule: true,
+        });
       }
+    });
 
-      try {
-        const matchDayOfWeek = schedule.matchDayOfWeek !== undefined ? Number(schedule.matchDayOfWeek) : ((scheduledDay + 2) % 7);
-        const matchTime = schedule.matchTime || "19:00";
-        const scheduledDate = computeNextDateForDayOfWeek(matchDayOfWeek, matchTime, now);
+    for (const schedule of schedulesToRun) {
+      const scheduledDay = Number(schedule.dayOfWeek);
+      const scheduledHour = Number(schedule.createHour ?? 9);
 
-        const result = await createMatchFromTemplate({
-          db,
-          FieldValue,
-          groupId,
-          templateId: schedule.templateId || null,
-          creatorUid: "cron_scheduler",
-          matchDate: scheduledDate,
-        });
-
-        await db.collection("groups").doc(groupId).collection("settings").doc("schedule").update({
-          lastTriggeredDate: todayStr,
-          lastCreatedMatchId: result.matchId,
-          lastTriggeredAt: FieldValue.serverTimestamp(),
-        });
-
-        if (slack && targets) {
-          try {
-            const target = await targets.getSlackTarget(groupId);
-            if (target) {
-              const webBaseUrl = slack.PUBLIC_WEB_URL || "https://thienbun-payment.web.app";
-              await slack.sendBlock({
-                headerText: "⚽ Đã mở điểm danh trận mới (Tự động)",
-                bodyMarkdown: `<!here>\n📅 Trận *${slack.formatMatchDate ? slack.formatMatchDate(result.date) : result.date.toISOString().slice(0, 10)}*${result.matchData.venueName ? `\n📍 ${result.matchData.venueName}` : ""}\n\n🏃 Hệ thống đã tự động tạo trận và mở điểm danh!`,
-                cta: {
-                  label: "Điểm danh ngay",
-                  url: `${publicUrlFor(groupId, webBaseUrl)}/attendance`,
-                  style: "primary",
-                },
-                fallbackText: "Đã mở điểm danh trận mới",
-              }, target);
-            }
-          } catch (slackErr) {
-            console.error(`[scheduledMatches] Slack notification failed for group ${groupId}`, slackErr);
-          }
+      if (currentDayOfWeek === scheduledDay && currentHour >= scheduledHour) {
+        if (schedule.lastTriggeredDate === todayStr) {
+          continue; // Already executed today
         }
 
-        results.push({ groupId, success: true, matchId: result.matchId });
-      } catch (err) {
-        results.push({ groupId, success: false, error: err.message });
+        try {
+          const matchDayOfWeek = schedule.matchDayOfWeek !== undefined ? Number(schedule.matchDayOfWeek) : ((scheduledDay + 2) % 7);
+          const matchTime = schedule.matchTime || "19:00";
+          const scheduledDate = computeNextDateForDayOfWeek(matchDayOfWeek, matchTime, now);
+
+          const result = await createMatchFromTemplate({
+            db,
+            FieldValue,
+            groupId,
+            templateId: schedule.templateId || null,
+            creatorUid: "cron_scheduler",
+            matchDate: scheduledDate,
+          });
+
+          if (schedule.isTemplateSchedule) {
+            await schedule.ref.update({
+              "schedule.lastTriggeredDate": todayStr,
+              "schedule.lastCreatedMatchId": result.matchId,
+              "schedule.lastTriggeredAt": FieldValue.serverTimestamp(),
+            });
+          } else {
+            await schedule.ref.update({
+              lastTriggeredDate: todayStr,
+              lastCreatedMatchId: result.matchId,
+              lastTriggeredAt: FieldValue.serverTimestamp(),
+            });
+          }
+
+          if (slack && targets) {
+            try {
+              const target = await targets.getSlackTarget(groupId);
+              if (target) {
+                const webBaseUrl = slack.PUBLIC_WEB_URL || "https://thienbun-payment.web.app";
+                await slack.sendBlock({
+                  headerText: "⚽ Đã mở điểm danh trận mới (Tự động)",
+                  bodyMarkdown: `<!here>\n📅 Trận *${slack.formatMatchDate ? slack.formatMatchDate(result.date) : result.date.toISOString().slice(0, 10)}*${result.matchData.venueName ? `\n📍 ${result.matchData.venueName}` : ""}\n\n🏃 Hệ thống đã tự động tạo trận và mở điểm danh!`,
+                  cta: {
+                    label: "Điểm danh ngay",
+                    url: `${publicUrlFor(groupId, webBaseUrl)}/attendance`,
+                    style: "primary",
+                  },
+                  fallbackText: "Đã mở điểm danh trận mới",
+                }, target);
+              }
+            } catch (slackErr) {
+              console.error(`[scheduledMatches] Slack notification failed for group ${groupId}`, slackErr);
+            }
+          }
+
+          results.push({ groupId, success: true, matchId: result.matchId });
+        } catch (err) {
+          results.push({ groupId, success: false, error: err.message });
+        }
       }
     }
   }

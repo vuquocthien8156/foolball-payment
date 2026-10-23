@@ -22,7 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Users, Trash2, Shield, Loader2, UserPlus, X } from "lucide-react";
+import { Users, Trash2, Shield, Loader2, UserPlus, X, Pencil, CreditCard, Copy, ExternalLink, QrCode, CheckCircle2, ArrowRight } from "lucide-react";
 
 type Group = {
   id: string;
@@ -68,6 +68,20 @@ const Groups = () => {
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [sport, setSport] = useState<GroupSport | "">("");
   const [busy, setBusy] = useState(false);
+
+  // Edit Group State
+  const [editGroup, setEditGroup] = useState<Group | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editSport, setEditSport] = useState<GroupSport | "">("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Super Admin Settlement Overview State
+  const [settlementOpen, setSettlementOpen] = useState(false);
+  const [settlementLoading, setSettlementLoading] = useState(false);
+  const [settlementData, setSettlementData] = useState<any>(null);
+  const [selectedGroupQr, setSelectedGroupQr] = useState<any>(null);
+  const [batchSettlingGid, setBatchSettlingGid] = useState<string | null>(null);
+  const [settlingAllPast, setSettlingAllPast] = useState(false);
 
   // Delete Group State
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
@@ -187,6 +201,92 @@ const Groups = () => {
     }
   };
 
+  const openEditGroup = (group: Group) => {
+    setEditGroup(group);
+    setEditName(group.name);
+    setEditSport(group.sport);
+  };
+
+  const handleSaveEditGroup = async () => {
+    if (!editGroup || !editName.trim() || !editSport) return;
+    setSavingEdit(true);
+    try {
+      await apiRequest("PATCH", `/platform/groups/${editGroup.id}`, {
+        name: editName.trim(),
+        sport: editSport,
+      });
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === editGroup.id
+            ? { ...g, name: editName.trim(), sport: editSport as GroupSport }
+            : g,
+        ),
+      );
+      toast({ title: "Đã cập nhật thông tin nhóm" });
+      setEditGroup(null);
+    } catch (e: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: e.message || "Không thể cập nhật nhóm",
+      });
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const fetchSettlementOverview = async () => {
+    setSettlementLoading(true);
+    try {
+      const data = await apiRequest("GET", "/platform/settlement/overview");
+      setSettlementData(data);
+    } catch (e) {
+      toast({ variant: "destructive", title: "Không thể tải dữ liệu đối soát" });
+    } finally {
+      setSettlementLoading(false);
+    }
+  };
+
+  const openSettlementOverview = () => {
+    setSettlementOpen(true);
+    fetchSettlementOverview();
+  };
+
+  const handleBatchSettleGroup = async (groupItem: any) => {
+    if (!groupItem?.pendingMatches?.length) return;
+    setBatchSettlingGid(groupItem.groupId);
+    try {
+      const matchIds = groupItem.pendingMatches.map((m: any) => m.id);
+      await apiRequest("POST", "/platform/settlement/batch-settle", {
+        groupId: groupItem.groupId,
+        matchIds,
+      });
+      toast({ title: "Đã xác nhận hoàn tiền thành công cho các trận của nhóm" });
+      setSelectedGroupQr(null);
+      await fetchSettlementOverview();
+    } catch {
+      toast({ variant: "destructive", title: "Không thể hoàn tất đối soát" });
+    } finally {
+      setBatchSettlingGid(null);
+    }
+  };
+
+  const handleSettleAllPast = async () => {
+    if (!window.confirm("Bạn có chắc muốn đánh dấu tất cả các trận đấu cũ (trước hôm nay) ở mọi nhóm là ĐÃ HOÀN TIỀN?")) return;
+    setSettlingAllPast(true);
+    try {
+      const res = await apiRequest("POST", "/platform/settlement/batch-settle", {
+        allPast: true,
+      });
+      toast({ title: `Đã hoàn tiền ${res?.count || 0} trận đấu cũ thành công` });
+      await fetchSettlementOverview();
+    } catch {
+      toast({ variant: "destructive", title: "Lỗi khi xử lý trận cũ" });
+    } finally {
+      setSettlingAllPast(false);
+    }
+  };
+
   return (
     <main className="container max-w-5xl py-8 space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-4">
@@ -196,9 +296,19 @@ const Groups = () => {
         </div>
         <nav className="flex flex-wrap gap-2" aria-label="Nền tảng">
           {account?.role === "owner" && (
-            <Button asChild variant="outline">
-              <Link to="/platform/accounts">Tài khoản</Link>
-            </Button>
+            <>
+              <Button asChild variant="outline">
+                <Link to="/platform/accounts">Tài khoản</Link>
+              </Button>
+              <Button
+                variant="outline"
+                onClick={openSettlementOverview}
+                className="gap-1.5 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+              >
+                <CreditCard className="h-4 w-4" />
+                Đối soát hoàn tiền nền tảng
+              </Button>
+            </>
           )}
           <Button onClick={() => {
             setName("");
@@ -251,13 +361,19 @@ const Groups = () => {
                     <div className="flex items-center justify-between text-muted-foreground text-xs">
                       <span>Vai trò của bạn:</span>
                       <span className="font-semibold text-foreground">
-                        {group.role === "owner" ? "Chủ nhóm (Owner)" : group.role === "manager" ? "Quản lý" : "Quản trị viên"}
+                        {group.role === "super_admin"
+                          ? "Super Admin (Nền tảng)"
+                          : group.role === "owner"
+                            ? "Chủ nhóm (Owner)"
+                            : group.role === "manager"
+                              ? "Quản lý"
+                              : "Quản trị viên"}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-muted-foreground text-xs">
                       <span>Chủ nhóm:</span>
-                      <span className="font-medium text-foreground truncate max-w-[150px]">
-                        {group.ownerDisplayName || group.ownerEmail || (group.ownerUid ? "Owner" : "Hệ thống")}
+                      <span className="font-medium text-foreground truncate max-w-[150px]" title={group.ownerDisplayName || group.ownerEmail || ""}>
+                        {group.ownerDisplayName || group.ownerEmail || (group.ownerUid ? "Chủ nhóm" : "Hệ thống")}
                       </span>
                     </div>
                   </div>
@@ -269,6 +385,14 @@ const Groups = () => {
 
                     {isOwnerOrSuper && (
                       <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEditGroup(group)}
+                          title="Chỉnh sửa thông tin nhóm"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -436,28 +560,288 @@ const Groups = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Alert Xóa Nhóm */}
-      <AlertDialog open={!!groupToDelete} onOpenChange={(isOpen) => !isOpen && setGroupToDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Bạn có chắc chắn muốn xóa nhóm?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Hành động này sẽ ẩn nhóm <strong className="text-foreground">{groupToDelete?.name}</strong> khỏi danh sách quản lý. Dữ liệu thành viên và trận đấu sẽ được lưu trữ an toàn.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Hủy</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteGroup}
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-              Xóa nhóm
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Dialog Sửa Nhóm */}
+      <Dialog open={!!editGroup} onOpenChange={(isOpen) => !isOpen && setEditGroup(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Chỉnh sửa thông tin nhóm</DialogTitle>
+            <DialogDescription>
+              Cập nhật tên hiển thị, bộ môn hoặc kiểm tra đường dẫn URL hiện tại của nhóm.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="edit-name">Tên nhóm</Label>
+              <Input
+                id="edit-name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="VD: Cầu Lông Zigvy"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="edit-sport">Môn thể thao</Label>
+              <Select value={editSport} onValueChange={(val: any) => setEditSport(val)}>
+                <SelectTrigger id="edit-sport">
+                  <SelectValue placeholder="Chọn môn" />
+                </SelectTrigger>
+                <SelectContent>
+                  {GROUP_SPORTS.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {SPORT_LABELS[s] || s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="p-3 bg-muted/40 rounded-lg space-y-1.5 text-xs">
+              <span className="font-semibold text-foreground">Đường dẫn nhóm (Path ID):</span>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={`/g/${editGroup?.id}`}
+                  className="h-8 font-mono text-xs bg-background"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  title="Sao chép đường dẫn"
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/g/${editGroup?.id}`);
+                    toast({ title: "Đã sao chép đường link nhóm" });
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <p className="text-muted-foreground text-[11px]">
+                Đường dẫn này được dùng cho các link công khai, bảng xếp hạng và điểm danh của nhóm.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditGroup(null)} disabled={savingEdit}>
+              Hủy
+            </Button>
+            <Button onClick={handleSaveEditGroup} disabled={savingEdit || !editName.trim() || !editSport}>
+              {savingEdit ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+              Lưu thay đổi
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Đối soát Hoàn tiền Toàn nền tảng (Super Admin) */}
+      <Dialog open={settlementOpen} onOpenChange={setSettlementOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5 text-emerald-600" />
+              <DialogTitle>Đối soát Hoàn tiền Nền tảng (Super Admin)</DialogTitle>
+            </div>
+            <DialogDescription>
+              Quản lý tổng tiền sân PayOS đã thu từ các nhóm và hoàn trả lại tiền cho người quản lý từng nhóm.
+            </DialogDescription>
+          </DialogHeader>
+
+          {settlementLoading ? (
+            <div className="flex items-center justify-center p-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : settlementData ? (
+            <div className="space-y-6 py-2">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Card className="p-3 bg-emerald-500/10 border-emerald-500/20 shadow-xs">
+                  <p className="text-xs text-muted-foreground">Tổng tiền cần hoàn:</p>
+                  <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
+                    {settlementData.summary?.totalPendingAmount?.toLocaleString() || 0} VND
+                  </p>
+                </Card>
+                <Card className="p-3 bg-muted/40 shadow-xs">
+                  <p className="text-xs text-muted-foreground">Nhóm chờ hoàn tiền:</p>
+                  <p className="text-xl font-bold text-foreground">
+                    {settlementData.summary?.pendingGroupsCount || 0} nhóm
+                  </p>
+                </Card>
+                <Card className="p-3 bg-muted/40 shadow-xs">
+                  <p className="text-xs text-muted-foreground">Tổng số trận chờ hoàn:</p>
+                  <p className="text-xl font-bold text-foreground">
+                    {settlementData.summary?.pendingMatchesCount || 0} trận
+                  </p>
+                </Card>
+              </div>
+
+              {/* Action: Clear Historical Backlog */}
+              <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/20">
+                <div className="space-y-0.5">
+                  <p className="text-xs font-semibold text-foreground">Dọn dẹp các trận đấu cũ</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Đánh dấu tất cả các trận đấu trước hôm nay ở mọi nhóm là đã hoàn tất đối soát.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleSettleAllPast}
+                  disabled={settlingAllPast}
+                  className="shrink-0 text-xs gap-1.5"
+                >
+                  {settlingAllPast ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
+                  Hoàn tiền nhanh các trận cũ
+                </Button>
+              </div>
+
+              {/* Groups List */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Danh sách nhóm cần đối soát:</h3>
+                {settlementData.groups?.filter((g: any) => g.pendingCount > 0).length === 0 ? (
+                  <p className="text-center p-6 text-xs text-muted-foreground border border-dashed rounded-lg">
+                    🎉 Tuyệt vời! Hiện không có nhóm nào có trận chờ hoàn tiền sân.
+                  </p>
+                ) : (
+                  settlementData.groups
+                    ?.filter((g: any) => g.pendingCount > 0)
+                    .map((item: any) => (
+                      <Card key={item.groupId} className="p-4 space-y-3 shadow-xs">
+                        <div className="flex flex-wrap items-start justify-between gap-2 border-b pb-2">
+                          <div>
+                            <h4 className="font-bold text-base text-foreground">{item.groupName}</h4>
+                            <p className="text-xs text-muted-foreground">
+                              Quản lý nhóm: <strong>{item.managerName}</strong> {item.managerEmail ? `(${item.managerEmail})` : ""}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 block">
+                              {item.pendingAmount?.toLocaleString()} VND
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {item.pendingCount} trận chờ hoàn
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Recipient Account info */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-muted/40 p-2.5 rounded-lg">
+                          <div>
+                            <span className="text-muted-foreground">Tài khoản nhận: </span>
+                            {item.payoutRecipient?.accountNumber ? (
+                              <strong className="text-foreground">
+                                {item.payoutRecipient.bankName} - {item.payoutRecipient.accountNumber} ({item.payoutRecipient.accountHolder})
+                              </strong>
+                            ) : (
+                              <span className="text-amber-600 italic">Chưa cấu hình tài khoản nhận hoàn tiền</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {item.payoutRecipient?.accountNumber && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs gap-1"
+                                onClick={() => setSelectedGroupQr(item)}
+                              >
+                                <QrCode className="h-3.5 w-3.5 text-primary" />
+                                Xem VietQR tổng
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="h-7 text-xs"
+                              disabled={batchSettlingGid === item.groupId}
+                              onClick={() => handleBatchSettleGroup(item)}
+                            >
+                              {batchSettlingGid === item.groupId ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                              ) : null}
+                              Xác nhận đã chuyển tất cả ({item.pendingCount})
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    ))
+                )}
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog Xem VietQR Tổng cho nhóm */}
+      <Dialog open={!!selectedGroupQr} onOpenChange={(open) => !open && setSelectedGroupQr(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Quét mã VietQR chuyển tiền cho Quản lý nhóm</DialogTitle>
+            <DialogDescription>
+              Mã QR đã gắn sẵn tổng số tiền của tất cả các trận chờ hoàn tiền cho nhóm <strong>{selectedGroupQr?.groupName}</strong>.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedGroupQr && (
+            <div className="flex flex-col items-center gap-3 p-4 bg-muted/20 border rounded-xl">
+              <img
+                src={
+                  selectedGroupQr.payoutRecipient?.qrCodeUrl ||
+                  `https://img.vietqr.io/image/${selectedGroupQr.payoutRecipient?.bankBin}-${selectedGroupQr.payoutRecipient?.accountNumber}-compact.png?amount=${
+                    selectedGroupQr.pendingAmount || 0
+                  }&addInfo=${encodeURIComponent(
+                    `HOAN TIEN SAN ${selectedGroupQr.groupName.slice(0, 15)}`,
+                  )}&accountName=${encodeURIComponent(selectedGroupQr.payoutRecipient?.accountHolder || "")}`
+                }
+                alt="VietQR Payout"
+                className="w-52 h-52 object-contain rounded-lg bg-white p-2 border shadow-xs"
+              />
+              <div className="w-full text-center space-y-1">
+                <p className="font-semibold text-foreground text-sm">
+                  {selectedGroupQr.payoutRecipient?.bankName}
+                </p>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="font-mono font-bold text-lg text-primary">
+                    {selectedGroupQr.payoutRecipient?.accountNumber}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    title="Sao chép số tài khoản"
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedGroupQr.payoutRecipient?.accountNumber || "");
+                      toast({ title: "Đã sao chép số tài khoản" });
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground uppercase">
+                  {selectedGroupQr.payoutRecipient?.accountHolder}
+                </p>
+                <p className="text-base font-bold text-emerald-600 dark:text-emerald-400 pt-1">
+                  Tổng tiền: {selectedGroupQr.pendingAmount?.toLocaleString()} VND ({selectedGroupQr.pendingCount} trận)
+                </p>
+              </div>
+
+              <Button
+                className="w-full mt-2"
+                disabled={batchSettlingGid === selectedGroupQr.groupId}
+                onClick={() => handleBatchSettleGroup(selectedGroupQr)}
+              >
+                {batchSettlingGid === selectedGroupQr.groupId ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                )}
+                Xác nhận đã chuyển khoản thành công
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </main>
   );
 };

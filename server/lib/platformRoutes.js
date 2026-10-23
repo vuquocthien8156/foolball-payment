@@ -69,24 +69,65 @@ function createPlatformRouter({ db, auth, FieldValue }) {
       memberDocs.forEach((d) => { if (d.exists) map.set(d.id, d); });
       documents = Array.from(map.values());
     }
-    const groups = documents
-      .filter((doc) => doc.exists && doc.data().status !== "deleted")
-      .map((doc) => {
-        const data = doc.data();
-        const role = req.platform.role === "owner"
-          ? "owner"
-          : (data.ownerUid === req.uid ? "owner" : (memberships.find((m) => m.groupId === doc.id)?.role || "manager"));
-        return {
-          id: doc.id,
-          name: data.name,
-          sport: data.sport,
-          status: data.status,
-          ownerUid: data.ownerUid || null,
-          ownerDisplayName: data.ownerDisplayName || null,
-          ownerEmail: data.ownerEmail || null,
-          role,
-        };
+    const activeDocs = documents.filter((doc) => doc.exists && doc.data().status !== "deleted");
+
+    // Pre-fetch missing owner platformAccounts
+    const missingOwnerUids = new Set();
+    activeDocs.forEach((doc) => {
+      const data = doc.data();
+      const ownerUid = data.ownerUid || data.createdBy;
+      if (ownerUid && (!data.ownerDisplayName || !data.ownerEmail)) {
+        missingOwnerUids.add(ownerUid);
+      }
+    });
+
+    const accountsMap = new Map();
+    if (missingOwnerUids.size > 0) {
+      const accountDocs = await Promise.all(
+        Array.from(missingOwnerUids).map((uid) => db.collection("platformAccounts").doc(uid).get())
+      );
+      accountDocs.forEach((accDoc) => {
+        if (accDoc.exists) accountsMap.set(accDoc.id, accDoc.data());
       });
+    }
+
+    const groups = activeDocs.map((doc) => {
+      const data = doc.data();
+      const ownerUid = data.ownerUid || data.createdBy || null;
+      let ownerDisplayName = data.ownerDisplayName || null;
+      let ownerEmail = data.ownerEmail || null;
+
+      if ((!ownerDisplayName || !ownerEmail) && ownerUid && accountsMap.has(ownerUid)) {
+        const acc = accountsMap.get(ownerUid);
+        ownerDisplayName = ownerDisplayName || acc.displayName || acc.email || null;
+        ownerEmail = ownerEmail || acc.email || null;
+      }
+
+      const isSuperAdmin = req.platform.role === "owner";
+      const isOwner = data.ownerUid === req.uid;
+      let role = "manager";
+      if (isSuperAdmin && !isOwner) {
+        role = "super_admin";
+      } else if (isOwner || isSuperAdmin) {
+        role = "owner";
+      } else {
+        const m = memberships.find((mb) => mb.groupId === doc.id);
+        role = m?.role || "manager";
+      }
+
+      return {
+        id: doc.id,
+        name: data.name,
+        sport: data.sport,
+        status: data.status,
+        ownerUid,
+        ownerDisplayName: ownerDisplayName || ownerEmail || (ownerUid ? "Chủ nhóm" : "Hệ thống"),
+        ownerEmail: ownerEmail || null,
+        role,
+        isSuperAdmin,
+        isOwner,
+      };
+    });
     groups.sort((a, b) => a.name.localeCompare(b.name));
     res.json(groups);
   }));
@@ -244,6 +285,135 @@ function createPlatformRouter({ db, auth, FieldValue }) {
 
     await db.collection("groupMembers").doc(`${req.params.groupId}_${req.params.targetUid}`).delete();
     res.json({ ok: true });
+  }));
+
+  // Super Admin Global Settlement Overview
+  router.get("/settlement/overview", requireOwner, wrap(async (req, res) => {
+    const groupsSnap = await db.collection("groups").where("status", "==", "active").get();
+    const groupsData = [];
+    let totalPendingAmount = 0;
+    let pendingGroupsCount = 0;
+    let pendingMatchesCount = 0;
+
+    for (const gDoc of groupsSnap.docs) {
+      const gData = gDoc.data();
+      const gid = gDoc.id;
+
+      // Payout settings (recipient bank & QR)
+      const payoutSnap = await db.collection("groups").doc(gid).collection("settings").doc("payout").get();
+      const payout = payoutSnap.exists ? payoutSnap.data() : {};
+
+      // Owner/Manager info
+      const ownerUid = gData.ownerUid || gData.createdBy;
+      let managerName = gData.ownerDisplayName || "";
+      let managerEmail = gData.ownerEmail || "";
+      if ((!managerName || !managerEmail) && ownerUid) {
+        const accSnap = await db.collection("platformAccounts").doc(ownerUid).get();
+        if (accSnap.exists) {
+          managerName = managerName || accSnap.data().displayName || accSnap.data().email || "";
+          managerEmail = managerEmail || accSnap.data().email || "";
+        }
+      }
+
+      // Query matches for this group
+      const matchesSnap = await db.collection("matches")
+        .where("groupId", "==", gid)
+        .where("status", "in", ["PUBLISHED", "COMPLETED"])
+        .get();
+
+      const pendingMatches = [];
+      let groupPendingAmount = 0;
+
+      matchesSnap.docs.forEach((mDoc) => {
+        const m = mDoc.data();
+        if (m.payoutStatus !== "PAID_OUT") {
+          const amount = Number(m.totalAmount) || 0;
+          groupPendingAmount += amount;
+          pendingMatches.push({
+            id: mDoc.id,
+            date: m.date,
+            totalAmount: amount,
+            status: m.status,
+            paidByMemberId: m.paidByMemberId || null,
+          });
+        }
+      });
+
+      if (pendingMatches.length > 0) {
+        pendingGroupsCount++;
+        pendingMatchesCount += pendingMatches.length;
+        totalPendingAmount += groupPendingAmount;
+      }
+
+      groupsData.push({
+        groupId: gid,
+        groupName: gData.name,
+        sport: gData.sport,
+        managerName: managerName || "Chủ nhóm",
+        managerEmail,
+        payoutRecipient: {
+          bankBin: payout.bankBin || "",
+          bankName: payout.bankName || "",
+          accountNumber: payout.accountNumber || "",
+          accountHolder: payout.accountHolder || managerName || "",
+          qrCodeUrl: payout.qrCodeUrl || "",
+        },
+        pendingMatches,
+        pendingAmount: groupPendingAmount,
+        pendingCount: pendingMatches.length,
+      });
+    }
+
+    groupsData.sort((a, b) => b.pendingAmount - a.pendingAmount);
+
+    res.json({
+      summary: {
+        totalPendingAmount,
+        pendingGroupsCount,
+        pendingMatchesCount,
+      },
+      groups: groupsData,
+    });
+  }));
+
+  // Batch Settle Matches (Super Admin marks matches as paid out)
+  router.post("/settlement/batch-settle", requireOwner, wrap(async (req, res) => {
+    const { groupId, matchIds, allPast, note } = req.body;
+    let targetMatchIds = Array.isArray(matchIds) ? matchIds : [];
+
+    if (allPast) {
+      let q = db.collection("matches");
+      if (groupId) q = q.where("groupId", "==", groupId);
+      const snap = await q.get();
+      const nowMs = Date.now();
+      snap.docs.forEach((d) => {
+        const m = d.data();
+        if (m.payoutStatus !== "PAID_OUT") {
+          const dTime = m.date?.toDate ? m.date.toDate().getTime() : (new Date(m.date)).getTime();
+          if (dTime < nowMs) {
+            targetMatchIds.push(d.id);
+          }
+        }
+      });
+    }
+
+    if (targetMatchIds.length === 0) {
+      return res.json({ success: true, count: 0 });
+    }
+
+    const batch = db.batch();
+    targetMatchIds.forEach((mId) => {
+      batch.update(db.collection("matches").doc(mId), {
+        payoutStatus: "PAID_OUT",
+        paidOutAt: FieldValue.serverTimestamp(),
+        paidOutBy: req.uid,
+        payoutNote: note || "Batch settled by Super Admin",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+    await batch.commit();
+
+    res.json({ success: true, count: targetMatchIds.length });
   }));
 
   return router;

@@ -94,12 +94,51 @@ function createGroupRouter({ db, auth, FieldValue, slack, env = process.env }) {
     res.json({ ok: true, payoutStatus: status });
   }));
 
+  // Batch Payout for Matches in Group
+  router.post("/:groupId/matches/batch-payout", ...manager, wrap(async (req, res) => {
+    const { matchIds, allPast, note } = req.body;
+    let targetIds = Array.isArray(matchIds) ? matchIds : [];
+    if (allPast) {
+      const snap = await db.collection("matches")
+        .where("groupId", "==", req.params.groupId)
+        .get();
+      const nowMs = Date.now();
+      snap.docs.forEach((d) => {
+        const m = d.data();
+        if (m.payoutStatus !== "PAID_OUT") {
+          const dTime = m.date?.toDate ? m.date.toDate().getTime() : (new Date(m.date)).getTime();
+          if (dTime < nowMs) {
+            targetIds.push(d.id);
+          }
+        }
+      });
+    }
+
+    if (targetIds.length === 0) {
+      return res.json({ ok: true, count: 0 });
+    }
+
+    const batch = db.batch();
+    targetIds.forEach((mId) => {
+      batch.update(db.collection("matches").doc(mId), {
+        payoutStatus: "PAID_OUT",
+        paidOutAt: FieldValue.serverTimestamp(),
+        paidOutBy: req.uid,
+        payoutNote: note || "Batch settled by Manager",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+    await batch.commit();
+
+    res.json({ ok: true, count: targetIds.length });
+  }));
+
   // Match Templates CRUD
   const templatesCol = (gid) => db.collection("groups").doc(gid).collection("templates");
   router.get("/:groupId/templates", ...manager, wrap(async (req, res) => {
     const snap = await templatesCol(req.params.groupId).get();
     const templates = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    templates.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    templates.sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0) || (a.name || "").localeCompare(b.name || ""));
     res.json(templates);
   }));
 
@@ -109,8 +148,22 @@ function createGroupRouter({ db, auth, FieldValue, slack, env = process.env }) {
 
     const templateId = req.body.id || templatesCol(req.params.groupId).doc().id;
     const docRef = templatesCol(req.params.groupId).doc(templateId);
+
+    // If set as default, unset any existing default in this group
+    if (req.body.isDefault) {
+      const allTemplates = await templatesCol(req.params.groupId).get();
+      const batch = db.batch();
+      allTemplates.docs.forEach((d) => {
+        if (d.id !== templateId && d.data().isDefault) {
+          batch.update(d.ref, { isDefault: false });
+        }
+      });
+      await batch.commit();
+    }
+
     const payload = {
       name,
+      isDefault: Boolean(req.body.isDefault),
       venueName: typeof req.body.venueName === "string" ? req.body.venueName.trim() : "",
       totalAmount: Number(req.body.totalAmount) || 0,
       mapIframe: typeof req.body.mapIframe === "string" ? req.body.mapIframe.trim() : "",
@@ -121,6 +174,13 @@ function createGroupRouter({ db, auth, FieldValue, slack, env = process.env }) {
       teamCount: req.body.teamCount === 3 ? 3 : 2,
       expenseItems: Array.isArray(req.body.expenseItems) ? req.body.expenseItems : [],
       teamsConfig: Array.isArray(req.body.teamsConfig) ? req.body.teamsConfig : null,
+      schedule: req.body.schedule ? {
+        enabled: Boolean(req.body.schedule.enabled),
+        dayOfWeek: Number(req.body.schedule.dayOfWeek ?? 2),
+        createHour: Number(req.body.schedule.createHour ?? 9),
+        matchDayOfWeek: Number(req.body.schedule.matchDayOfWeek ?? 4),
+        matchTime: req.body.schedule.matchTime || "19:00",
+      } : null,
       updatedBy: req.uid,
       updatedAt: FieldValue.serverTimestamp(),
     };
