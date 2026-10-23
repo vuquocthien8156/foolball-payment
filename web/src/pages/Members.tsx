@@ -99,6 +99,7 @@ interface Member {
   autoAttendance?: boolean;
   inactive?: boolean;
   isPriority?: boolean;
+  autoCoverWhenPayer?: boolean;
 }
 
 interface MemberStats {
@@ -443,7 +444,7 @@ const Members = () => {
   ) => {
     const stripUndefined = (data: Partial<Member>) =>
       Object.fromEntries(
-        Object.entries(data).filter(([key, value]) => value !== undefined && ["name", "nickname", "isExemptFromPayment", "autoAttendance", "inactive", "isPriority"].includes(key))
+        Object.entries(data).filter(([key, value]) => value !== undefined && ["name", "nickname", "isExemptFromPayment", "autoAttendance", "inactive", "isPriority", "autoCoverWhenPayer"].includes(key))
       );
 
     if (!updatedData.name?.trim()) {
@@ -1050,6 +1051,19 @@ const Members = () => {
                     }
                   />
                   <Label htmlFor="edit-exempt">Miễn chia tiền</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="edit-auto-cover"
+                    checked={editingMember.autoCoverWhenPayer !== false}
+                    onCheckedChange={(checked) =>
+                      setEditingMember({
+                        ...editingMember,
+                        autoCoverWhenPayer: checked,
+                      })
+                    }
+                  />
+                  <Label htmlFor="edit-auto-cover">Tự động ghi nhận đã trả khi là người ứng tiền</Label>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Switch

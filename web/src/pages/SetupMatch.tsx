@@ -1462,12 +1462,15 @@ const SetupMatch = () => {
 
       // Convert map to shares array
       memberSharesMap.forEach((memberShare) => {
+        const memberObj = allMembers.find((m) => m.id === memberShare.memberId);
+        const isPayer = !!paidByMemberId && memberShare.memberId === paidByMemberId;
+        const autoCover = isPayer && (memberObj as { autoCoverWhenPayer?: boolean } | undefined)?.autoCoverWhenPayer !== false;
         shares.push({
           matchId: matchRef.id,
           memberId: memberShare.memberId,
           teamId: memberShare.teamId,
           amount: memberShare.totalAmount,
-          status: "PENDING",
+          status: autoCover ? "PAID" : "PENDING",
           orderCode: "",
           expenseBreakdown: memberShare.expenseBreakdown,
           calculationDetails: memberShare.calculationDetails,

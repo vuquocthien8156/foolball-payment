@@ -9,7 +9,7 @@ function requireDate(value) {
   return value;
 }
 
-function splitBill({ amountVnd, participants, providerPayerMemberId }) {
+function splitBill({ amountVnd, participants, providerPayerMemberId, autoCoverPayer = true }) {
   if (!Number.isSafeInteger(amountVnd) || amountVnd <= 0 || !Array.isArray(participants) ||
       participants.length === 0 || participants.length > 50 || amountVnd < participants.length) reject(400, "INVALID_SPLIT");
   if (participants.some((p) => !validId(p.id) || typeof p.name !== "string") ||
@@ -19,7 +19,7 @@ function splitBill({ amountVnd, participants, providerPayerMemberId }) {
   const remainder = amountVnd % participants.length;
   return [...participants].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map((member, index) => ({
     memberId: member.id, name: member.name, amountVnd: base + (index < remainder ? 1 : 0),
-    state: member.id === providerPayerMemberId ? "covered_by_payer" : "unpaid",
+    state: (member.id === providerPayerMemberId && autoCoverPayer) ? "covered_by_payer" : "unpaid",
   }));
 }
 
@@ -77,7 +77,9 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
         return { id: ref.id, duplicate: true };
       }
       if (members.some((m) => !m.exists || groupIdOf(m.data()) !== groupId || m.data().inactive)) reject(400, "INVALID_PARTICIPANTS");
-      const allocations = splitBill({ amountVnd: input.amountVnd, participants: members.map((m) => ({ id: m.id, name: m.data().name })), providerPayerMemberId: input.providerPayerMemberId });
+      const payerDoc = members.find((m) => m.id === input.providerPayerMemberId);
+      const autoCoverPayer = payerDoc ? (payerDoc.data().autoCoverWhenPayer !== false) : true;
+      const allocations = splitBill({ amountVnd: input.amountVnd, participants: members.map((m) => ({ id: m.id, name: m.data().name })), providerPayerMemberId: input.providerPayerMemberId, autoCoverPayer });
       const [telegram, slack] = await tx.getAll(groupRef(groupId).collection("settings").doc("telegram"), groupRef(groupId).collection("settings").doc("slack"));
       const timestamp = FieldValue.serverTimestamp();
       tx.set(ref, { groupId, title, amountVnd: input.amountVnd, currency: "VND", billingDate, dueDate,
@@ -143,18 +145,31 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
 
   async function members(gid) {
     checkGroup(await groupRef(gid).get());
-    return (await db.collection("members").where("groupId", "==", gid).get()).docs.map((doc) => ({ id: doc.id, name: doc.data().name, inactive: !!doc.data().inactive }));
+    return (await db.collection("members").where("groupId", "==", gid).get()).docs.map((doc) => ({
+      id: doc.id,
+      name: doc.data().name,
+      inactive: !!doc.data().inactive,
+      autoCoverWhenPayer: doc.data().autoCoverWhenPayer !== false,
+    }));
   }
 
   async function saveMember(gid, id, input, actorUid) {
     if (!isValidGroupId(gid) || !validId(id) || typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 60 ||
-        (input.inactive !== undefined && typeof input.inactive !== "boolean")) reject(400, "INVALID_MEMBER");
+        (input.inactive !== undefined && typeof input.inactive !== "boolean") ||
+        (input.autoCoverWhenPayer !== undefined && typeof input.autoCoverWhenPayer !== "boolean")) reject(400, "INVALID_MEMBER");
     const ref = db.collection("members").doc(id);
     return db.runTransaction(async (tx) => {
       const [group, member] = await tx.getAll(groupRef(gid), ref);
       checkGroup(group);
       if (member.exists && groupIdOf(member.data()) !== gid) reject(409, "MEMBER_ID_EXISTS");
-      tx.set(ref, { groupId: gid, name: input.name.trim(), inactive: input.inactive ?? false, updatedBy: actorUid, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      tx.set(ref, {
+        groupId: gid,
+        name: input.name.trim(),
+        inactive: input.inactive ?? false,
+        autoCoverWhenPayer: input.autoCoverWhenPayer ?? true,
+        updatedBy: actorUid,
+        updatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
       return { id };
     });
   }
@@ -168,7 +183,23 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
       checkGroup(group);
       if (!bill.exists || bill.data().state !== "open") reject(409, "BILL_NOT_OPEN");
       const allocations = (await tx.get(ref.collection("allocations"))).docs.map((doc) => doc.data());
-      const text = reminderText(bill.data(), allocations);
+      const priorDebtByMember = new Map();
+      try {
+        const openBillsSnap = await db.collection(`groups/${gid}/bills`).where("state", "==", "open").get();
+        for (const bDoc of openBillsSnap.docs) {
+          if (bDoc.id === bid) continue;
+          const aSnap = await bDoc.ref.collection("allocations").get();
+          for (const aDoc of aSnap.docs) {
+            const a = aDoc.data();
+            if (a.state === "unpaid") {
+              priorDebtByMember.set(a.memberId, (priorDebtByMember.get(a.memberId) || 0) + a.amountVnd);
+            }
+          }
+        }
+      } catch {
+        // Fallback gracefully
+      }
+      const text = reminderText(bill.data(), allocations, priorDebtByMember);
       if (preview) return { text };
       const eventRef = ref.collection("events").doc(`reminder_${requestId}`);
       if ((await tx.get(eventRef)).exists) return { queued: true, duplicate: true };

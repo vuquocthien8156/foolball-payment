@@ -31,10 +31,20 @@ async function ensureBillNotifications({ db, groupId, now }) {
   });
 }
 
-function reminderText(bill, allocations) {
+function reminderText(bill, allocations, priorDebtByMember = new Map()) {
   const unpaid = allocations.filter((allocation) => allocation.state === "unpaid");
-  const remaining = unpaid.reduce((sum, allocation) => sum + allocation.amountVnd, 0);
-  return `${bill.title} — ${bill.billingDate.slice(0, 7)}\nHạn thanh toán: ${bill.dueDate}\n${unpaid.map((allocation) => `${allocation.name.slice(0, 40)}: ${allocation.amountVnd.toLocaleString("vi-VN")} VND`).join("\n")}\nCòn phải thu: ${remaining.toLocaleString("vi-VN")} VND`;
+  let grandTotal = 0;
+  const lines = unpaid.map((allocation) => {
+    const current = allocation.amountVnd;
+    const prior = priorDebtByMember.get(allocation.memberId) || 0;
+    const total = current + prior;
+    grandTotal += total;
+    if (prior > 0) {
+      return `${allocation.name.slice(0, 40)}: ${total.toLocaleString("vi-VN")} VND (${current.toLocaleString("vi-VN")} VND kỳ này + ${prior.toLocaleString("vi-VN")} VND nợ cũ)`;
+    }
+    return `${allocation.name.slice(0, 40)}: ${current.toLocaleString("vi-VN")} VND`;
+  });
+  return `${bill.title} — ${bill.billingDate.slice(0, 7)}\nHạn thanh toán: ${bill.dueDate}\n${lines.join("\n")}\nCòn phải thu: ${grandTotal.toLocaleString("vi-VN")} VND`;
 }
 
 async function queueCatchupSummary({ db, groupId, now }) {
@@ -69,11 +79,31 @@ async function notificationContent(db, data) {
       if (!subscription.data()?.enabled) return null;
     }
     const unpaid = allocations.docs.map((doc) => doc.data()).filter((allocation) => allocation.state === "unpaid");
-    return unpaid.length ? { bill: bill.data(), allocations: unpaid } : null;
+    return unpaid.length ? { id, bill: bill.data(), allocations: unpaid } : null;
   }));
   const open = bills.filter(Boolean);
   if (!open.length) return null;
-  if (data.event !== "catchup") return reminderText(open[0].bill, open[0].allocations);
+  if (data.event !== "catchup") {
+    const targetBill = open[0].bill;
+    const targetBillId = open[0].id;
+    const priorDebtByMember = new Map();
+    try {
+      const openBillsSnap = await db.collection(`groups/${data.groupId}/bills`).where("state", "==", "open").get();
+      for (const bDoc of openBillsSnap.docs) {
+        if (bDoc.id === targetBillId) continue;
+        const aSnap = await bDoc.ref.collection("allocations").get();
+        for (const aDoc of aSnap.docs) {
+          const a = aDoc.data();
+          if (a.state === "unpaid") {
+            priorDebtByMember.set(a.memberId, (priorDebtByMember.get(a.memberId) || 0) + a.amountVnd);
+          }
+        }
+      }
+    } catch {
+      // Keep running with empty prior debt if query fails
+    }
+    return reminderText(targetBill, open[0].allocations, priorDebtByMember);
+  }
   const total = open.reduce((sum, item) => sum + item.allocations.reduce((amount, allocation) => amount + allocation.amountVnd, 0), 0);
   return `Đã khôi phục lịch sử thu tiền\nĐã tạo ${open.length} kỳ thu còn thiếu.\nCòn phải thu: ${total.toLocaleString("vi-VN")} VND\nMở ứng dụng để kiểm tra từng tháng. Các tin nhắc cũ được gộp vào thông báo này.`;
 }

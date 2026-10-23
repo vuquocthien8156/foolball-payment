@@ -1,4 +1,4 @@
-export interface BillMember { id: string; name: string; inactive: boolean }
+export interface BillMember { id: string; name: string; inactive: boolean; autoCoverWhenPayer?: boolean }
 export interface BillInput {
   title: string;
   amountVnd: number;
