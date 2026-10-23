@@ -110,13 +110,53 @@ interface AttendanceLogEntry {
   memberId: string;
   memberName: string;
   timestamp: Timestamp;
-  userAgent: string;
+  userAgent?: string;
+  deviceId?: string;
+  deviceModel?: string;
+  clientIp?: string;
+  actorMemberId?: string;
+  actorName?: string;
+  isProxyAction?: boolean;
 }
 
 interface Team {
   id: string;
   name: string;
   members: Member[];
+}
+
+function getOrCreateDeviceId(): string {
+  try {
+    if (typeof localStorage === "undefined") return "dev_node";
+    const key = "fb_device_id";
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = "dev_" + (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "") : Math.random().toString(36).slice(2) + Date.now().toString(36));
+      localStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return "dev_fallback";
+  }
+}
+
+function getAssociatedMemberId(groupId: string): string | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    return localStorage.getItem(`fb_actor_${groupId}`) || null;
+  } catch {
+    return null;
+  }
+}
+
+function setAssociatedMemberId(groupId: string, memberId: string) {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const key = `fb_actor_${groupId}`;
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, memberId);
+    }
+  } catch {}
 }
 
 const Attendance = () => {
@@ -413,10 +453,20 @@ const Attendance = () => {
 
     setIsSubmitting((prev) => new Set(prev).add(memberId));
     try {
+      const deviceId = getOrCreateDeviceId();
+      const screen = typeof window !== "undefined" && window.screen ? `${window.screen.width}x${window.screen.height}@${window.devicePixelRatio || 1}` : "";
+      const platform = typeof navigator !== "undefined" ? (navigator.platform || "") : "";
+      const actorMemberId = getAssociatedMemberId(groupId);
+      setAssociatedMemberId(groupId, memberId);
+
       await postApiJson(`/public/${groupId}/attendance`, {
         matchId,
         memberId,
         action: status,
+        deviceId,
+        screen,
+        platform,
+        actorMemberId,
       });
 
       // Optimistic UI update
@@ -958,9 +1008,10 @@ const Attendance = () => {
                     <Table>
                       <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
                         <TableRow>
-                          <TableHead className="w-[120px]">Hành động</TableHead>
+                          <TableHead className="w-[110px]">Hành động</TableHead>
                           <TableHead>Thành viên</TableHead>
-                          <TableHead className="w-[150px]">Thời gian</TableHead>
+                          <TableHead>Thiết bị & Mạng</TableHead>
+                          <TableHead className="w-[120px]">Thời gian</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -994,6 +1045,11 @@ const Attendance = () => {
                             label: entry.type,
                             className: "bg-slate-100 text-slate-700",
                           };
+
+                          const sameDeviceCount = entry.deviceId
+                            ? attendanceHistory.filter((h) => h.deviceId === entry.deviceId).length
+                            : 0;
+
                           return (
                             <TableRow key={index}>
                               <TableCell>
@@ -1005,9 +1061,29 @@ const Attendance = () => {
                                 </Badge>
                               </TableCell>
                               <TableCell className="font-medium">
-                                {entry.memberName}
+                                <div>{entry.memberName}</div>
+                                {entry.isProxyAction && entry.actorName && (
+                                  <div className="text-[11px] text-amber-600 dark:text-amber-400 font-normal mt-0.5">
+                                    ⚠️ Bấm bởi: <b>{entry.actorName}</b>
+                                  </div>
+                                )}
                               </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
+                              <TableCell className="text-xs text-muted-foreground">
+                                <div className="font-medium text-foreground">
+                                  {entry.deviceModel || (entry.userAgent ? "Thiết bị di động" : "—")}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                  {entry.clientIp && (
+                                    <span>IP: {entry.clientIp}</span>
+                                  )}
+                                  {sameDeviceCount > 1 && (
+                                    <Badge variant="outline" className="text-[10px] px-1 py-0 border-amber-500/50 text-amber-600 dark:text-amber-400">
+                                      {sameDeviceCount} lượt từ máy này
+                                    </Badge>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
                                 {entry.timestamp?.seconds
                                   ? new Date(
                                       entry.timestamp.seconds * 1000
@@ -1093,45 +1169,54 @@ const Attendance = () => {
               >
                 <div className="absolute top-1 right-1 flex gap-1">
                   {/* Auto Attendance Toggle */}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    title={
-                      member.autoAttendance
-                        ? "Tắt tự động điểm danh"
-                        : "Bật tự động điểm danh"
-                    }
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await postApiJson(`/public/${groupId}/auto-attendance`, {
-                        memberId: member.id,
-                        enabled: !member.autoAttendance,
-                      });
-                      fetchMatchAndMembers();
-                    }}
-                  >
-                    <Repeat
-                      className={`h-4 w-4 ${
-                        member.autoAttendance
-                          ? "text-blue-500"
-                          : "text-muted-foreground"
-                      }`}
-                    />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await postApiJson(`/public/${groupId}/auto-attendance`, {
+                            memberId: member.id,
+                            enabled: !member.autoAttendance,
+                          });
+                          fetchMatchAndMembers();
+                        }}
+                      >
+                        <Repeat
+                          className={`h-4 w-4 ${
+                            member.autoAttendance
+                              ? "text-blue-500"
+                              : "text-muted-foreground"
+                          }`}
+                        />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p>{member.autoAttendance ? "Tắt tự động điểm danh" : "Bật tự động điểm danh"}</p>
+                    </TooltipContent>
+                  </Tooltip>
 
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => handlePinToggle(member.id)}
-                  >
-                    {isPinned ? (
-                      <PinOff className="h-4 w-4 text-blue-500" />
-                    ) : (
-                      <Pin className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handlePinToggle(member.id)}
+                      >
+                        {isPinned ? (
+                          <PinOff className="h-4 w-4 text-blue-500" />
+                        ) : (
+                          <Pin className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      <p>{isPinned ? "Bỏ ghim thành viên" : "Ghim lên đầu danh sách"}</p>
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
                 <CardContent className="p-4 flex flex-col items-center text-center h-full w-full min-w-0">
                   <div className="flex-grow pt-4 w-full min-w-0 flex flex-col items-center">
@@ -1140,23 +1225,24 @@ const Attendance = () => {
                     </p>
                     <div className="h-8 w-full min-w-0 flex items-center justify-center px-1">
                       {member.nickname && (
-                        <TooltipProvider delayDuration={150}>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span tabIndex={0} className="inline-flex max-w-full cursor-help">
                               <Badge
                                 variant="secondary"
-                                className="max-w-full text-xs px-2.5 py-0.5 inline-flex items-center overflow-hidden cursor-help"
+                                className="max-w-full text-xs px-2.5 py-0.5 inline-flex items-center overflow-hidden"
+                                title={member.nickname}
                               >
                                 <span className="truncate block max-w-full">
                                   {member.nickname}
                                 </span>
                               </Badge>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">
-                              <p>{member.nickname}</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            <p>{member.nickname}</p>
+                          </TooltipContent>
+                        </Tooltip>
                       )}
                     </div>
                   </div>

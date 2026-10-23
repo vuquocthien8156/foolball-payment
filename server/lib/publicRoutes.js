@@ -4,6 +4,48 @@ const { groupIdOf, isValidGroupId } = require("./groups");
 const validId = (value) => typeof value === "string" && value.length > 0 && value !== "." && value !== ".." && !value.includes("/");
 const reject = (status, message) => { throw Object.assign(new Error(message), { status }); };
 
+function parseDeviceDetails(userAgent = "", screen = "", platform = "") {
+  let model = "Thiết bị không xác định";
+  const ua = String(userAgent);
+  const scr = String(screen);
+
+  if (/iPhone/i.test(ua)) {
+    if (scr.includes("430x932") || scr.includes("932x430")) {
+      model = "iPhone 15 Pro Max / 15 Plus / 14 Pro Max";
+    } else if (scr.includes("393x852") || scr.includes("852x393")) {
+      model = "iPhone 15 Pro / 15 / 14 Pro";
+    } else if (scr.includes("390x844") || scr.includes("844x390")) {
+      model = "iPhone 14 / 13 / 13 Pro / 12";
+    } else if (scr.includes("414x896") || scr.includes("896x414")) {
+      model = "iPhone 11 / XR / XS Max";
+    } else if (scr.includes("375x812") || scr.includes("812x375")) {
+      model = "iPhone 13 mini / 12 mini / X / XS";
+    } else if (scr.includes("375x667") || scr.includes("667x375")) {
+      model = "iPhone SE / 8 / 7";
+    } else {
+      model = "iPhone (iOS)";
+    }
+  } else if (/iPad/i.test(ua)) {
+    model = "iPad (iPadOS)";
+  } else if (/Android/i.test(ua)) {
+    const match = ua.match(/;\s*([^;)]+?)\s+Build\//i) || ua.match(/\(([^;)]+);\s*Android/i);
+    const rawModel = match ? match[1].replace(/Linux;\s*/i, "").trim() : "";
+    if (rawModel) {
+      model = `Android (${rawModel})`;
+    } else {
+      model = "Điện thoại Android";
+    }
+  } else if (/Macintosh|Mac OS X/i.test(ua)) {
+    model = "Máy tính MacBook (macOS)";
+  } else if (/Windows/i.test(ua)) {
+    model = "Máy tính Windows";
+  } else if (/Linux/i.test(ua)) {
+    model = "Máy tính Linux";
+  }
+
+  return model;
+}
+
 function createPublicRouter({ db, FieldValue, Timestamp, onMemberAction }) {
   const router = express.Router();
   const route = (handler) => async (req, res) => {
@@ -27,29 +69,56 @@ function createPublicRouter({ db, FieldValue, Timestamp, onMemberAction }) {
   };
 
   router.post("/:groupId/attendance", route(async (req) => {
-    const { matchId, memberId, action } = req.body || {};
+    const { matchId, memberId, action, deviceId, screen, platform, actorMemberId } = req.body || {};
     if (!validId(matchId) || !validId(memberId) || !["attending", "not_attending"].includes(action)) reject(400, "INVALID_ATTENDANCE");
     const groupId = req.params.groupId;
+    const clientIp = (req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket?.remoteAddress || "").split(",")[0].trim();
+    const userAgent = req.get("User-Agent") || "";
+    const deviceModel = parseDeviceDetails(userAgent, screen, platform);
+
     const result = await inGroup(groupId, async (transaction) => {
       const matchRef = db.collection("matches").doc(matchId);
       const attendanceRef = matchRef.collection("attendance").doc(memberId);
       const notAttendanceRef = matchRef.collection("not_attending").doc(memberId);
-      const [matchSnap, memberSnap, attendance, notAttendance] = await transaction.getAll(
-        matchRef, db.collection("members").doc(memberId), attendanceRef, notAttendanceRef
-      );
+      const refs = [matchRef, db.collection("members").doc(memberId), attendanceRef, notAttendanceRef];
+      const validActorId = validId(actorMemberId) ? actorMemberId : null;
+      if (validActorId) refs.push(db.collection("members").doc(validActorId));
+
+      const snaps = await transaction.getAll(...refs);
+      const [matchSnap, memberSnap, attendance, notAttendance] = snaps.slice(0, 4);
+      const actorSnap = validActorId && snaps[4] ? snaps[4] : null;
+
       const match = checkRecord(matchSnap, groupId);
       const member = checkRecord(memberSnap, groupId);
+      const actorName = actorSnap?.exists ? actorSnap.data().name : null;
+      const isProxyAction = Boolean(validActorId && validActorId !== memberId);
+
       if (match.status !== "PENDING") reject(409, "MATCH_NOT_PENDING");
       if ((action === "attending" && attendance.exists) || (action === "not_attending" && notAttendance.exists)) return { skipped: true, actions: [] };
       const memberName = member.name || "Một thành viên";
-      const userAgent = req.get("User-Agent") || "";
       const record = { timestamp: Timestamp.now(), memberName, userAgent };
       transaction.set(action === "attending" ? attendanceRef : notAttendanceRef, record);
       transaction.delete(action === "attending" ? notAttendanceRef : attendanceRef);
       const logType = action === "attending" ? "ATTEND" : attendance.exists ? "CANCEL_ATTEND" : "NOT_ATTEND";
-      transaction.set(matchRef.collection("attendanceLog").doc(), {
-        memberId, memberName, userAgent, timestamp: FieldValue.serverTimestamp(), type: logType,
-      });
+      const logData = {
+        memberId,
+        memberName,
+        userAgent,
+        timestamp: FieldValue.serverTimestamp(),
+        type: logType,
+      };
+      if (deviceId) {
+        logData.deviceId = typeof deviceId === "string" ? deviceId.slice(0, 64) : null;
+        logData.deviceModel = deviceModel;
+        if (screen) logData.screen = typeof screen === "string" ? screen.slice(0, 32) : null;
+        if (clientIp) logData.clientIp = clientIp;
+        if (validActorId) {
+          logData.actorMemberId = validActorId;
+          logData.actorName = actorName;
+          logData.isProxyAction = isProxyAction;
+        }
+      }
+      transaction.set(matchRef.collection("attendanceLog").doc(), logData);
       // Preserve the existing logs: CANCEL_NOT_ATTEND is a notification action only.
       const actions = action === "attending" && notAttendance.exists ? ["CANCEL_NOT_ATTEND", "ATTEND"] : [logType];
       return { skipped: false, actions, match, memberName };
