@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Users, Trash2, Shield, Loader2, UserPlus, X, Pencil, CreditCard, Copy, ExternalLink, QrCode, CheckCircle2, ArrowRight } from "lucide-react";
+import { Users, Trash2, Shield, Loader2, UserPlus, X, Pencil, CreditCard, Copy, ExternalLink, QrCode, CheckCircle2, ArrowRight, Check } from "lucide-react";
 
 type Group = {
   id: string;
@@ -84,6 +84,7 @@ const Groups = () => {
   const [selectedGroupQr, setSelectedGroupQr] = useState<any>(null);
   const [batchSettlingGid, setBatchSettlingGid] = useState<string | null>(null);
   const [settlingAllPast, setSettlingAllPast] = useState(false);
+  const [settlingMatchId, setSettlingMatchId] = useState<string | null>(null);
 
   // Delete Group State
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
@@ -270,6 +271,30 @@ const Groups = () => {
       toast({ variant: "destructive", title: "Không thể hoàn tất đối soát" });
     } finally {
       setBatchSettlingGid(null);
+    }
+  };
+
+  const handleSettleSingleMatch = async (matchId: string, groupId: string, payerName: string) => {
+    setSettlingMatchId(matchId);
+    try {
+      await apiRequest("POST", "/platform/settlement/batch-settle", {
+        groupId,
+        matchIds: [matchId],
+        note: `Settled single match for payer ${payerName}`,
+      });
+      toast({
+        title: "Hoàn tiền thành công",
+        description: `Đã đánh dấu hoàn tiền trận đấu cho ${payerName}.`,
+      });
+      await fetchSettlementOverview();
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi hoàn tiền",
+        description: err.message || "Không thể cập nhật trạng thái trận đấu",
+      });
+    } finally {
+      setSettlingMatchId(null);
     }
   };
 
@@ -732,65 +757,182 @@ const Groups = () => {
                 ) : (
                   settlementData.groups
                     ?.filter((g: any) => g.pendingCount > 0)
-                    .map((item: any) => (
-                      <Card key={item.groupId} className="p-4 space-y-3 shadow-xs">
-                        <div className="flex flex-wrap items-start justify-between gap-2 border-b pb-2">
-                          <div>
-                            <h4 className="font-bold text-base text-foreground">{item.groupName}</h4>
-                            <p className="text-xs text-muted-foreground">
-                              Quản lý nhóm: <strong>{item.managerName}</strong> {item.managerEmail ? `(${item.managerEmail})` : ""}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 block">
-                              {item.pendingAmount?.toLocaleString()} VND
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              {item.pendingCount} trận chờ hoàn
-                            </span>
-                          </div>
-                        </div>
+                    .map((item: any) => {
+                      const payerGroups = item.payerGroups || (() => {
+                        const map = new Map();
+                        (item.pendingMatches || []).forEach((m: any) => {
+                          const key = m.paidByMemberId || `mgr_${item.groupId}`;
+                          if (!map.has(key)) {
+                            map.set(key, {
+                              payerId: m.paidByMemberId || null,
+                              payerName: m.paidByMemberName || item.managerName || "Quản lý nhóm",
+                              isManager: m.isManagerPayer ?? !m.paidByMemberId,
+                              totalAmount: 0,
+                              matches: [],
+                            });
+                          }
+                          const g = map.get(key);
+                          g.totalAmount += (Number(m.totalAmount) || 0);
+                          g.matches.push(m);
+                        });
+                        return Array.from(map.values());
+                      })();
 
-                        {/* Recipient Account info */}
-                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-muted/40 p-2.5 rounded-lg">
-                          <div>
-                            <span className="text-muted-foreground">Tài khoản nhận: </span>
-                            {item.payoutRecipient?.accountNumber ? (
-                              <strong className="text-foreground">
-                                {item.payoutRecipient.bankName} - {item.payoutRecipient.accountNumber} ({item.payoutRecipient.accountHolder})
-                              </strong>
-                            ) : (
-                              <span className="text-amber-600 italic">Chưa cấu hình tài khoản nhận hoàn tiền</span>
-                            )}
+                      return (
+                        <Card key={item.groupId} className="p-4 space-y-3.5 shadow-xs">
+                          {/* Group Header */}
+                          <div className="flex flex-wrap items-start justify-between gap-2 border-b pb-2">
+                            <div>
+                              <h4 className="font-bold text-base text-foreground">{item.groupName}</h4>
+                              <p className="text-xs text-muted-foreground">
+                                Quản lý nhóm: <strong>{item.managerName}</strong> {item.managerEmail ? `(${item.managerEmail})` : ""}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 block">
+                                {item.pendingAmount?.toLocaleString()} VND
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {item.pendingCount} trận chờ hoàn
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            {item.payoutRecipient?.accountNumber && (
+
+                          {/* Grouped by Member / Payer */}
+                          <div className="space-y-3">
+                            {payerGroups.map((payerGroup: any, pIdx: number) => (
+                              <div
+                                key={pIdx}
+                                className="rounded-lg border border-border/70 bg-muted/20 overflow-hidden"
+                              >
+                                {/* Payer Header */}
+                                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-muted/40 border-b">
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-xs px-2 py-0.5 font-medium ${
+                                      payerGroup.isManager
+                                        ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
+                                        : "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
+                                    }`}
+                                  >
+                                    👤 Người ứng: {payerGroup.payerName}
+                                    {payerGroup.isManager ? " (Quản lý nhóm)" : " (Thành viên)"}
+                                  </Badge>
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <span className="text-muted-foreground">
+                                      {payerGroup.matches?.length || 0} trận:
+                                    </span>
+                                    <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                      {payerGroup.totalAmount?.toLocaleString()} VND
+                                    </strong>
+                                  </div>
+                                </div>
+
+                                {/* Matches List for this Payer */}
+                                <div className="divide-y divide-border/50">
+                                  {payerGroup.matches?.map((match: any) => {
+                                    const matchDate = match.date ? new Date(match.date) : null;
+                                    const dateFormatted = matchDate && !isNaN(matchDate.getTime())
+                                      ? matchDate.toLocaleDateString("vi-VN", {
+                                          weekday: "short",
+                                          day: "2-digit",
+                                          month: "2-digit",
+                                          year: "numeric",
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                        })
+                                      : (match.date || "Trận đấu");
+
+                                    return (
+                                      <div
+                                        key={match.id}
+                                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-muted/30 transition-colors"
+                                      >
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="font-semibold text-foreground">
+                                            📅 {dateFormatted}
+                                          </span>
+                                          {match.venueName && (
+                                            <span className="text-muted-foreground">
+                                              • {match.venueName}
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
+                                          <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                            {match.totalAmount?.toLocaleString()} VND
+                                          </span>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-6 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800"
+                                            disabled={settlingMatchId === match.id}
+                                            onClick={() =>
+                                              handleSettleSingleMatch(
+                                                match.id,
+                                                item.groupId,
+                                                payerGroup.payerName
+                                              )
+                                            }
+                                          >
+                                            {settlingMatchId === match.id ? (
+                                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                            ) : (
+                                              <Check className="h-3 w-3 mr-1" />
+                                            )}
+                                            Đã hoàn
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Recipient Account info */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-muted/40 p-2.5 rounded-lg">
+                            <div>
+                              <span className="text-muted-foreground">Tài khoản nhận: </span>
+                              {item.payoutRecipient?.accountNumber ? (
+                                <strong className="text-foreground">
+                                  {item.payoutRecipient.bankName} - {item.payoutRecipient.accountNumber} ({item.payoutRecipient.accountHolder})
+                                </strong>
+                              ) : (
+                                <span className="text-amber-600 italic">Chưa cấu hình tài khoản nhận hoàn tiền</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {item.payoutRecipient?.accountNumber && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs gap-1"
+                                  onClick={() => setSelectedGroupQr(item)}
+                                >
+                                  <QrCode className="h-3.5 w-3.5 text-primary" />
+                                  Xem VietQR tổng
+                                </Button>
+                              )}
                               <Button
                                 size="sm"
-                                variant="outline"
-                                className="h-7 text-xs gap-1"
-                                onClick={() => setSelectedGroupQr(item)}
+                                variant="default"
+                                className="h-7 text-xs"
+                                disabled={batchSettlingGid === item.groupId}
+                                onClick={() => handleBatchSettleGroup(item)}
                               >
-                                <QrCode className="h-3.5 w-3.5 text-primary" />
-                                Xem VietQR tổng
+                                {batchSettlingGid === item.groupId ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                                ) : null}
+                                Xác nhận đã chuyển tất cả ({item.pendingCount})
                               </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="default"
-                              className="h-7 text-xs"
-                              disabled={batchSettlingGid === item.groupId}
-                              onClick={() => handleBatchSettleGroup(item)}
-                            >
-                              {batchSettlingGid === item.groupId ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                              ) : null}
-                              Xác nhận đã chuyển tất cả ({item.pendingCount})
-                            </Button>
+                            </div>
                           </div>
-                        </div>
-                      </Card>
-                    ))
+                        </Card>
+                      );
+                    })
                 )}
               </div>
             </div>

@@ -367,6 +367,18 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         }
       }
 
+      // Query members for this group to resolve payer names
+      const membersSnap = await db.collection("members").where("groupId", "==", gid).get();
+      const membersMap = new Map();
+      membersSnap.docs.forEach((mDoc) => {
+        const mData = mDoc.data();
+        membersMap.set(mDoc.id, {
+          id: mDoc.id,
+          name: mData.name,
+          nickname: mData.nickname || "",
+        });
+      });
+
       // Query matches for this group
       const matchesSnap = await db.collection("matches")
         .where("groupId", "==", gid)
@@ -381,15 +393,64 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         if (m.payoutStatus !== "PAID_OUT") {
           const amount = Number(m.totalAmount) || 0;
           groupPendingAmount += amount;
+
+          let paidByName = "";
+          let isManagerPayer = false;
+          if (m.paidByMemberId && membersMap.has(m.paidByMemberId)) {
+            const memberObj = membersMap.get(m.paidByMemberId);
+            paidByName = memberObj.name;
+          } else if (m.paidByMemberId) {
+            paidByName = "Thành viên #" + m.paidByMemberId.slice(0, 6);
+          } else {
+            paidByName = managerName || "Quản lý nhóm";
+            isManagerPayer = true;
+          }
+
+          let dateIso = null;
+          if (m.date?.toDate) {
+            dateIso = m.date.toDate().toISOString();
+          } else if (m.date) {
+            dateIso = new Date(m.date).toISOString();
+          }
+
           pendingMatches.push({
             id: mDoc.id,
-            date: m.date,
+            date: dateIso,
             totalAmount: amount,
+            venueName: m.venueName || null,
             status: m.status,
             paidByMemberId: m.paidByMemberId || null,
+            paidByMemberName: paidByName,
+            isManagerPayer,
           });
         }
       });
+
+      // Sort pending matches by date descending
+      pendingMatches.sort((a, b) => {
+        const tA = a.date ? new Date(a.date).getTime() : 0;
+        const tB = b.date ? new Date(b.date).getTime() : 0;
+        return tB - tA;
+      });
+
+      // Group pending matches by member/payer
+      const payerGroupsMap = new Map();
+      pendingMatches.forEach((pm) => {
+        const key = pm.paidByMemberId || `mgr_${gid}`;
+        if (!payerGroupsMap.has(key)) {
+          payerGroupsMap.set(key, {
+            payerId: pm.paidByMemberId || null,
+            payerName: pm.paidByMemberName,
+            isManager: pm.isManagerPayer,
+            totalAmount: 0,
+            matches: [],
+          });
+        }
+        const item = payerGroupsMap.get(key);
+        item.totalAmount += pm.totalAmount;
+        item.matches.push(pm);
+      });
+      const payerGroups = Array.from(payerGroupsMap.values());
 
       if (pendingMatches.length > 0) {
         pendingGroupsCount++;
@@ -411,6 +472,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           qrCodeUrl: payout.qrCodeUrl || "",
         },
         pendingMatches,
+        payerGroups,
         pendingAmount: groupPendingAmount,
         pendingCount: pendingMatches.length,
       });
