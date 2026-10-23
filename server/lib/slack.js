@@ -8,7 +8,7 @@ const { isMuted } = require("./mute");
 
 const WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 const BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
-let rawUrl = process.env.SLACK_PUBLIC_WEB_URL || "https://foolball-payment.web.app/public";
+let rawUrl = process.env.SLACK_PUBLIC_WEB_URL || "https://thienbun-payment.web.app/public";
 if (rawUrl.endsWith("/")) {
   rawUrl = rawUrl.slice(0, -1);
 }

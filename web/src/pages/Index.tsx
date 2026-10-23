@@ -47,17 +47,16 @@ const Index = () => {
             <Trophy className="h-12 w-12 text-white" />
           </div>
           <h1 className="text-5xl md:text-6xl font-bold text-foreground mb-6">
-            Chia Tiền Đá Bóng
+            Thiên Bún Payment
           </h1>
           <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-            Quản lý và thanh toán chi phí trận đá bóng một cách dễ dàng, minh
-            bạch với PayOS
+            Quản lý điểm danh và chia tiền sân thể thao, hoạt động nhóm dễ dàng và minh bạch với PayOS
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button asChild size="lg" className="text-lg h-14 px-8">
               <Link to="/setup">
                 <Trophy className="h-5 w-5 mr-2" />
-                Tạo trận đấu ngay
+                Tạo buổi chơi ngay
               </Link>
             </Button>
             <Button
@@ -82,7 +81,7 @@ const Index = () => {
             Tính năng nổi bật
           </h2>
           <p className="text-muted-foreground text-lg">
-            Giải pháp hoàn hảo cho việc quản lý chi phí đá bóng nhóm
+            Giải pháp hoàn hảo cho việc quản lý chi phí và điểm danh nhóm thể thao
           </p>
         </div>
 

@@ -608,7 +608,7 @@ const Members = () => {
                 Quản lý thành viên
               </h1>
               <p className="text-muted-foreground">
-                Danh sách người chơi đá bóng
+                Danh sách thành viên nhóm
               </p>
             </div>
           </div>

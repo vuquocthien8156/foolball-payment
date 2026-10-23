@@ -27,12 +27,27 @@ const { DEFAULT_GROUP_ID, groupIdOf, isValidGroupId, publicUrlFor } = require(".
 admin.initializeApp();
 console.log("Firebase Admin SDK initialized successfully.");
 
-// --- PayOS Initialization ---
-const payos = new PayOS(
-  process.env.PAYOS_CLIENT_ID,
-  process.env.PAYOS_API_KEY,
-  process.env.PAYOS_CHECKSUM_KEY
-);
+// --- PayOS Lazy Initialization ---
+let _payosInstance = null;
+const getPayOS = () => {
+  if (!_payosInstance) {
+    _payosInstance = new PayOS(
+      process.env.PAYOS_CLIENT_ID,
+      process.env.PAYOS_API_KEY,
+      process.env.PAYOS_CHECKSUM_KEY
+    );
+  }
+  return _payosInstance;
+};
+
+const payos = {
+  get paymentRequests() {
+    return getPayOS().paymentRequests;
+  },
+  get webhooks() {
+    return getPayOS().webhooks;
+  },
+};
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -681,7 +696,7 @@ apiRoutes.post("/notify/attendance-created", triggerAuth.requireUser, requireTri
                 ? [
                     {
                       title: "⏱️ Giờ đóng cổng",
-                      value: `${match.attendanceCloseHours}h trước ngày đá`,
+                      value: `${match.attendanceCloseHours}h trước giờ bắt đầu`,
                     },
                   ]
                 : []),
@@ -1309,9 +1324,7 @@ const computeClosingTime = (matchDate, closeHours) => {
     typeof closeHours === "number"
       ? closeHours
       : cfg.DEFAULT_ATTENDANCE_CLOSE_HOURS;
-  // Anchor at midnight of match day in TZ (not server's UTC midnight).
-  const matchDayStart = startOfDayInTz(d, TZ);
-  return new Date(matchDayStart.getTime() - hours * 60 * 60 * 1000);
+  return new Date(d.getTime() - hours * 60 * 60 * 1000);
 };
 
 /**

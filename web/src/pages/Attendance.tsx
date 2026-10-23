@@ -19,6 +19,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Table,
   TableBody,
   TableCell,
@@ -174,11 +180,9 @@ const Attendance = () => {
 
     const closeHours = match.attendanceCloseHours ?? 12;
     const matchDate = new Date(match.date.seconds * 1000);
-    const matchDayStart = new Date(matchDate);
-    matchDayStart.setHours(0, 0, 0, 0);
 
     const closingDate = new Date(
-      matchDayStart.getTime() - closeHours * 60 * 60 * 1000
+      matchDate.getTime() - closeHours * 60 * 60 * 1000
     );
 
     const isClosed = now > closingDate;
@@ -1077,7 +1081,7 @@ const Attendance = () => {
             return (
               <Card
                 key={member.id}
-                className={`shadow-card transition-all relative ${
+                className={`shadow-card transition-all relative overflow-hidden ${
                   isAttending
                     ? "bg-green-100/20 border-green-500"
                     : isNotAttending
@@ -1129,16 +1133,30 @@ const Attendance = () => {
                     )}
                   </Button>
                 </div>
-                <CardContent className="p-4 flex flex-col items-center text-center h-full">
-                  <div className="flex-grow pt-4">
-                    <p className="font-bold text-foreground text-lg leading-tight">
+                <CardContent className="p-4 flex flex-col items-center text-center h-full w-full min-w-0">
+                  <div className="flex-grow pt-4 w-full min-w-0 flex flex-col items-center">
+                    <p className="font-bold text-foreground text-lg leading-tight truncate w-full px-1" title={member.name}>
                       {member.name}
                     </p>
-                    <div className="h-8 flex items-center justify-center">
+                    <div className="h-8 w-full min-w-0 flex items-center justify-center px-1">
                       {member.nickname && (
-                        <Badge variant="secondary" className="mt-1 mb-3">
-                          {member.nickname}
-                        </Badge>
+                        <TooltipProvider delayDuration={150}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge
+                                variant="secondary"
+                                className="max-w-full text-xs px-2.5 py-0.5 inline-flex items-center overflow-hidden cursor-help"
+                              >
+                                <span className="truncate block max-w-full">
+                                  {member.nickname}
+                                </span>
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              <p>{member.nickname}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       )}
                     </div>
                   </div>
@@ -1353,7 +1371,8 @@ const Attendance = () => {
                             {member.nickname && (
                               <Badge
                                 variant="secondary"
-                                className="mt-1 text-xs"
+                                className="mt-1 text-xs max-w-full truncate inline-block"
+                                title={member.nickname}
                               >
                                 {member.nickname}
                               </Badge>
@@ -1416,7 +1435,8 @@ const Attendance = () => {
                                 {member.nickname && (
                                   <Badge
                                     variant="secondary"
-                                    className="mt-1 text-xs"
+                                    className="mt-1 text-xs max-w-full truncate inline-block"
+                                    title={member.nickname}
                                   >
                                     {member.nickname}
                                   </Badge>

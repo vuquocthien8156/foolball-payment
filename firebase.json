@@ -13,19 +13,39 @@
     "functions": { "port": 5001 },
     "ui": { "enabled": false }
   },
-  "hosting": {
-    "public": "web/dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [
-      {
-        "source": "/api/**",
-        "function": "api",
-        "region": "us-central1"
-      },
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
-  }
+  "hosting": [
+    {
+      "site": "thienbun-payment",
+      "public": "web/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "function": "api",
+          "region": "us-central1"
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
+    },
+    {
+      "site": "foolball-payment",
+      "public": "web/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "redirects": [
+        {
+          "source": "/",
+          "destination": "https://thienbun-payment.web.app/",
+          "type": 301
+        },
+        {
+          "source": "/:path*",
+          "destination": "https://thienbun-payment.web.app/:path*",
+          "type": 301
+        }
+      ]
+    }
+  ]
 }

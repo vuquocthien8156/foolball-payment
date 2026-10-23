@@ -43,9 +43,9 @@ export default defineConfig(({ mode }) => ({
         "pwa-512x512.png",
       ],
       manifest: {
-        name: "Chia tiền sân",
-        short_name: "Chia tiền",
-        description: "Ứng dụng chia tiền sân bóng đá",
+        name: "Thiên Bún Payment",
+        short_name: "Thiên Bún",
+        description: "Ứng dụng quản lý điểm danh và chia tiền sân thể thao",
         theme_color: "#18181b",
         background_color: "#18181b",
         display: "standalone",

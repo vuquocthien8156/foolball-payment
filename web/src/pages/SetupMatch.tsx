@@ -23,6 +23,7 @@ import {
   Percent,
   Loader2,
   Save,
+  BookmarkPlus,
   Search,
   MessageSquarePlus,
   CheckCircle2,
@@ -171,6 +172,59 @@ const removeDiacritics = (str: string) => {
     .replace(/Đ/g, "D");
 };
 
+/**
+ * Helper to get participation weight of a member.
+ * Default is 1.0 (1 full share / 100%).
+ * If percent is defined and > 0, weight is percent / 100 (e.g. 50% -> 0.5 share).
+ */
+export const getMemberWeight = (member: { percent?: number }): number => {
+  if (member.percent === undefined || member.percent === null || member.percent <= 0) {
+    return 1;
+  }
+  return member.percent / 100;
+};
+
+/**
+ * Distribute an amount proportionally according to member weights,
+ * with exact integer rounding and remainder reconciliation so sum === totalAmount.
+ */
+export const distributeAmountByWeights = <T extends { id: string; percent?: number }>(
+  members: T[],
+  totalAmount: number
+): Map<string, number> => {
+  const result = new Map<string, number>();
+  if (members.length === 0 || totalAmount <= 0) {
+    members.forEach((m) => result.set(m.id, 0));
+    return result;
+  }
+
+  const weights = members.map((m) => getMemberWeight(m));
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+
+  if (totalWeight <= 0) {
+    members.forEach((m) => result.set(m.id, 0));
+    return result;
+  }
+
+  let distributed = 0;
+  members.forEach((m, idx) => {
+    const w = weights[idx];
+    const share = Math.round((w / totalWeight) * totalAmount);
+    result.set(m.id, share);
+    distributed += share;
+  });
+
+  // Reconcile rounding difference to the last member so sum === totalAmount exactly
+  const diff = Math.round(totalAmount) - distributed;
+  if (diff !== 0 && members.length > 0) {
+    const adjustMember = members[members.length - 1];
+    const currentVal = result.get(adjustMember.id) || 0;
+    result.set(adjustMember.id, Math.max(0, currentVal + diff));
+  }
+
+  return result;
+};
+
 const SetupMatch = () => {
   const { groupId, group, loading: groupLoading } = useGroup();
   const usesTeams = group?.sport !== "badminton";
@@ -207,6 +261,7 @@ const SetupMatch = () => {
   const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [pool, setPool] = useState<Member[]>([]);
   const [attendance, setAttendance] = useState<Set<string>>(new Set());
+  const [customPercentMemberIds, setCustomPercentMemberIds] = useState<Set<string>>(new Set());
   const [teams, setTeams] = useState<Team[]>([
     { id: "A", name: usesTeams ? "Đội A" : "Người tham gia", color: "bg-blue-500", members: [], percent: usesTeams ? 50 : 100 },
     { id: "B", name: "Đội B", color: "bg-red-500", members: [], percent: 50 },
@@ -490,7 +545,7 @@ const SetupMatch = () => {
   const handleMemberPercentChange = (
     teamId: string,
     memberId: string,
-    percent: number
+    percent: number | undefined
   ) => {
     setTeams((prev) =>
       prev.map((t) =>
@@ -499,7 +554,17 @@ const SetupMatch = () => {
               ...t,
               members: t.members.map((m) =>
                 m.id === memberId
-                  ? { ...m, percent: isNaN(percent) ? undefined : percent }
+                  ? {
+                      ...m,
+                      percent:
+                        percent === undefined || isNaN(percent) || percent === 100
+                          ? undefined
+                          : Math.max(1, percent),
+                      reason:
+                        percent === undefined || isNaN(percent) || percent === 100
+                          ? undefined
+                          : m.reason,
+                    }
                   : m
               ),
             }
@@ -606,17 +671,19 @@ const SetupMatch = () => {
         });
 
         if (eligibleMembers.length > 0) {
-          const amountPerMember = Math.floor(expense.amount / eligibleMembers.length);
-          let remainder = expense.amount % eligibleMembers.length;
-
+          const shares = distributeAmountByWeights(eligibleMembers, expense.amount);
           eligibleMembers.forEach((member) => {
-            const memberAmount = amountPerMember + (remainder-- > 0 ? 1 : 0);
+            const memberAmount = shares.get(member.id) || 0;
             if (!memberAmounts[member.id]) {
               memberAmounts[member.id] = { totalAmount: 0, details: [] };
             }
             memberAmounts[member.id].totalAmount += memberAmount;
+            const weightDesc =
+              member.percent && member.percent < 100
+                ? ` (${member.percent}%)`
+                : "";
             memberAmounts[member.id].details.push({
-              description: expense.description || "Chia đều",
+              description: (expense.description || "Chia đều") + weightDesc,
               amount: memberAmount,
             });
           });
@@ -635,50 +702,24 @@ const SetupMatch = () => {
         if (eligibleMembers.length === 0) return;
 
         const teamPercent = expense.teamPercents?.[team.id] ?? team.percent;
-        const teamTotal = expense.amount * (teamPercent / 100);
+        const teamTotal = Math.round(expense.amount * (teamPercent / 100));
 
-        const fixedPercentMembers = eligibleMembers.filter(
-          (m) => m.percent !== undefined && m.percent > 0
-        );
-        const regularMembers = eligibleMembers.filter(
-          (m) => m.percent === undefined || m.percent <= 0
-        );
-
-        let totalFixedAmount = 0;
-
-        fixedPercentMembers.forEach((member) => {
-          const memberAmount = Math.round(
-            teamTotal * ((member.percent || 0) / 100)
-          );
+        const shares = distributeAmountByWeights(eligibleMembers, teamTotal);
+        eligibleMembers.forEach((member) => {
+          const memberAmount = shares.get(member.id) || 0;
           if (!memberAmounts[member.id]) {
             memberAmounts[member.id] = { totalAmount: 0, details: [] };
           }
           memberAmounts[member.id].totalAmount += memberAmount;
+          const weightDesc =
+            member.percent && member.percent < 100
+              ? ` (${member.percent}%)`
+              : "";
           memberAmounts[member.id].details.push({
-            description: expense.description || "Tiền sân",
+            description: (expense.description || "Tiền sân") + weightDesc,
             amount: memberAmount,
           });
-          totalFixedAmount += memberAmount;
         });
-
-        const remainingAmount = teamTotal - totalFixedAmount;
-        if (regularMembers.length > 0 && remainingAmount >= 0) {
-          const amountPerRegular = Math.floor(
-            remainingAmount / regularMembers.length
-          );
-          let remainder = remainingAmount % regularMembers.length;
-          regularMembers.forEach((member) => {
-            const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
-            if (!memberAmounts[member.id]) {
-              memberAmounts[member.id] = { totalAmount: 0, details: [] };
-            }
-            memberAmounts[member.id].totalAmount += memberAmount;
-            memberAmounts[member.id].details.push({
-              description: expense.description || "Tiền sân",
-              amount: memberAmount,
-            });
-          });
-        }
       });
     });
 
@@ -1013,11 +1054,13 @@ const SetupMatch = () => {
           });
 
           if (eligibleMembers.length > 0) {
-            const amountPerMember = Math.floor(expense.amount / eligibleMembers.length);
-            let remainder = expense.amount % eligibleMembers.length;
+            const shares = distributeAmountByWeights(
+              eligibleMembers.map((e) => e.member),
+              expense.amount
+            );
 
             eligibleMembers.forEach(({ member, teamId }) => {
-              const memberAmount = amountPerMember + (remainder-- > 0 ? 1 : 0);
+              const memberAmount = shares.get(member.id) || 0;
 
               if (!memberSharesMap.has(member.id)) {
                 memberSharesMap.set(member.id, {
@@ -1027,15 +1070,21 @@ const SetupMatch = () => {
                   expenseBreakdown: [],
                   calculationDetails: {
                     isEqual: true,
+                    memberPercent: member.percent && member.percent < 100 ? member.percent : undefined,
+                    reason: member.reason,
                   },
                 });
               }
 
               const memberShare = memberSharesMap.get(member.id)!;
               memberShare.totalAmount += memberAmount;
+              const weightDesc =
+                member.percent && member.percent < 100
+                  ? ` (${member.percent}%)`
+                  : "";
               memberShare.expenseBreakdown.push({
                 expenseId: expense.id,
-                description: expense.description || "Chia đều",
+                description: (expense.description || "Chia đều") + weightDesc,
                 amount: memberAmount,
               });
             });
@@ -1053,21 +1102,12 @@ const SetupMatch = () => {
           if (eligibleMembers.length === 0) return;
 
           const teamPercent = expense.teamPercents?.[team.id] ?? team.percent;
-          const teamTotal = expense.amount * (teamPercent / 100);
+          const teamTotal = Math.round(expense.amount * (teamPercent / 100));
 
-          const fixedPercentMembers = eligibleMembers.filter(
-            (m) => m.percent !== undefined && m.percent > 0
-          );
-          const regularMembers = eligibleMembers.filter(
-            (m) => m.percent === undefined || m.percent <= 0
-          );
+          const shares = distributeAmountByWeights(eligibleMembers, teamTotal);
 
-          let totalFixedAmount = 0;
-
-          fixedPercentMembers.forEach((member) => {
-            const memberAmount = Math.round(
-              teamTotal * ((member.percent || 0) / 100)
-            );
+          eligibleMembers.forEach((member) => {
+            const memberAmount = shares.get(member.id) || 0;
 
             if (!memberSharesMap.has(member.id)) {
               memberSharesMap.set(member.id, {
@@ -1076,72 +1116,26 @@ const SetupMatch = () => {
                 totalAmount: 0,
                 expenseBreakdown: [],
                 calculationDetails: {
-                  memberPercent: member.percent,
+                  memberPercent: member.percent && member.percent < 100 ? member.percent : undefined,
                   reason: member.reason,
                   teamName: team.name,
-                  teamTotal: Math.round(teamTotal),
-                  totalFixedAmount: 0, // Will be updated after loop
-                  remainingAmount: 0, // Will be calculated
-                  regularMemberCount: regularMembers.length,
+                  teamTotal: teamTotal,
                 },
               });
             }
 
             const memberShare = memberSharesMap.get(member.id)!;
             memberShare.totalAmount += memberAmount;
+            const weightDesc =
+              member.percent && member.percent < 100
+                ? ` (${member.percent}%)`
+                : "";
             memberShare.expenseBreakdown.push({
               expenseId: expense.id,
-              description: expense.description,
+              description: (expense.description || "Tiền sân") + weightDesc,
               amount: memberAmount,
             });
-
-            totalFixedAmount += memberAmount;
           });
-
-          const remainingAmount = teamTotal - totalFixedAmount;
-
-          // Update totalFixedAmount and remainingAmount for fixed percent members
-          fixedPercentMembers.forEach((member) => {
-            const memberShare = memberSharesMap.get(member.id);
-            if (memberShare && memberShare.calculationDetails) {
-              memberShare.calculationDetails.totalFixedAmount = Math.round(totalFixedAmount);
-              memberShare.calculationDetails.remainingAmount = Math.round(remainingAmount);
-            }
-          });
-
-          if (regularMembers.length > 0 && remainingAmount >= 0) {
-            const amountPerRegular = Math.floor(
-              remainingAmount / regularMembers.length
-            );
-            let remainder = remainingAmount % regularMembers.length;
-            regularMembers.forEach((member) => {
-              const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
-
-              if (!memberSharesMap.has(member.id)) {
-                memberSharesMap.set(member.id, {
-                  memberId: member.id,
-                  teamId: team.id,
-                  totalAmount: 0,
-                  expenseBreakdown: [],
-                  calculationDetails: {
-                    teamName: team.name,
-                    teamTotal: Math.round(teamTotal),
-                    totalFixedAmount: Math.round(totalFixedAmount),
-                    remainingAmount: Math.round(remainingAmount),
-                    regularMemberCount: regularMembers.length,
-                  },
-                });
-              }
-
-              const memberShare = memberSharesMap.get(member.id)!;
-              memberShare.totalAmount += memberAmount;
-              memberShare.expenseBreakdown.push({
-                expenseId: expense.id,
-                description: expense.description,
-                amount: memberAmount,
-              });
-            });
-          }
         });
       });
 
@@ -1737,7 +1731,7 @@ const SetupMatch = () => {
               <div className="space-y-2">
                 <Label htmlFor="close-hours" className="flex items-center gap-2">
                   <Clock className="h-4 w-4" />
-                  {usesTeams ? "Đóng điểm danh trước ngày đá (giờ)" : "Đóng điểm danh trước ngày chơi (giờ)"}
+                  {usesTeams ? "Đóng điểm danh trước giờ đá (giờ)" : "Đóng điểm danh trước giờ chơi (giờ)"}
                 </Label>
                 <Input
                   id="close-hours"
@@ -1750,7 +1744,7 @@ const SetupMatch = () => {
                   }
                 />
                 <p className="text-xs text-muted-foreground">
-                  Mặc định: 12 giờ (đóng lúc 12:00 ngày hôm trước)
+                  Mặc định: 12 giờ trước giờ bắt đầu
                 </p>
               </div>
               <div className="space-y-2">
@@ -2007,32 +2001,21 @@ const SetupMatch = () => {
                       }
 
                       if (expense.type === "EQUAL") {
-                        const eligibleMembersCount = activeTeams.reduce((sum, t) => {
-                          return sum + t.members.filter(
-                            (m) => !m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)
-                          ).length;
-                        }, 0);
-
-                        if (eligibleMembersCount > 0) {
-                          const amountPerMember = Math.floor(expense.amount / eligibleMembersCount);
-                          let remainder = expense.amount % eligibleMembersCount;
-                          
-                          let teamEqualAmount = 0;
-                          
-                          const allEligibleMembers: string[] = [];
-                          activeTeams.forEach((t) => {
-                            t.members.forEach((m) => {
-                              if (!m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)) {
-                                allEligibleMembers.push(m.id);
-                              }
-                            });
+                        const allEligibleMembers: Member[] = [];
+                        activeTeams.forEach((t) => {
+                          t.members.forEach((m) => {
+                            if (!m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)) {
+                              allEligibleMembers.push(m);
+                            }
                           });
+                        });
 
+                        if (allEligibleMembers.length > 0) {
+                          const shares = distributeAmountByWeights(allEligibleMembers, expense.amount);
+                          let teamEqualAmount = 0;
                           team.members.forEach((m) => {
                             if (!m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)) {
-                              const idx = allEligibleMembers.indexOf(m.id);
-                              const memberAmount = amountPerMember + (idx < remainder ? 1 : 0);
-                              teamEqualAmount += memberAmount;
+                              teamEqualAmount += shares.get(m.id) || 0;
                             }
                           });
 
@@ -2048,48 +2031,25 @@ const SetupMatch = () => {
 
                       // SHARED / default
                       const teamPercent = expense.teamPercents?.[team.id] ?? (teams.find(t => t.id === team.id)?.percent ?? 0);
-                      const teamTotal = expense.amount * (teamPercent / 100);
+                      const teamTotal = Math.round(expense.amount * (teamPercent / 100));
                       
-                      let teamSharedAmount = 0;
                       const eligibleMembers = team.members.filter(
                         (m) => !m.isExemptFromPayment && !expense.exemptMemberIds.includes(m.id)
                       );
                       
                       if (eligibleMembers.length > 0) {
-                        const fixedPercentMembers = eligibleMembers.filter(
-                          (m) => m.percent !== undefined && m.percent > 0
-                        );
-                        const regularMembers = eligibleMembers.filter(
-                          (m) => m.percent === undefined || m.percent <= 0
-                        );
-
-                        let totalFixedAmount = 0;
-                        fixedPercentMembers.forEach((member) => {
-                          const memberAmount = Math.round(
-                            teamTotal * ((member.percent || 0) / 100)
-                          );
-                          teamSharedAmount += memberAmount;
-                          totalFixedAmount += memberAmount;
+                        const shares = distributeAmountByWeights(eligibleMembers, teamTotal);
+                        let teamSharedAmount = 0;
+                        eligibleMembers.forEach((m) => {
+                          teamSharedAmount += shares.get(m.id) || 0;
                         });
 
-                        const remainingAmount = teamTotal - totalFixedAmount;
-                        if (regularMembers.length > 0 && remainingAmount >= 0) {
-                          const amountPerRegular = Math.floor(
-                            remainingAmount / regularMembers.length
-                          );
-                          let remainder = remainingAmount % regularMembers.length;
-                          regularMembers.forEach((member) => {
-                            const memberAmount = amountPerRegular + (remainder-- > 0 ? 1 : 0);
-                            teamSharedAmount += memberAmount;
+                        if (teamSharedAmount > 0) {
+                          teamDetails.push({
+                            description: `${expense.description || "Tiền sân"} (${teamPercent}%)`,
+                            amount: teamSharedAmount,
                           });
                         }
-                      }
-
-                      if (teamSharedAmount > 0) {
-                        teamDetails.push({
-                          description: `${expense.description || "Tiền sân"} (${teamPercent}%)`,
-                          amount: teamSharedAmount,
-                        });
                       }
                     });
 
@@ -2169,34 +2129,156 @@ const SetupMatch = () => {
                     {member.isExemptFromPayment ? (
                       <Badge
                         variant="outline"
-                        className="w-full justify-center"
+                        className="w-full justify-center text-xs py-1 text-muted-foreground"
                       >
                         Miễn chia tiền
                       </Badge>
-                    ) : usesTeams ? (
-                      <>
-                        <div className="relative">
-                          <Percent className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                          <Input
-                            type="number"
-                            placeholder="Chia đều"
-                            value={member.percent || ""}
-                            onChange={(e) =>
-                              handleMemberPercentChange(
-                                team.id,
-                                member.id,
-                                parseInt(e.target.value)
-                              )
-                            }
-                            className="pl-7 h-8 text-sm"
-                          />
+                    ) : (
+                      <div className="space-y-1.5 pt-1.5 border-t border-border/50">
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span className="font-medium">Suất đóng:</span>
+                          {member.percent && member.percent < 100 ? (
+                            <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                              {member.percent}% ({member.percent === 50 ? "½ suất" : member.percent === 75 ? "¾ suất" : `${member.percent}%`})
+                            </span>
+                          ) : member.percent && member.percent > 100 ? (
+                            <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                              {member.percent}% ({member.percent / 100} suất)
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">100% (1 suất)</span>
+                          )}
                         </div>
-                        {(member.percent || 0) > 0 && (
+
+                        {/* Quick preset chips */}
+                        <div className="grid grid-cols-4 gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={(!member.percent || member.percent === 100) && !customPercentMemberIds.has(member.id) ? "secondary" : "ghost"}
+                            className={cn(
+                              "h-7 text-xs px-1",
+                              (!member.percent || member.percent === 100) && !customPercentMemberIds.has(member.id) && "font-semibold border shadow-xs"
+                            )}
+                            onClick={() => {
+                              setCustomPercentMemberIds((prev) => {
+                                const next = new Set(prev);
+                                next.delete(member.id);
+                                return next;
+                              });
+                              handleMemberPercentChange(team.id, member.id, undefined);
+                            }}
+                          >
+                            1 suất
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={member.percent === 50 ? "default" : "outline"}
+                            className={cn(
+                              "h-7 text-xs px-1",
+                              member.percent === 50 && "bg-amber-500 hover:bg-amber-600 text-white font-semibold border-amber-500"
+                            )}
+                            onClick={() => {
+                              setCustomPercentMemberIds((prev) => {
+                                const next = new Set(prev);
+                                next.delete(member.id);
+                                return next;
+                              });
+                              handleMemberPercentChange(team.id, member.id, 50);
+                              if (!member.reason) {
+                                handleMemberReasonChange(team.id, member.id, "Về sớm (½ suất)");
+                              }
+                            }}
+                          >
+                            ½ suất
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={member.percent === 75 ? "default" : "outline"}
+                            className={cn(
+                              "h-7 text-xs px-1",
+                              member.percent === 75 && "bg-amber-500 hover:bg-amber-600 text-white font-semibold border-amber-500"
+                            )}
+                            onClick={() => {
+                              setCustomPercentMemberIds((prev) => {
+                                const next = new Set(prev);
+                                next.delete(member.id);
+                                return next;
+                              });
+                              handleMemberPercentChange(team.id, member.id, 75);
+                              if (!member.reason) {
+                                handleMemberReasonChange(team.id, member.id, "Về sớm (¾ suất)");
+                              }
+                            }}
+                          >
+                            ¾ suất
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={
+                              customPercentMemberIds.has(member.id) ||
+                              (member.percent !== undefined && member.percent !== 50 && member.percent !== 75 && member.percent !== 100)
+                                ? "default"
+                                : "outline"
+                            }
+                            className={cn(
+                              "h-7 text-xs px-1",
+                              (customPercentMemberIds.has(member.id) ||
+                                (member.percent !== undefined && member.percent !== 50 && member.percent !== 75 && member.percent !== 100)) &&
+                                "bg-amber-500 hover:bg-amber-600 text-white font-semibold border-amber-500"
+                            )}
+                            onClick={() => {
+                              setCustomPercentMemberIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(member.id)) {
+                                  next.delete(member.id);
+                                } else {
+                                  next.add(member.id);
+                                }
+                                return next;
+                              });
+                            }}
+                          >
+                            Khác %
+                          </Button>
+                        </div>
+
+                        {/* Custom % input */}
+                        {(customPercentMemberIds.has(member.id) ||
+                          (member.percent !== undefined && member.percent !== 50 && member.percent !== 75 && member.percent !== 100)) && (
                           <div className="relative">
-                            <MessageSquarePlus className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                            <Percent className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                            <Input
+                              type="number"
+                              min={1}
+                              max={300}
+                              placeholder="Nhập % (vd: 40 hoặc 150)"
+                              value={member.percent ?? ""}
+                              onChange={(e) => {
+                                const val = e.target.value === "" ? undefined : parseInt(e.target.value, 10);
+                                handleMemberPercentChange(team.id, member.id, val);
+                              }}
+                              className="pl-8 pr-8 h-8 text-xs"
+                            />
+                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium">
+                              %
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Reason input when reduced or custom */}
+                        {((member.percent && member.percent !== 100) || customPercentMemberIds.has(member.id)) && (
+                          <div className="relative">
+                            <MessageSquarePlus className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                             <Input
                               type="text"
-                              placeholder={usesTeams ? "Lý do (vd: đá ít)" : "Lý do (vd: chơi ít)"}
+                              placeholder={usesTeams ? "Lý do (vd: đá 1 hiệp, về sớm)" : "Lý do (vd: về sớm, chơi nửa buổi)"}
                               value={member.reason || ""}
                               onChange={(e) =>
                                 handleMemberReasonChange(
@@ -2205,12 +2287,12 @@ const SetupMatch = () => {
                                   e.target.value
                                 )
                               }
-                              className="pl-7 h-8 text-sm"
+                              className="pl-8 h-8 text-xs"
                             />
                           </div>
                         )}
-                      </>
-                    ) : null}
+                      </div>
+                    )}
                   </div>
                 ))}
               </CardContent>
@@ -2218,62 +2300,178 @@ const SetupMatch = () => {
           ))}
         </div>
 
-        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 rounded-lg border bg-background p-4 shadow-sm">
-          <Button
-            variant="outline"
-            onClick={() =>
-              copyLink(
-                `${window.location.origin}${groupPath("public/pay")}`,
-                "Link thanh toán chung đã được sao chép."
-              )
-            }
-            disabled={isSaving}
-          >
-            <Copy className="h-4 w-4 mr-2" />
-            Sao chép link thanh toán
-          </Button>
-          <Button
-            onClick={handleCreateMatchForAttendance}
-            disabled={isBusy || !!matchId}
-            variant="default"
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            {isCreating ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <LinkIcon className="h-4 w-4 mr-2" />
-            )}
-            {usesTeams ? "Tạo trận & lấy link điểm danh" : "Tạo buổi & lấy link điểm danh"}
-          </Button>
-          <Button
-            onClick={handleSaveConfigToDb}
-            disabled={isBusy}
-            variant="secondary"
-          >
-            {isSavingConfig ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4 mr-2" />
-            )}
-            Lưu Cấu Hình
-          </Button>
+        <div className="sticky bottom-0 z-10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 rounded-xl border bg-background/95 backdrop-blur p-4 shadow-lg">
+          {/* Nhóm 1: Tiện ích & Cấu hình mẫu mặc định */}
+          <div className="flex flex-wrap items-center gap-2">
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      copyLink(
+                        `${window.location.origin}${groupPath("public/pay")}`,
+                        "Link thanh toán chung đã được sao chép."
+                      )
+                    }
+                    disabled={isSaving}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <Copy className="h-4 w-4 mr-1.5" />
+                    Link thanh toán
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Sao chép đường link thanh toán chung (/public/pay) để gửi cho thành viên</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
 
-          {matchId && (
-            <Button
-              onClick={handleUpdateMatchConfig}
-              disabled={isBusy}
-              variant="secondary"
-            >
-              {isUpdatingConfig ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-              Cập nhật (không tính tiền)
-            </Button>
-          )}
-          <Button onClick={() => void handleSave(false)} variant="outline" disabled={isBusy}>
-            Chỉ tính tiền
-          </Button>
-          <Button onClick={() => void handleSave(true)} disabled={isBusy}>
-            {isSaving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Đang lưu...</> : "Tính tiền & công khai"}
-          </Button>
+            {matchId && (
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        copyLink(
+                          `${window.location.origin}${groupPath("public/attendance")}`,
+                          "Link điểm danh đã được sao chép."
+                        )
+                      }
+                      disabled={isSaving}
+                      className="text-blue-600 border-blue-200 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                    >
+                      <LinkIcon className="h-4 w-4 mr-1.5" />
+                      Link điểm danh
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Sao chép đường link điểm danh (/public/attendance) của buổi chơi này</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={handleSaveConfigToDb}
+                    disabled={isBusy}
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    {isSavingConfig ? (
+                      <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                    ) : (
+                      <BookmarkPlus className="h-4 w-4 mr-1.5" />
+                    )}
+                    Lưu làm mẫu mặc định
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[260px]">
+                  <p>Lưu thiết lập hiện tại (tiền sân, giờ chơi, địa điểm...) làm <b>mẫu mặc định</b> cho các buổi chơi tạo mới lần sau</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+
+          {/* Nhóm 2: Thao tác buổi chơi & Tính tiền */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {!matchId && (
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={handleCreateMatchForAttendance}
+                      disabled={isBusy}
+                      variant="default"
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+                    >
+                      {isCreating ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <LinkIcon className="h-4 w-4 mr-2" />
+                      )}
+                      {usesTeams ? "Tạo trận & mở điểm danh" : "Tạo buổi & mở điểm danh"}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[260px]">
+                    <p>Tạo buổi chơi mới ở trạng thái chờ điểm danh (PENDING) và tự động copy link điểm danh để gửi cho nhóm</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+
+            {matchId && (
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={handleUpdateMatchConfig}
+                      disabled={isBusy}
+                      variant="secondary"
+                    >
+                      {isUpdatingConfig ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4 mr-2" />
+                      )}
+                      Lưu thay đổi
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[260px]">
+                    <p>Lưu lại các thông tin sân, giờ, người tham gia, chi phí vừa sửa nhưng <b>CHƯA tính tiền</b></p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => void handleSave(false)}
+                    variant="outline"
+                    disabled={isBusy}
+                  >
+                    Chỉ tính tiền (nháp)
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[260px]">
+                  <p>Tính tiền chia cho từng người và lưu bản nháp (COMPLETED) để kiểm tra, <b>chưa công khai</b> cho thành viên thấy bill</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => void handleSave(true)}
+                    disabled={isBusy}
+                    className="bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white shadow font-medium"
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Đang lưu...
+                      </>
+                    ) : (
+                      "Tính tiền & công khai"
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[260px]">
+                  <p>Chốt tính tiền và công khai hóa đơn (PUBLISHED) để tất cả thành viên có thể vào xem bill và thanh toán ngay</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </div>
       </div>
     </div>
