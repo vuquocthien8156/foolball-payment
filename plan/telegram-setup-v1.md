@@ -5,6 +5,10 @@ Status: Integration implemented and tested with simulated Telegram responses. Th
 Revision: 2026-10-23 — guided multi-group connection added at the user's request.
 Related: [Shared-bills plan](shared-bills-subscriptions-v1.md), [plan index](index.md).
 
+Configuration decision — 2026-10-23: the user selected the existing `server/.env` deployment workflow. Telegram credentials use ordinary server environment variables, matching the other backend credentials. Do not also bind these names with `defineSecret`; that causes a duplicate secret/non-secret variable deployment error. Existing Firebase Secret Manager entries can remain unused. No production deployment was performed by this configuration fix.
+
+Local verification of the configuration fix: `node --check server/index.js` passed; evaluation of the exported API/monthly/reminder registration options confirmed no secret bindings and preserved the public API and schedules. The four focused Telegram adapter, connection, webhook-setup, and bill-reminder test files passed all 14 tests. A production redeployment remains necessary to verify the Cloud Run error is resolved remotely. The local credential file was not edited.
+
 ## 1. Create the bot now
 
 1. Open the official [BotFather](https://t.me/BotFather) in Telegram.
@@ -35,8 +39,8 @@ Manual Chat ID discovery is an operator troubleshooting option only. The primary
 
 Platform operator:
 
-- Store `TELEGRAM_BOT_TOKEN` as a server secret; never use a `VITE_` variable.
-- Bind the secret to the API function that validates/tests connections and the worker function that sends reminders.
+- Store `TELEGRAM_BOT_TOKEN` in the ignored `server/.env` file; never use a `VITE_` variable or a frontend environment file.
+- Firebase deploy loads the server environment variables for the API and scheduled functions. Both the connection API and reminder worker read the token from `process.env`.
 - Configure one platform-owned Telegram webhook and a separate webhook secret. This is shared infrastructure; individual managers never register webhooks or receive the bot token.
 - Show only bot username and configured/not-configured status to group managers.
 - Do not return token values, token-bearing URLs, or full HTTP client error objects in responses/logs.
@@ -140,21 +144,25 @@ UX states: Not configured, Not connected, Waiting for Telegram, Group detected, 
 This is the future operator runbook, not a record of executed deployment. Managers only use the guided Settings card; they do not perform these steps or receive credentials. All app-facing setup text is Vietnamese at the user's request.
 
 1. Create the bot once with BotFather as described in section 1. Leave group participation enabled and privacy mode enabled.
-2. Create a separate random webhook secret. Keep both values in your secret manager, never in Git or chat.
-3. Set Firebase secrets using its interactive prompts:
+2. Create a separate random webhook secret locally with `openssl rand -hex 32`. BotFather only provides the bot token; it does not provide this second value. The app and Telegram share this value to authenticate incoming webhook requests.
+3. Keep the following values in `server/.env`, which is ignored by Git. Replace the placeholders privately. Do not put them in `web/.env` or use `VITE_` names:
 
-```sh
-firebase functions:secrets:set TELEGRAM_BOT_TOKEN --project foolball-payment
-firebase functions:secrets:set TELEGRAM_WEBHOOK_SECRET --project foolball-payment
+```dotenv
+TELEGRAM_BOT_TOKEN=<full token from BotFather>
+TELEGRAM_WEBHOOK_SECRET=<random value generated above>
+TELEGRAM_WEBHOOK_URL=https://thienbun-payment.web.app/api/telegram/webhook
 ```
 
+Do not run `functions:secrets:set` for this selected workflow. Values already saved there do not need deletion; these functions no longer bind them. Firebase uploads variables from the Functions source directory (`server/.env`) during deployment. A root `.env` is not the configured Functions environment file.
+
 4. After separately approving a production release, deploy the API, monthly generation function, reminder worker, rules/indexes, and web build. All three parts are required: API alone does not schedule monthly bills, and a web deployment alone does not add backend behavior. Preserve existing scheduled sports functions.
-5. Provide `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `TELEGRAM_WEBHOOK_URL` to the setup script through a private process environment. Use `https://thienbun-payment.web.app/api/telegram/webhook` for the current hosting domain. The webhook secret must match the Firebase secret exactly.
-6. Validate without making a Telegram call, then explicitly register:
+5. The standalone webhook setup script reads its process environment; it does not automatically load `.env`. Run the commands below from `server` so the existing `dotenv` dependency loads `server/.env`. The webhook secret registered with Telegram must match the value deployed to Firebase.
+6. Validate without making a Telegram call, then explicitly register after deployment:
 
 ```sh
-node server/scripts/configure-telegram-webhook.js
-node server/scripts/configure-telegram-webhook.js --apply
+cd server
+node -r dotenv/config scripts/configure-telegram-webhook.js
+node -r dotenv/config scripts/configure-telegram-webhook.js --apply
 ```
 
 The script defaults to validation only, refuses a non-HTTPS endpoint, never prints credentials, and registers only message and bot-membership updates. If the bot already belongs to another application, coordinate before replacing its one webhook. Never use production `getUpdates` while this webhook is registered.

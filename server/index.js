@@ -9,7 +9,6 @@ const { FieldValue, Timestamp, FieldPath } = require("firebase-admin/firestore")
 const axios = require("axios");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { defineSecret } = require("firebase-functions/params");
 const slack = require("./lib/slack");
 const cfg = require("./lib/slackConfig");
 const { isMuted } = require("./lib/mute");
@@ -21,8 +20,6 @@ const { runScheduledBills } = require("./lib/scheduledBills");
 const { createTelegramRouter } = require("./lib/telegramRoutes");
 const { createTelegramClient } = require("./lib/telegram");
 const { deliverBillNotifications } = require("./lib/billNotifications");
-const telegramBotToken = defineSecret("TELEGRAM_BOT_TOKEN");
-const telegramWebhookSecret = defineSecret("TELEGRAM_WEBHOOK_SECRET");
 const { createAuthMiddleware, resolveGroupRole } = require("./lib/auth");
 const { createGroupTargets } = require("./lib/groupTargets");
 const { DEFAULT_GROUP_ID, groupIdOf, isValidGroupId, publicUrlFor } = require("./lib/groups");
@@ -1302,7 +1299,7 @@ app.use("/api", apiRoutes);
 // });
 
 // Export the Express API as a Cloud Function
-exports.api = onRequest({ invoker: "public", secrets: [telegramBotToken, telegramWebhookSecret] }, app);
+exports.api = onRequest({ invoker: "public" }, app);
 
 exports.generateMonthlyBills = onSchedule(
   { schedule: "0 * * * *", timeZone: "Asia/Ho_Chi_Minh" },
@@ -1313,7 +1310,7 @@ exports.generateMonthlyBills = onSchedule(
 );
 
 exports.sendBillReminders = onSchedule(
-  { schedule: "* * * * *", timeZone: "Asia/Ho_Chi_Minh", secrets: [telegramBotToken] },
+  { schedule: "* * * * *", timeZone: "Asia/Ho_Chi_Minh" },
   async () => {
     const result = await deliverBillNotifications({ db: admin.firestore(), FieldValue,
       telegram: createTelegramClient(), slack, muted: isMuted() });
