@@ -15,25 +15,29 @@ service cloud.firestore {
       return gid is string && signedIn() && accountAllowsAccess() &&
         (isOwner() || exists(/databases/$(database)/documents/groupMembers/$(gid + '_' + request.auth.uid)));
     }
+    function isSports(gid) {
+      return !exists(/databases/$(database)/documents/groups/$(gid)) ||
+        get(/databases/$(database)/documents/groups/$(gid)).data.get('kind', 'sports') != 'shared_bills';
+    }
 
     match /members/{id} {
       allow read: if true;
       allow create: if isStaff(request.resource.data.groupId);
       allow update: if isStaff(resource.data.groupId) && request.resource.data.groupId == resource.data.groupId;
-      allow delete: if isStaff(resource.data.groupId);
+      allow delete: if isStaff(resource.data.groupId) && isSports(resource.data.groupId);
     }
     match /matches/{id} {
       allow read: if true;
-      allow create: if isStaff(request.resource.data.groupId);
-      allow update: if isStaff(resource.data.groupId) && request.resource.data.groupId == resource.data.groupId;
-      allow delete: if isStaff(resource.data.groupId);
+      allow create: if isStaff(request.resource.data.groupId) && isSports(request.resource.data.groupId);
+      allow update: if isStaff(resource.data.groupId) && isSports(resource.data.groupId) && request.resource.data.groupId == resource.data.groupId;
+      allow delete: if isStaff(resource.data.groupId) && isSports(resource.data.groupId);
     }
     match /matches/{id}/{sub}/{doc} {
       function parentGroup() { return get(/databases/$(database)/documents/matches/$(id)).data.groupId; }
       allow read: if true;
-      allow create: if isStaff(parentGroup()) &&
+      allow create: if isStaff(parentGroup()) && isSports(parentGroup()) &&
         (!(sub in ['shares', 'ratings']) || request.resource.data.groupId == parentGroup());
-      allow update, delete: if isStaff(parentGroup());
+      allow update, delete: if isStaff(parentGroup()) && isSports(parentGroup());
     }
     match /{path=**}/shares/{id} { allow read: if true; }
     match /{path=**}/ratings/{id} { allow read: if true; }
@@ -57,6 +61,11 @@ service cloud.firestore {
     match /paymentRequests/{id} { allow read, write: if false; }
     match /paymentQueue/{id} { allow read, write: if false; }
     match /slackQueue/{id} { allow read, write: if false; }
+    match /billNotificationJobs/{id} { allow read, write: if false; }
+    match /telegramConnections/{id} { allow read, write: if false; }
+    match /telegramDestinations/{id} { allow read, write: if false; }
+    match /telegramUpdates/{id} { allow read, write: if false; }
+    match /notificationState/{id} { allow read, write: if false; }
 
     // Platform records: server (Admin SDK) only.
     match /platformAccounts/{uid} {
@@ -73,6 +82,9 @@ service cloud.firestore {
     match /groups/{gid} {
       allow read: if true;
       allow write: if false;
+      // Financial data is served through authenticated manager APIs only.
+      match /bills/{billId}/{document=**} { allow read, write: if false; }
+      match /subscriptions/{subscriptionId} { allow read, write: if false; }
       match /settings/{name} {
         allow read: if name in ['lastMatch', 'slack'] && isStaff(gid);
         allow write: if name == 'lastMatch' && isStaff(gid);
