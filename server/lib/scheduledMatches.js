@@ -1,4 +1,4 @@
-const { isValidGroupId } = require("./groups");
+const { isValidGroupId, publicUrlFor } = require("./groups");
 
 /**
  * Calculates next date for a target day of the week (0=Sun, 1=Mon, ..., 6=Sat) and time (HH:mm)
@@ -116,7 +116,7 @@ async function createMatchFromTemplate({ db, FieldValue, groupId, templateId, cr
   return { matchId, date: dateToUse, matchData: newMatch };
 }
 
-async function checkAndRunScheduledMatches({ db, FieldValue, now = new Date() }) {
+async function checkAndRunScheduledMatches({ db, FieldValue, slack = null, targets = null, now = new Date() }) {
   const vnOffsetMs = 7 * 60 * 60 * 1000;
   const vnDate = new Date(now.getTime() + vnOffsetMs);
   const currentDayOfWeek = vnDate.getUTCDay();
@@ -161,6 +161,27 @@ async function checkAndRunScheduledMatches({ db, FieldValue, now = new Date() })
           lastCreatedMatchId: result.matchId,
           lastTriggeredAt: FieldValue.serverTimestamp(),
         });
+
+        if (slack && targets) {
+          try {
+            const target = await targets.getSlackTarget(groupId);
+            if (target) {
+              const webBaseUrl = slack.PUBLIC_WEB_URL || "https://thienbun-payment.web.app";
+              await slack.sendBlock({
+                headerText: "⚽ Đã mở điểm danh trận mới (Tự động)",
+                bodyMarkdown: `<!here>\n📅 Trận *${slack.formatMatchDate ? slack.formatMatchDate(result.date) : result.date.toISOString().slice(0, 10)}*${result.matchData.venueName ? `\n📍 ${result.matchData.venueName}` : ""}\n\n🏃 Hệ thống đã tự động tạo trận và mở điểm danh!`,
+                cta: {
+                  label: "Điểm danh ngay",
+                  url: `${publicUrlFor(groupId, webBaseUrl)}/attendance`,
+                  style: "primary",
+                },
+                fallbackText: "Đã mở điểm danh trận mới",
+              }, target);
+            }
+          } catch (slackErr) {
+            console.error(`[scheduledMatches] Slack notification failed for group ${groupId}`, slackErr);
+          }
+        }
 
         results.push({ groupId, success: true, matchId: result.matchId });
       } catch (err) {
