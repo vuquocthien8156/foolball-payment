@@ -731,6 +731,14 @@ apiRoutes.post("/notify/attendance-deleted", triggerAuth.requireUser, requireTri
     const match = matchSnap.exists ? matchSnap.data() : null;
     const groupId = groupIdOf(match);
     if (req.body.groupId && req.body.groupId !== groupId) return res.status(409).json({ error: "MIXED_GROUP" });
+
+    const matchDateObj = match?.date
+      ? (typeof match.date?.toDate === "function" ? match.date.toDate() : new Date(match.date))
+      : null;
+    if (matchDateObj && matchDateObj.getTime() < Date.now()) {
+      return res.status(200).json({ success: false, skipped: true, reason: "MATCH_DATE_PASSED" });
+    }
+
     const dateLabel = match?.date
       ? slack.formatMatchDateOnly(match.date)
       : "trận điểm danh";
@@ -2117,7 +2125,8 @@ exports.autoScheduledMatchCreation = onSchedule(
     const db = admin.firestore();
     const { checkAndRunScheduledMatches } = require("./lib/scheduledMatches");
     try {
-      const results = await checkAndRunScheduledMatches({ db, FieldValue, now: new Date() });
+      const targets = createGroupTargets({ db, env: process.env });
+      const results = await checkAndRunScheduledMatches({ db, FieldValue, slack, targets, now: new Date() });
       if (results.length > 0) {
         console.log("[autoScheduledMatchCreation] processed results:", results);
       }

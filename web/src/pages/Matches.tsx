@@ -61,6 +61,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -420,6 +421,8 @@ const Matches = () => {
   const [isLoadingShares, setIsLoadingShares] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [matchIdToDelete, setMatchIdToDelete] = useState<string | null>(null);
+  const [sendNotificationOnDelete, setSendNotificationOnDelete] =
+    useState(false);
   const [highlightedShareId, setHighlightedShareId] = useState<string | null>(
     null,
   );
@@ -937,10 +940,26 @@ const Matches = () => {
     setIsDeleting(true);
     try {
       const deletingMatch = matches.find((m) => m.id === matchIdToDelete);
-      // Notify members nếu đang ở trạng thái điểm danh
-      if (deletingMatch?.status === "PENDING") {
+      const matchDateObj = deletingMatch?.date
+        ? typeof deletingMatch.date === "string"
+          ? new Date(deletingMatch.date)
+          : typeof (deletingMatch.date as any).toDate === "function"
+            ? (deletingMatch.date as any).toDate()
+            : new Date(deletingMatch.date)
+        : null;
+      const isPastMatch = matchDateObj
+        ? matchDateObj.getTime() < Date.now()
+        : false;
+
+      // Chỉ gửi thông báo nếu người dùng chủ động tích chọn VÀ trận chưa qua ngày
+      if (
+        sendNotificationOnDelete &&
+        !isPastMatch &&
+        deletingMatch?.status === "PENDING"
+      ) {
         postApiJson("/notify/attendance-deleted", {
           matchId: matchIdToDelete,
+          groupId,
         }).catch((err) =>
           console.error("Failed to send delete attendance notification", err),
         );
@@ -1500,9 +1519,12 @@ const Matches = () => {
                 ) : (
                   <AlertDialog
                     open={!!matchIdToDelete}
-                    onOpenChange={(isOpen) =>
-                      !isOpen && setMatchIdToDelete(null)
-                    }
+                    onOpenChange={(isOpen) => {
+                      if (!isOpen) {
+                        setMatchIdToDelete(null);
+                        setSendNotificationOnDelete(false);
+                      }
+                    }}
                   >
                     <div className="space-y-1 p-2">
                       {displayedMatches.map((match) => (
@@ -1511,7 +1533,10 @@ const Matches = () => {
                           match={match}
                           isSelected={selectedMatchId === match.id}
                           onSelect={() => setSelectedMatchId(match.id)}
-                          onDelete={() => setMatchIdToDelete(match.id)}
+                          onDelete={() => {
+                            setSendNotificationOnDelete(false);
+                            setMatchIdToDelete(match.id);
+                          }}
                           onEdit={() =>
                             navigate(groupPath(`admin/setup/${match.id}`))
                           }
@@ -1529,6 +1554,59 @@ const Matches = () => {
                           quan.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
+
+                      {(() => {
+                        const targetMatch = matches.find(
+                          (m) => m.id === matchIdToDelete,
+                        );
+                        if (!targetMatch) return null;
+                        const matchDateObj = targetMatch.date
+                          ? typeof targetMatch.date === "string"
+                            ? new Date(targetMatch.date)
+                            : typeof (targetMatch.date as any).toDate ===
+                                "function"
+                              ? (targetMatch.date as any).toDate()
+                              : new Date(targetMatch.date)
+                          : null;
+                        const isPast = matchDateObj
+                          ? matchDateObj.getTime() < Date.now()
+                          : false;
+
+                        return (
+                          <div className="py-2 text-xs text-muted-foreground border-y my-1 space-y-1.5">
+                            <p>
+                              Trận:{" "}
+                              <strong className="text-foreground">
+                                {formatMatchDateTime(targetMatch.date)}
+                              </strong>
+                            </p>
+                            {isPast ? (
+                              <p className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                                💡 Trận đấu trong quá khứ — hệ thống sẽ không gửi thông báo hủy.
+                              </p>
+                            ) : targetMatch.status === "PENDING" ? (
+                              <div className="flex items-center space-x-2 pt-1">
+                                <Checkbox
+                                  id="notify-delete"
+                                  checked={sendNotificationOnDelete}
+                                  onCheckedChange={(checked) =>
+                                    setSendNotificationOnDelete(
+                                      Boolean(checked),
+                                    )
+                                  }
+                                />
+                                <Label
+                                  htmlFor="notify-delete"
+                                  className="text-xs text-foreground font-normal cursor-pointer"
+                                >
+                                  Gửi thông báo hủy trận lên Slack và Push (Mặc định: Tắt)
+                                </Label>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
+
                       <AlertDialogFooter>
                         <AlertDialogCancel>Hủy</AlertDialogCancel>
                         <AlertDialogAction
