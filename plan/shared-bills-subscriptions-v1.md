@@ -288,3 +288,5 @@ Implementation reuse decisions: bank recipient settings reuse the existing manag
 ### UI language decision — 2026-10-23
 
 The user explicitly requested Vietnamese app text. All new bill/member/history/subscription screens, Settings sections, Telegram setup UI, status/error labels, and outgoing reminder text use Vietnamese. Code identifiers and API fields remain English. This supersedes the earlier general English-only rule for user-facing application strings.
+
+The document language in `web/index.html` is also `vi`, so browsers and assistive technology identify the Vietnamese interface correctly.
