@@ -58,7 +58,15 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { postApiJson } from "@/lib/api";
+import { postApiJson, apiRequest } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -285,6 +293,87 @@ const SetupMatch = () => {
     }, 0);
 
     return Math.round((teamTotalAmount / totalExpenseAmount) * 100);
+  };
+
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [isSaveTemplateOpen, setIsSaveTemplateOpen] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+
+  const loadTemplates = useCallback(async () => {
+    try {
+      if (typeof apiRequest !== "function") return;
+      const data = await apiRequest("GET", `/groups/${groupId}/templates`);
+      if (Array.isArray(data)) {
+        setTemplates(data);
+      }
+    } catch (e) {
+      console.error("Failed to load templates", e);
+    }
+  }, [groupId]);
+
+  useEffect(() => {
+    loadTemplates();
+  }, [loadTemplates]);
+
+  const applyTemplate = (tpl: any) => {
+    setSelectedTemplateId(tpl.id);
+    if (tpl.venueName !== undefined) setVenueName(tpl.venueName || "");
+    if (tpl.mapIframe !== undefined) setMapIframe(tpl.mapIframe || "");
+    if (tpl.attendanceCloseHours !== undefined) setAttendanceCloseHours(tpl.attendanceCloseHours);
+    if (tpl.sufficientPlayerCount !== undefined) setSufficientPlayerCount(tpl.sufficientPlayerCount ?? (usesTeams ? 14 : ""));
+    if (tpl.paidByMemberId !== undefined) setPaidByMemberId(tpl.paidByMemberId || "");
+    if (tpl.kickoffTime) setTime(tpl.kickoffTime);
+    if (tpl.teamCount && usesTeams) setTeamCount(tpl.teamCount);
+    if (Array.isArray(tpl.expenseItems) && tpl.expenseItems.length > 0) {
+      setExpenseItems(tpl.expenseItems);
+    }
+    toast({
+      title: "Đã áp dụng mẫu",
+      description: `Đã điền thông tin từ mẫu "${tpl.name}".`,
+    });
+  };
+
+  const handleSaveAsTemplate = async () => {
+    if (!newTemplateName.trim()) return;
+    setIsSavingTemplate(true);
+    try {
+      const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
+      const payload = {
+        name: newTemplateName.trim(),
+        venueName: venueName || "",
+        totalAmount,
+        mapIframe: mapIframe || "",
+        attendanceCloseHours,
+        sufficientPlayerCount: sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
+        paidByMemberId: paidByMemberId || null,
+        kickoffTime: time,
+        teamCount: usesTeams ? teamCount : 1,
+        expenseItems,
+      };
+      const res = await apiRequest("POST", `/groups/${groupId}/templates`, payload);
+      toast({ title: "Đã lưu mẫu trận đấu thành công" });
+      setIsSaveTemplateOpen(false);
+      setNewTemplateName("");
+      await loadTemplates();
+      if (res?.id) setSelectedTemplateId(res.id);
+    } catch {
+      toast({ variant: "destructive", title: "Không thể lưu mẫu trận đấu" });
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId: string) => {
+    try {
+      await apiRequest("DELETE", `/groups/${groupId}/templates/${templateId}`);
+      toast({ title: "Đã xóa mẫu trận đấu" });
+      setSelectedTemplateId("");
+      await loadTemplates();
+    } catch {
+      toast({ variant: "destructive", title: "Không thể xóa mẫu" });
+    }
   };
 
   const fetchData = useCallback(async () => {
@@ -1313,6 +1402,90 @@ const SetupMatch = () => {
             </div>
           </div>
         </div>
+
+        {/* Template Selector Bar */}
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border bg-card/60 backdrop-blur-xs shadow-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium text-foreground flex items-center gap-1.5">
+              <BookmarkPlus className="h-4 w-4 text-primary" />
+              Mẫu cấu hình trận đấu:
+            </span>
+            <Select
+              value={selectedTemplateId || "none"}
+              onValueChange={(val) => {
+                if (val === "none") return;
+                const tpl = templates.find((t) => t.id === val);
+                if (tpl) applyTemplate(tpl);
+              }}
+            >
+              <SelectTrigger className="w-56 h-9">
+                <SelectValue placeholder="Chọn mẫu để điền nhanh..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">-- Chọn mẫu trận đấu --</SelectItem>
+                {templates.map((tpl) => (
+                  <SelectItem key={tpl.id} value={tpl.id}>
+                    {tpl.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsSaveTemplateOpen(true)}
+              className="gap-1.5"
+            >
+              <Save className="h-3.5 w-3.5" />
+              Lưu cấu hình hiện tại thành mẫu
+            </Button>
+            {selectedTemplateId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleDeleteTemplate(selectedTemplateId)}
+                className="text-destructive hover:text-destructive hover:bg-destructive/10 h-9 px-2"
+                title="Xóa mẫu đang chọn"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <Dialog open={isSaveTemplateOpen} onOpenChange={setIsSaveTemplateOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Lưu mẫu cấu hình trận đấu</DialogTitle>
+              <DialogDescription>
+                Lưu lại sân bóng, chi phí, giờ đá và các thông số hiện tại để áp dụng nhanh cho các trận sau hoặc lịch tự động.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="tpl-name">Tên mẫu trận đấu</Label>
+                <Input
+                  id="tpl-name"
+                  placeholder="VD: Sân Chảo Lửa 19h, Sân Celadon 20h30..."
+                  value={newTemplateName}
+                  onChange={(e) => setNewTemplateName(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsSaveTemplateOpen(false)}>
+                Hủy
+              </Button>
+              <Button onClick={handleSaveAsTemplate} disabled={!newTemplateName.trim() || isSavingTemplate}>
+                {isSavingTemplate && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Lưu mẫu
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Card className="mb-6 shadow-card">
           <CardHeader>

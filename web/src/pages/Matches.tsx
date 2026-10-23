@@ -50,6 +50,8 @@ import {
   Copy,
   Link as LinkIcon,
   ExternalLink,
+  QrCode,
+  CreditCard,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -92,6 +94,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -116,7 +120,7 @@ import { db } from "@/lib/firebase";
 import { cn, MATCH_TZ, formatMatchDateTime } from "@/lib/utils";
 import { aggregateLiveStats, AggregatedStat } from "@/lib/liveStats";
 import { useActionConfigs } from "@/hooks/useActionConfigs";
-import { postApiJson } from "@/lib/api";
+import { postApiJson, apiRequest } from "@/lib/api";
 import html2canvas from "html2canvas";
 
 interface Match {
@@ -137,6 +141,10 @@ interface Match {
   ratingsPublished?: boolean;
   venueName?: string;
   paidByMemberId?: string | null;
+  payoutStatus?: "COLLECTING" | "READY_FOR_PAYOUT" | "PAID_OUT";
+  paidOutAt?: Timestamp | string | null;
+  paidOutBy?: string | null;
+  payoutNote?: string | null;
   teamNames?: { [key: string]: string };
   teamsConfig?: {
     id: string;
@@ -244,10 +252,8 @@ const MatchListItem = ({
 
   const date = formatMatchDateTime(match.date);
 
-  const isFullyPaid =
-    !stats.isLoading &&
-    stats.totalShares > 0 &&
-    stats.paidCount === stats.totalShares;
+  const isPaidOut = match.payoutStatus === "PAID_OUT";
+  const isReadyForPayout = !isPaidOut && (isFullyPaid || stats.paidAmount >= match.totalAmount || match.payoutStatus === "READY_FOR_PAYOUT");
 
   return (
     <div
@@ -297,6 +303,21 @@ const MatchListItem = ({
             </p>
           </>
         )}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          {isPaidOut ? (
+            <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10", isSelected && "border-white/50 text-white bg-white/20")}>
+              ✓ Đã hoàn tiền ứng
+            </Badge>
+          ) : isReadyForPayout ? (
+            <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 border-sky-500/40 text-sky-600 dark:text-sky-400 bg-sky-500/10", isSelected && "border-white/50 text-white bg-white/20")}>
+              ⚡ Chờ hoàn tiền
+            </Badge>
+          ) : (
+            <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10", isSelected && "border-white/50 text-white bg-white/20")}>
+              Đang thu tiền
+            </Badge>
+          )}
+        </div>
       </button>
       <div className="flex items-center flex-shrink-0">
         <Tooltip>
@@ -399,6 +420,72 @@ const Matches = () => {
   const [isLiveStatsDialogOpen, setIsLiveStatsDialogOpen] = useState(false);
   const [isRatingsDialogOpen, setIsRatingsDialogOpen] = useState(false);
   const [isPosterDialogOpen, setIsPosterDialogOpen] = useState(false);
+  const [payoutFilter, setPayoutFilter] = useState<"ALL" | "UNPAID" | "PAID_OUT">("ALL");
+  const [payoutSettings, setPayoutSettings] = useState<{
+    bankBin?: string;
+    bankName?: string;
+    accountNumber?: string;
+    accountHolder?: string;
+    qrCodeUrl?: string;
+  } | null>(null);
+  const [isPayoutModalOpen, setIsPayoutModalOpen] = useState(false);
+  const [isUpdatingPayout, setIsUpdatingPayout] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (typeof apiRequest === "function") {
+      apiRequest("GET", `/groups/${groupId}/settings/payout`)
+        .then((data) => {
+          if (!cancelled && data) setPayoutSettings(data);
+        })
+        .catch(() => {});
+    }
+    return () => { cancelled = true; };
+  }, [groupId]);
+
+  const handleUpdatePayoutStatus = async (status: "PAID_OUT" | "COLLECTING") => {
+    if (!selectedMatchId) return;
+    setIsUpdatingPayout(true);
+    try {
+      await apiRequest("POST", `/groups/${groupId}/matches/${selectedMatchId}/payout`, {
+        payoutStatus: status,
+        note: status === "PAID_OUT" ? "Đã chuyển khoản hoàn tiền sân" : "",
+      });
+      toast({
+        title: status === "PAID_OUT" ? "Đã xác nhận hoàn tiền!" : "Đã hoàn tác trạng thái",
+        description: status === "PAID_OUT" ? "Trận đấu đã được đánh dấu là Đã hoàn tiền ứng." : "Trận đấu chuyển về trạng thái đang thu tiền.",
+      });
+      setMatches((current) =>
+        current.map((m) =>
+          m.id === selectedMatchId
+            ? {
+                ...m,
+                payoutStatus: status,
+                paidOutAt: status === "PAID_OUT" ? new Date().toISOString() : null,
+              }
+            : m
+        )
+      );
+      setIsPayoutModalOpen(false);
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Lỗi cập nhật",
+        description: "Không thể cập nhật trạng thái hoàn tiền.",
+      });
+    } finally {
+      setIsUpdatingPayout(false);
+    }
+  };
+
+  const displayedMatches = useMemo(() => {
+    if (payoutFilter === "PAID_OUT") return matches.filter((m) => m.payoutStatus === "PAID_OUT");
+    if (payoutFilter === "UNPAID") return matches.filter((m) => m.payoutStatus !== "PAID_OUT");
+    return matches;
+  }, [matches, payoutFilter]);
+
+  const unpaidCount = useMemo(() => matches.filter((m) => m.payoutStatus !== "PAID_OUT").length, [matches]);
+  const paidOutCount = useMemo(() => matches.filter((m) => m.payoutStatus === "PAID_OUT").length, [matches]);
   const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
   const [pendingSharesMap, setPendingSharesMap] = useState<
     Map<
@@ -1311,13 +1398,32 @@ const Matches = () => {
         <div className="grid min-h-0 flex-1 grid-rows-[minmax(10rem,30%)_minmax(0,1fr)] gap-4 lg:grid-cols-12 lg:grid-rows-1">
           <div className="min-h-0 min-w-0 lg:col-span-4 xl:col-span-3">
             <Card className="flex h-full min-h-0 flex-col shadow-card">
-              <CardHeader className="shrink-0 p-4">
-                <CardTitle>Danh sách trận đấu</CardTitle>
+              <CardHeader className="shrink-0 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Danh sách trận đấu</CardTitle>
+                </div>
+                <Select
+                  value={payoutFilter}
+                  onValueChange={(val: any) => setPayoutFilter(val)}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Lọc trạng thái hoàn tiền" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">Tất cả trận ({matches.length})</SelectItem>
+                    <SelectItem value="UNPAID">Chưa hoàn tiền ({unpaidCount})</SelectItem>
+                    <SelectItem value="PAID_OUT">Đã hoàn tiền ({paidOutCount})</SelectItem>
+                  </SelectContent>
+                </Select>
               </CardHeader>
               <CardContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-0" role="region" aria-label="Danh sách trận đấu" tabIndex={0}>
                 {isLoadingMatches ? (
                   <div className="p-6 text-center">
                     <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                  </div>
+                ) : displayedMatches.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-muted-foreground">
+                    Không có trận đấu nào trong bộ lọc này.
                   </div>
                 ) : (
                   <AlertDialog
@@ -1327,7 +1433,7 @@ const Matches = () => {
                     }
                   >
                     <div className="space-y-1 p-2">
-                      {matches.map((match) => (
+                      {displayedMatches.map((match) => (
                         <MatchListItem
                           key={match.id}
                           match={match}
@@ -2427,9 +2533,9 @@ const Matches = () => {
                     </CardContent>
                   </Card>
                 </div>
-                {(selectedMatch?.venueName || selectedMatch?.paidByMemberId) && (
-                  <Card className="shadow-card mb-6 bg-muted/30">
-                    <CardContent className="pt-6 flex flex-wrap gap-x-8 gap-y-3">
+                <Card className="shadow-card mb-6 bg-muted/30">
+                  <CardContent className="pt-6 flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
                       {selectedMatch.venueName && (
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-muted-foreground">
@@ -2440,24 +2546,167 @@ const Matches = () => {
                           </span>
                         </div>
                       )}
-                      {selectedMatch.paidByMemberId && (
-                        <div className="flex items-center gap-2">
-                          <DollarSign className="h-4 w-4 text-amber-600" />
-                          <span className="text-sm text-muted-foreground">
-                            Người ứng tiền sân:
-                          </span>
-                          <Badge
-                            variant="secondary"
-                            className="bg-amber-100 text-amber-800 hover:bg-amber-100"
-                          >
-                            {members.get(selectedMatch.paidByMemberId) ||
-                              "Không rõ"}
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="h-4 w-4 text-amber-600" />
+                        <span className="text-sm text-muted-foreground">
+                          Người ứng tiền sân:
+                        </span>
+                        <Badge
+                          variant="secondary"
+                          className="bg-amber-100 text-amber-800 hover:bg-amber-100"
+                        >
+                          {selectedMatch.paidByMemberId
+                            ? members.get(selectedMatch.paidByMemberId) || "Không rõ"
+                            : group?.ownerDisplayName || "Người ứng nhóm"}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">
+                          Trạng thái hoàn tiền:
+                        </span>
+                        {selectedMatch.payoutStatus === "PAID_OUT" ? (
+                          <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30">
+                            ✓ Đã hoàn tiền ứng
                           </Badge>
+                        ) : paidAmount >= totalAmount ? (
+                          <Badge className="bg-sky-500/15 text-sky-700 dark:text-sky-400 border-sky-500/30">
+                            ⚡ Sẵn sàng hoàn tiền
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30">
+                            Đang thu tiền
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setIsPayoutModalOpen(true)}
+                      className="gap-1.5"
+                    >
+                      <QrCode className="h-4 w-4 text-primary" />
+                      Hoàn tiền ứng sân
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                {/* Reimbursement & VietQR Payout Dialog */}
+                <Dialog open={isPayoutModalOpen} onOpenChange={setIsPayoutModalOpen}>
+                  <DialogContent className="max-w-md">
+                    <DialogHeader>
+                      <div className="flex items-center gap-2">
+                        <CreditCard className="h-5 w-5 text-primary" />
+                        <DialogTitle>Hoàn tiền ứng sân cho trận đấu</DialogTitle>
+                      </div>
+                      <DialogDescription>
+                        Thông tin tài khoản ngân hàng và mã VietQR để người quản lý hoặc thủ quỹ hoàn trả tiền sân cho người đã ứng.
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                      <div className="p-3 bg-muted/40 rounded-lg space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Người ứng tiền:</span>
+                          <span className="font-semibold">
+                            {selectedMatch?.paidByMemberId
+                              ? members.get(selectedMatch.paidByMemberId) || "Thành viên nhóm"
+                              : group?.ownerDisplayName || "Người ứng tiền nhóm"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Tiền sân cần hoàn:</span>
+                          <span className="font-bold text-base text-primary">
+                            {selectedMatch?.totalAmount.toLocaleString()} VND
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Tiền đã thu được:</span>
+                          <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                            {paidAmount.toLocaleString()} VND ({totalAmount > 0 ? Math.round((paidAmount / totalAmount) * 100) : 0}%)
+                          </span>
+                        </div>
+                      </div>
+
+                      {payoutSettings?.bankBin && payoutSettings?.accountNumber ? (
+                        <div className="flex flex-col items-center gap-3 p-4 border rounded-xl bg-card">
+                          <img
+                            src={
+                              payoutSettings.qrCodeUrl ||
+                              `https://img.vietqr.io/image/${payoutSettings.bankBin}-${payoutSettings.accountNumber}-compact.png?amount=${
+                                selectedMatch?.totalAmount || 0
+                              }&addInfo=${encodeURIComponent(
+                                `HOAN TIEN SAN ${selectedMatch?.id.slice(0, 8)}`
+                              )}&accountName=${encodeURIComponent(payoutSettings.accountHolder || "")}`
+                            }
+                            alt="VietQR Payout"
+                            className="w-48 h-48 object-contain rounded-lg bg-white p-2 border shadow-xs"
+                          />
+                          <div className="w-full text-center space-y-1">
+                            <p className="font-medium text-foreground">{payoutSettings.bankName}</p>
+                            <div className="flex items-center justify-center gap-2">
+                              <span className="font-mono font-bold text-lg text-primary">{payoutSettings.accountNumber}</span>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                title="Sao chép số tài khoản"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(payoutSettings.accountNumber || "");
+                                  toast({ title: "Đã sao chép số tài khoản" });
+                                }}
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground uppercase">{payoutSettings.accountHolder}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-4 border border-dashed rounded-lg text-center text-sm text-muted-foreground">
+                          <p>Chưa cấu hình tài khoản nhận hoàn tiền cho nhóm.</p>
+                          <p className="text-xs mt-1">Vui lòng vào trang <strong>Cấu hình</strong> để cập nhật số tài khoản & VietQR.</p>
                         </div>
                       )}
-                    </CardContent>
-                  </Card>
-                )}
+
+                      {selectedMatch?.payoutStatus === "PAID_OUT" ? (
+                        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-center space-y-2">
+                          <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400 flex items-center justify-center gap-1.5">
+                            <CheckCircle2 className="h-4 w-4" />
+                            Trận đấu này đã được xác nhận hoàn tiền ứng!
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-xs"
+                            onClick={() => handleUpdatePayoutStatus("COLLECTING")}
+                            disabled={isUpdatingPayout}
+                          >
+                            Hoàn tác trạng thái về Chưa hoàn
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
+                          onClick={() => handleUpdatePayoutStatus("PAID_OUT")}
+                          disabled={isUpdatingPayout}
+                        >
+                          {isUpdatingPayout ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                          )}
+                          Xác nhận đã chuyển khoản hoàn tiền sân
+                        </Button>
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsPayoutModalOpen(false)}>
+                        Đóng
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
                 {hasFeature(groupId, group, "ratings") && (<Card className="shadow-card mb-6">
                   <CardHeader className="flex flex-row items-center justify-between pb-2">
                     <div>

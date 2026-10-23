@@ -56,24 +56,79 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     res.status(204).send();
   }));
   router.get("/groups", requirePlatform, wrap(async (req, res) => {
-    let documents, memberships = [];
-    if (req.platform.role === "owner") documents = (await db.collection("groups").get()).docs;
-    else {
+    let documents = [], memberships = [];
+    if (req.platform.role === "owner") {
+      documents = (await db.collection("groups").get()).docs;
+    } else {
       memberships = (await db.collection("groupMembers").where("uid", "==", req.uid).get()).docs.map((doc) => doc.data());
-      const refs = memberships.map((member) => db.collection("groups").doc(member.groupId));
-      documents = refs.length ? await db.getAll(...refs) : [];
+      const ownedDocs = (await db.collection("groups").where("ownerUid", "==", req.uid).get()).docs;
+      const memberRefs = memberships.map((member) => db.collection("groups").doc(member.groupId));
+      const memberDocs = memberRefs.length ? await db.getAll(...memberRefs) : [];
+      const map = new Map();
+      ownedDocs.forEach((d) => map.set(d.id, d));
+      memberDocs.forEach((d) => { if (d.exists) map.set(d.id, d); });
+      documents = Array.from(map.values());
     }
-    const groups = documents.filter((doc) => doc.exists).map((doc) => {
-      const { name, sport, status } = doc.data();
-      return { id: doc.id, name, sport, status, role: req.platform.role === "owner" ? "owner" : memberships.find((member) => member.groupId === doc.id)?.role };
-    });
+    const groups = documents
+      .filter((doc) => doc.exists && doc.data().status !== "deleted")
+      .map((doc) => {
+        const data = doc.data();
+        const role = req.platform.role === "owner"
+          ? "owner"
+          : (data.ownerUid === req.uid ? "owner" : (memberships.find((m) => m.groupId === doc.id)?.role || "manager"));
+        return {
+          id: doc.id,
+          name: data.name,
+          sport: data.sport,
+          status: data.status,
+          ownerUid: data.ownerUid || null,
+          ownerDisplayName: data.ownerDisplayName || null,
+          ownerEmail: data.ownerEmail || null,
+          role,
+        };
+      });
     groups.sort((a, b) => a.name.localeCompare(b.name));
     res.json(groups);
   }));
+
   router.post("/groups", requirePlatform, wrap(async (req, res) => {
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
     if (name.length < 2 || name.length > 60) return res.status(400).json({ error: "INVALID_NAME" });
     if (!isValidSport(req.body.sport)) return res.status(400).json({ error: "INVALID_SPORT" });
+
+    const rawSlug = typeof req.body.id === "string" ? req.body.id.trim().toLowerCase() : (typeof req.body.slug === "string" ? req.body.slug.trim().toLowerCase() : null);
+    if (rawSlug) {
+      if (!isValidGroupId(rawSlug) || ["admin", "public", "platform", "api", "login"].includes(rawSlug)) {
+        return res.status(400).json({ error: "INVALID_GROUP_ID" });
+      }
+      const ref = db.collection("groups").doc(rawSlug);
+      const existing = await ref.get();
+      if (existing.exists) return res.status(409).json({ error: "GROUP_ID_EXISTS" });
+
+      const timestamps = { createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
+      await db.runTransaction(async (transaction) => {
+        transaction.set(ref, {
+          name,
+          sport: req.body.sport,
+          ownerUid: req.uid,
+          ownerEmail: req.email || "",
+          ownerDisplayName: req.platform.displayName || req.email || "",
+          status: "active",
+          payoutEnabled: false,
+          createdBy: req.uid,
+          ...timestamps,
+        });
+        transaction.set(db.collection("groupMembers").doc(`${rawSlug}_${req.uid}`), {
+          groupId: rawSlug,
+          uid: req.uid,
+          role: "manager",
+          tabs: [],
+          ...timestamps,
+        });
+      });
+      return res.status(201).json({ id: rawSlug });
+    }
+
     const id = await db.runTransaction(async (transaction) => {
       for (let attempt = 0; attempt < 5; attempt++) {
         const suffix = Array.from({ length: 4 }, () => randomInt(36).toString(36)).join("");
@@ -81,8 +136,24 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         const ref = db.collection("groups").doc(gid);
         if ((await transaction.get(ref)).exists) continue;
         const timestamps = { createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() };
-        transaction.set(ref, { name, sport: req.body.sport, ownerUid: req.uid, status: "active", payoutEnabled: false, createdBy: req.uid, ...timestamps });
-        transaction.set(db.collection("groupMembers").doc(`${gid}_${req.uid}`), { groupId: gid, uid: req.uid, role: "manager", tabs: [], ...timestamps });
+        transaction.set(ref, {
+          name,
+          sport: req.body.sport,
+          ownerUid: req.uid,
+          ownerEmail: req.email || "",
+          ownerDisplayName: req.platform.displayName || req.email || "",
+          status: "active",
+          payoutEnabled: false,
+          createdBy: req.uid,
+          ...timestamps,
+        });
+        transaction.set(db.collection("groupMembers").doc(`${gid}_${req.uid}`), {
+          groupId: gid,
+          uid: req.uid,
+          role: "manager",
+          tabs: [],
+          ...timestamps,
+        });
         return gid;
       }
       return null;
@@ -90,6 +161,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     if (!id) return res.status(503).json({ error: "GROUP_ID_COLLISION" });
     res.status(201).json({ id });
   }));
+
   router.patch("/groups/:groupId", requireGroupRole({ manager: true }), wrap(async (req, res) => {
     if (!isValidGroupId(req.params.groupId)) return res.status(400).json({ error: "INVALID_GROUP" });
     const { name, sport, status } = req.body;
@@ -102,6 +174,78 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     await ref.update({ ...(name !== undefined ? { name: name.trim() } : {}), ...(sport !== undefined ? { sport } : {}), ...(status !== undefined ? { status } : {}), updatedAt: FieldValue.serverTimestamp() });
     res.json({ id: req.params.groupId });
   }));
+
+  router.delete("/groups/:groupId", requirePlatform, requireGroupRole({ manager: true }), wrap(async (req, res) => {
+    if (!isValidGroupId(req.params.groupId)) return res.status(400).json({ error: "INVALID_GROUP" });
+    const ref = db.collection("groups").doc(req.params.groupId);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: "NOT_FOUND" });
+    const groupData = snap.data();
+    const isOwner = req.platform?.role === "owner" || groupData.ownerUid === req.uid;
+    if (!isOwner) return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
+
+    await ref.update({
+      status: "deleted",
+      deletedAt: FieldValue.serverTimestamp(),
+      deletedBy: req.uid,
+    });
+    res.json({ ok: true, id: req.params.groupId });
+  }));
+
+  router.get("/groups/:groupId/co-managers", requirePlatform, requireGroupRole({ manager: true }), wrap(async (req, res) => {
+    const snap = await db.collection("groupMembers").where("groupId", "==", req.params.groupId).get();
+    const members = snap.docs.map((d) => d.data());
+    res.json(members);
+  }));
+
+  router.post("/groups/:groupId/co-managers", requirePlatform, requireGroupRole({ manager: true }), wrap(async (req, res) => {
+    const groupSnap = await db.collection("groups").doc(req.params.groupId).get();
+    if (!groupSnap.exists) return res.status(404).json({ error: "NOT_FOUND" });
+    const groupData = groupSnap.data();
+    const isOwner = req.platform?.role === "owner" || groupData.ownerUid === req.uid;
+    if (!isOwner) return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
+
+    const email = typeof req.body.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    if (!email) return res.status(400).json({ error: "INVALID_EMAIL" });
+    const role = ["manager", "admin"].includes(req.body.role) ? req.body.role : "manager";
+
+    const accSnap = await db.collection("platformAccounts").where("email", "==", email).get();
+    if (accSnap.empty) return res.status(404).json({ error: "ACCOUNT_NOT_FOUND" });
+    const targetAccount = accSnap.docs[0].data();
+    const targetUid = accSnap.docs[0].id;
+
+    const memberRef = db.collection("groupMembers").doc(`${req.params.groupId}_${targetUid}`);
+    const timestamps = { updatedAt: FieldValue.serverTimestamp() };
+    await memberRef.set({
+      groupId: req.params.groupId,
+      uid: targetUid,
+      email: targetAccount.email,
+      displayName: targetAccount.displayName || targetAccount.email,
+      role,
+      tabs: Array.isArray(req.body.tabs) ? req.body.tabs : [],
+      assignedBy: req.uid,
+      createdAt: FieldValue.serverTimestamp(),
+      ...timestamps,
+    }, { merge: true });
+
+    res.status(201).json({ ok: true, uid: targetUid });
+  }));
+
+  router.delete("/groups/:groupId/co-managers/:targetUid", requirePlatform, requireGroupRole({ manager: true }), wrap(async (req, res) => {
+    const groupSnap = await db.collection("groups").doc(req.params.groupId).get();
+    if (!groupSnap.exists) return res.status(404).json({ error: "NOT_FOUND" });
+    const groupData = groupSnap.data();
+    const isOwner = req.platform?.role === "owner" || groupData.ownerUid === req.uid;
+    if (!isOwner) return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
+
+    if (req.params.targetUid === groupData.ownerUid) {
+      return res.status(409).json({ error: "CANNOT_REMOVE_OWNER" });
+    }
+
+    await db.collection("groupMembers").doc(`${req.params.groupId}_${req.params.targetUid}`).delete();
+    res.json({ ok: true });
+  }));
+
   return router;
 }
 module.exports = { createPlatformRouter };

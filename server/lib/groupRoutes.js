@@ -35,6 +35,154 @@ function createGroupRouter({ db, auth, FieldValue, slack, env = process.env }) {
     if (result.error === "channel_not_found") return res.status(400).json({ error: "SLACK_CHANNEL_NOT_FOUND" });
     res.status(502).json({ error: "SLACK_ERROR", slackError: result.error });
   }));
+
+  // Payout Recipient Settings (VietQR / Bank Account)
+  const payoutRef = (gid) => db.collection("groups").doc(gid).collection("settings").doc("payout");
+  router.get("/:groupId/settings/payout", ...manager, wrap(async (req, res) => {
+    const snap = await payoutRef(req.params.groupId).get();
+    const data = snap.exists ? snap.data() : {};
+    res.json({
+      bankBin: data.bankBin || "",
+      bankName: data.bankName || "",
+      accountNumber: data.accountNumber || "",
+      accountHolder: data.accountHolder || "",
+      qrCodeUrl: data.qrCodeUrl || "",
+    });
+  }));
+
+  router.put("/:groupId/settings/payout", ...manager, wrap(async (req, res) => {
+    const { bankBin, bankName, accountNumber, accountHolder, qrCodeUrl } = req.body;
+    await payoutRef(req.params.groupId).set({
+      bankBin: typeof bankBin === "string" ? bankBin.trim() : "",
+      bankName: typeof bankName === "string" ? bankName.trim() : "",
+      accountNumber: typeof accountNumber === "string" ? accountNumber.trim() : "",
+      accountHolder: typeof accountHolder === "string" ? accountHolder.trim().toUpperCase() : "",
+      qrCodeUrl: typeof qrCodeUrl === "string" ? qrCodeUrl.trim() : "",
+      updatedBy: req.uid,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    res.json({ ok: true });
+  }));
+
+  // Match Payout Settlement Status
+  router.post("/:groupId/matches/:matchId/payout", ...manager, wrap(async (req, res) => {
+    const matchRef = db.collection("matches").doc(req.params.matchId);
+    const snap = await matchRef.get();
+    if (!snap.exists) return res.status(404).json({ error: "MATCH_NOT_FOUND" });
+    const matchData = snap.data();
+    if (matchData.groupId && matchData.groupId !== req.params.groupId) {
+      return res.status(403).json({ error: "MATCH_WRONG_GROUP" });
+    }
+
+    const validStatuses = ["PAID_OUT", "READY_FOR_PAYOUT", "COLLECTING"];
+    const status = validStatuses.includes(req.body.payoutStatus) ? req.body.payoutStatus : "PAID_OUT";
+    const updateData = {
+      payoutStatus: status,
+      payoutNote: typeof req.body.note === "string" ? req.body.note.trim() : "",
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    if (status === "PAID_OUT") {
+      updateData.paidOutAt = FieldValue.serverTimestamp();
+      updateData.paidOutBy = req.uid;
+    } else {
+      updateData.paidOutAt = null;
+      updateData.paidOutBy = null;
+    }
+
+    await matchRef.update(updateData);
+    res.json({ ok: true, payoutStatus: status });
+  }));
+
+  // Match Templates CRUD
+  const templatesCol = (gid) => db.collection("groups").doc(gid).collection("templates");
+  router.get("/:groupId/templates", ...manager, wrap(async (req, res) => {
+    const snap = await templatesCol(req.params.groupId).get();
+    const templates = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    templates.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    res.json(templates);
+  }));
+
+  router.post("/:groupId/templates", ...manager, wrap(async (req, res) => {
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    if (!name) return res.status(400).json({ error: "INVALID_NAME" });
+
+    const templateId = req.body.id || templatesCol(req.params.groupId).doc().id;
+    const docRef = templatesCol(req.params.groupId).doc(templateId);
+    const payload = {
+      name,
+      venueName: typeof req.body.venueName === "string" ? req.body.venueName.trim() : "",
+      totalAmount: Number(req.body.totalAmount) || 0,
+      mapIframe: typeof req.body.mapIframe === "string" ? req.body.mapIframe.trim() : "",
+      attendanceCloseHours: req.body.attendanceCloseHours !== undefined ? Number(req.body.attendanceCloseHours) : 12,
+      sufficientPlayerCount: req.body.sufficientPlayerCount ? Number(req.body.sufficientPlayerCount) : null,
+      paidByMemberId: req.body.paidByMemberId || null,
+      kickoffTime: typeof req.body.kickoffTime === "string" ? req.body.kickoffTime : "19:00",
+      teamCount: req.body.teamCount === 3 ? 3 : 2,
+      expenseItems: Array.isArray(req.body.expenseItems) ? req.body.expenseItems : [],
+      teamsConfig: Array.isArray(req.body.teamsConfig) ? req.body.teamsConfig : null,
+      updatedBy: req.uid,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    await docRef.set(payload, { merge: true });
+    res.status(201).json({ id: templateId, ...payload });
+  }));
+
+  router.delete("/:groupId/templates/:templateId", ...manager, wrap(async (req, res) => {
+    await templatesCol(req.params.groupId).doc(req.params.templateId).delete();
+    res.json({ ok: true });
+  }));
+
+  // Automated Scheduled Attendance Settings
+  const scheduleRef = (gid) => db.collection("groups").doc(gid).collection("settings").doc("schedule");
+  router.get("/:groupId/settings/schedule", ...manager, wrap(async (req, res) => {
+    const snap = await scheduleRef(req.params.groupId).get();
+    const data = snap.exists ? snap.data() : {};
+    res.json({
+      enabled: Boolean(data.enabled),
+      dayOfWeek: data.dayOfWeek !== undefined ? Number(data.dayOfWeek) : 2, // Tuesday default
+      createHour: data.createHour !== undefined ? Number(data.createHour) : 9, // 09:00 AM
+      matchDayOfWeek: data.matchDayOfWeek !== undefined ? Number(data.matchDayOfWeek) : 4, // Thursday
+      matchTime: data.matchTime || "19:00",
+      templateId: data.templateId || null,
+      lastTriggeredDate: data.lastTriggeredDate || null,
+      lastCreatedMatchId: data.lastCreatedMatchId || null,
+    });
+  }));
+
+  router.put("/:groupId/settings/schedule", ...manager, wrap(async (req, res) => {
+    const { enabled, dayOfWeek, createHour, matchDayOfWeek, matchTime, templateId } = req.body;
+    await scheduleRef(req.params.groupId).set({
+      enabled: Boolean(enabled),
+      dayOfWeek: Number(dayOfWeek ?? 2),
+      createHour: Number(createHour ?? 9),
+      matchDayOfWeek: Number(matchDayOfWeek ?? 4),
+      matchTime: typeof matchTime === "string" ? matchTime : "19:00",
+      templateId: templateId || null,
+      updatedBy: req.uid,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    res.json({ ok: true });
+  }));
+
+  router.post("/:groupId/settings/schedule/run-now", ...manager, wrap(async (req, res) => {
+    const { createMatchFromTemplate } = require("./scheduledMatches");
+    const scheduleSnap = await scheduleRef(req.params.groupId).get();
+    const schedule = scheduleSnap.exists ? scheduleSnap.data() : {};
+    const templateId = req.body.templateId || schedule.templateId || null;
+
+    const result = await createMatchFromTemplate({
+      db,
+      FieldValue,
+      groupId: req.params.groupId,
+      templateId,
+      creatorUid: req.uid,
+    });
+
+    res.status(201).json({ ok: true, matchId: result.matchId, date: result.date });
+  }));
+
   return router;
 }
 module.exports = { createGroupRouter };

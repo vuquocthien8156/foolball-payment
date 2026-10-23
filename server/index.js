@@ -890,9 +890,9 @@ apiRoutes.post("/notify/match-published", triggerAuth.requireUser, requireTrigge
     const groupId = groupIdOf(match);
     if (req.body.groupId && req.body.groupId !== groupId) return res.status(409).json({ error: "MIXED_GROUP" });
 
-    // Anti-duplicate notification check: do not resend if already published previously
-    if (match.wasPublished || match.publishedAt) {
-      console.log(`[notify/match-published] Match ${matchId} was already published, skipping duplicate notifications.`);
+    // Anti-duplicate notification check: do not resend if already notified previously
+    if (match.matchPublishedNotified) {
+      console.log(`[notify/match-published] Match ${matchId} was already notified, skipping duplicate notifications.`);
       return res.status(200).json({ success: true, skipped: true, reason: "ALREADY_PUBLISHED" });
     }
 
@@ -968,6 +968,8 @@ apiRoutes.post("/notify/match-published", triggerAuth.requireUser, requireTrigge
     }
 
     await matchSnap.ref.update({
+      matchPublishedNotified: true,
+      matchPublishedAt: FieldValue.serverTimestamp(),
       wasPublished: true,
       publishedAt: FieldValue.serverTimestamp(),
     });
@@ -2101,3 +2103,27 @@ exports.dailyAttendanceReminder = onSchedule(
     }
   }
 );
+
+/**
+ * Automated scheduled attendance match creation.
+ * Runs hourly to check if any active group has a scheduled match configured for today's day/hour.
+ */
+exports.autoScheduledMatchCreation = onSchedule(
+  {
+    schedule: "0 * * * *",
+    timeZone: TZ,
+  },
+  async () => {
+    const db = admin.firestore();
+    const { checkAndRunScheduledMatches } = require("./lib/scheduledMatches");
+    try {
+      const results = await checkAndRunScheduledMatches({ db, FieldValue, now: new Date() });
+      if (results.length > 0) {
+        console.log("[autoScheduledMatchCreation] processed results:", results);
+      }
+    } catch (err) {
+      console.error("[autoScheduledMatchCreation] failed", err);
+    }
+  }
+);
+

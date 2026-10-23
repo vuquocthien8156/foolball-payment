@@ -2,6 +2,8 @@
 
 ## Current group platform work
 
+Latest master plan: [Group Platform v4 — Multi-Tenant Ownership, Settlement & Automation](group-platform-v4-tenancy-settlement-automation.md) (2026-10-23) records the architecture for RBAC, custom group slugs, match settlement & payout workflow to managers, auto-attendance cron jobs, and multi-template configs.
+
 Production execution: [Group production rollout v1](group-production-rollout-v1.md)
 records the user's 2026-10-22 authorization, ordered tasks and live evidence.
 

@@ -4,6 +4,10 @@ async function resolveGroupRole(db, uid, gid) {
     if (account.data().status !== "active") return null;
     if (account.data().role === "owner") return { role: "owner", tabs: "*" };
   }
+  const group = await db.collection("groups").doc(gid).get();
+  if (group.exists && group.data().ownerUid === uid) {
+    return { role: "owner", tabs: "*" };
+  }
   const membership = await db.collection("groupMembers").doc(`${gid}_${uid}`).get();
   if (!membership.exists) return null;
   const data = membership.data();
