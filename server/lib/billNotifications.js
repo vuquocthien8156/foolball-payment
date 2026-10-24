@@ -3,14 +3,20 @@ const localDate = (date) => new Date(date.getTime() + 7 * 3600000).toISOString()
 const atHour = (date, hour) => Date.parse(`${date}T${String(hour).padStart(2, "0")}:00:00+07:00`);
 const plusDays = (date, days) => new Date(Date.parse(date) + days * 86400000).toISOString().slice(0, 10);
 
-function enqueueBillNotifications(tx, { db, groupId, billId, billingDate, dueDate, hour = 9, telegram, slack, now, existingIds = new Set() }) {
+function enqueueBillNotifications(tx, { db, groupId, billId, billingDate, dueDate, hour = 9, telegram, slack, now, existingIds = new Set(), reminderMode = "default" }) {
+  if (reminderMode === "none") return;
   const today = localDate(now);
   const schedule = [["opened", billingDate, now.getTime()], ["due", dueDate, atHour(dueDate, hour)], ["overdue", plusDays(dueDate, 3), atHour(plusDays(dueDate, 3), hour)]];
   for (const [provider, settings] of [["telegram", telegram], ["slack", slack]]) {
     if (!settings?.enabled) continue;
     const version = provider === "telegram" ? settings.version || 0 : settings.channelId;
     for (const [event, date, dueAt] of schedule) {
-      if (date < today || (provider === "telegram" && !(settings.events || []).includes(event))) continue;
+      if (date < today) continue;
+      if (provider === "telegram") {
+        if (reminderMode === "bill_only" && event !== "opened") continue;
+        if (reminderMode === "full" && !["opened", "due", "overdue"].includes(event)) continue;
+        if ((reminderMode === "default" || !reminderMode) && !(settings.events || []).includes(event)) continue;
+      }
       const id = `${groupId}_${billId}_${provider}_${event}_${version}`;
       if (existingIds.has(id)) continue;
       tx.set(db.doc(`billNotificationJobs/${id}`), { groupId, billId, provider, event, scheduledDate: date, dueAt,
@@ -27,7 +33,7 @@ async function ensureBillNotifications({ db, groupId, now }) {
     const jobs = await tx.get(db.collection("billNotificationJobs").where("groupId", "==", groupId).where("billId", "==", bill.id));
     const data = current.data();
     enqueueBillNotifications(tx, { db, groupId, billId: bill.id, billingDate: data.billingDate, dueDate: data.dueDate,
-      hour: data.reminderHour ?? 9, telegram: telegram.data(), slack: slack.data(), now, existingIds: new Set(jobs.docs.map((job) => job.id)) });
+      hour: data.reminderHour ?? 9, reminderMode: data.reminderMode || "default", telegram: telegram.data(), slack: slack.data(), now, existingIds: new Set(jobs.docs.map((job) => job.id)) });
   });
 }
 

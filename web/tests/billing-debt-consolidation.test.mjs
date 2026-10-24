@@ -118,3 +118,61 @@ test("two-tier reconciliation settlement flow", async () => {
   const afterTier2 = await service.detail("team", "bill-1");
   assert.equal(afterTier2.reconciliation.tier2Payout.status, "SETTLED");
 });
+
+test("per-bill reminderMode controls notification scheduling", async () => {
+  const fake = createFakeFirestore({
+    "groups/team": { name: "Team", kind: "shared_bills", status: "active", ownerUid: "superadmin_uid" },
+    "groups/team/settings/telegram": { enabled: true, version: 1, events: ["opened", "due", "overdue"] },
+    "groups/team/settings/slack": { enabled: false },
+    "platformAccounts/superadmin_uid": { role: "owner" },
+    "members/payer": { name: "Payer", groupId: "team" },
+    "members/other": { name: "Other", groupId: "team" },
+  });
+
+  const service = createBillService({
+    ...fake,
+    now: () => new Date("2026-11-01T08:00:00+07:00"),
+  });
+
+  // 1. Bill with reminderMode: "none"
+  await service.create({
+    groupId: "team",
+    billId: "bill-silent",
+    actorUid: "superadmin_uid",
+    input: {
+      title: "Silent Bill",
+      amountVnd: 100000,
+      settlementMode: "full_collection",
+      reminderMode: "none",
+      participantIds: ["payer", "other"],
+      providerPayerMemberId: "payer",
+      billingDate: "2026-11-01",
+      dueDate: "2026-11-05",
+    },
+  });
+
+  const silentJobs = [...fake.records.keys()].filter((k) => k.startsWith("billNotificationJobs/team_bill-silent"));
+  assert.equal(silentJobs.length, 0, "Silent bill should have 0 notification jobs");
+
+  // 2. Bill with reminderMode: "bill_only"
+  await service.create({
+    groupId: "team",
+    billId: "bill-only",
+    actorUid: "superadmin_uid",
+    input: {
+      title: "Bill Only",
+      amountVnd: 100000,
+      settlementMode: "full_collection",
+      reminderMode: "bill_only",
+      participantIds: ["payer", "other"],
+      providerPayerMemberId: "payer",
+      billingDate: "2026-11-01",
+      dueDate: "2026-11-05",
+    },
+  });
+
+  const billOnlyJobs = [...fake.records.keys()].filter((k) => k.startsWith("billNotificationJobs/team_bill-only"));
+  assert.equal(billOnlyJobs.length, 1, "bill_only should only schedule opened job");
+  assert.ok(billOnlyJobs[0].includes("_opened_"), "Job should be opened event");
+});
+

@@ -46,9 +46,16 @@ function createSubscriptionService({ db, FieldValue }) {
       if (members.some((m) => !m.exists || groupIdOf(m.data()) !== gid || m.data().inactive)) reject(400, "INVALID_PARTICIPANTS");
       splitBill({ amountVnd: input.amountVnd, participants: members.map((m) => ({ id: m.id, name: m.data().name })), providerPayerMemberId: input.providerPayerMemberId });
       const prior = existing.data();
+      const reminderMode = ["default", "bill_only", "full", "none"].includes(input.reminderMode)
+        ? input.reminderMode
+        : (prior?.reminderMode || "default");
+      const settlementMode = ["full_collection", "net_offset"].includes(input.settlementMode)
+        ? input.settlementMode
+        : (prior?.settlementMode || "full_collection");
       tx.set(ref, { title: input.title.trim(), amountVnd: input.amountVnd, participantIds: input.participantIds,
         providerPayerMemberId: input.providerPayerMemberId, billingDay: input.billingDay, startMonth: input.startMonth,
         dueOffsetDays: input.dueOffsetDays, reminderHour: input.reminderHour, timeZone: "Asia/Ho_Chi_Minh",
+        reminderMode, settlementMode,
         revision: (prior?.revision || 0) + 1, enabled: prior ? prior.enabled : true,
         nextPeriod: prior?.nextPeriod || input.startMonth, createdBy: prior?.createdBy || actorUid,
         createdAt: prior?.createdAt || FieldValue.serverTimestamp(), updatedBy: actorUid, updatedAt: FieldValue.serverTimestamp(), lastError: null });

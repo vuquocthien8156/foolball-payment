@@ -54,6 +54,8 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
     const title = typeof input.title === "string" ? input.title.trim() : "";
     if (!title || title.length > 100) reject(400, "INVALID_TITLE");
     if (input.reminderHour !== undefined && (!Number.isInteger(input.reminderHour) || input.reminderHour < 0 || input.reminderHour > 23)) reject(400, "INVALID_REMINDER_HOUR");
+    if (input.reminderMode !== undefined && !["default", "bill_only", "full", "none"].includes(input.reminderMode)) reject(400, "INVALID_REMINDER_MODE");
+    const reminderMode = ["default", "bill_only", "full", "none"].includes(input.reminderMode) ? input.reminderMode : "default";
     const billingDate = requireDate(input.billingDate), dueDate = requireDate(input.dueDate);
     if (dueDate < billingDate) reject(400, "INVALID_DUE_DATE");
     if (!Array.isArray(input.participantIds) || input.participantIds.length === 0 || input.participantIds.length > 50 ||
@@ -127,6 +129,7 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
 
       tx.set(ref, { groupId, title, amountVnd: input.amountVnd, currency: "VND", billingDate, dueDate,
         reminderHour: input.reminderHour ?? 9,
+        reminderMode,
         settlementMode,
         reconciliation,
         providerPayerMemberId: input.providerPayerMemberId, source: occurrence ? "subscription" : "one_time",
@@ -139,7 +142,7 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
       });
       tx.set(ref.collection("events").doc("created"), { type: "created", actorUid, amountVnd: input.amountVnd, createdAt: timestamp });
       if (subscriptionRef) tx.update(subscriptionRef, { nextPeriod: occurrence.nextPeriod, lastError: null, lastGeneratedBillId: ref.id, lastGeneratedAt: timestamp });
-      enqueueBillNotifications(tx, { db, groupId, billId, billingDate, dueDate, hour: input.reminderHour ?? 9, telegram: telegram.data(), slack: slack.data(), now: now() });
+      enqueueBillNotifications(tx, { db, groupId, billId, billingDate, dueDate, hour: input.reminderHour ?? 9, reminderMode, telegram: telegram.data(), slack: slack.data(), now: now() });
       return { id: ref.id, duplicate: false };
     });
   }

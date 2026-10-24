@@ -13,6 +13,10 @@ import {
   Activity,
   Menu,
   Settings,
+  Repeat,
+  Receipt,
+  Bell,
+  History,
 } from "lucide-react";
 import {
   Card,
@@ -75,7 +79,7 @@ const AdminLayout = () => {
 
     const currentPath = window.location.pathname;
     if (currentPath === groupPath("admin") || currentPath === groupPath("admin/")) {
-      if (sharedBills) { if (isSuperAdmin) navigate(groupPath("admin/bills"), { replace: true }); return; }
+      if (sharedBills) { if (isSuperAdmin) navigate(groupPath("admin/bills?tab=recurring"), { replace: true }); return; }
       const tabRoutes = [
         { key: "matches", path: groupPath("admin/matches") },
         { key: "members", path: groupPath("admin/members") },
@@ -156,10 +160,64 @@ const AdminLayout = () => {
                 </NavLink>
               )} */}
               {account && <NavLink to="/platform" className="text-sm underline">Nền tảng</NavLink>}
-              {sharedBills && isSuperAdmin ? <>
-                <NavLink to={groupPath("admin/bills")} className="rounded-md px-3 py-2">Khoản thu</NavLink>
-                <NavLink to={groupPath("admin/bill-history")} className="rounded-md px-3 py-2">Lịch sử</NavLink>
-              </> : null}
+              {sharedBills && isSuperAdmin ? (
+                <>
+                  <NavLink
+                    to={groupPath("admin/bills?tab=recurring")}
+                    onClick={() => setIsSidebarOpen(false)}
+                    className={() =>
+                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
+                        pathname === groupPath("admin/bills") && (!location.search || location.search.includes("tab=recurring"))
+                          ? "bg-muted text-primary font-medium"
+                          : ""
+                      }`
+                    }
+                  >
+                    <Repeat className="h-4 w-4" />
+                    Thu định kỳ
+                  </NavLink>
+                  <NavLink
+                    to={groupPath("admin/bills?tab=monthly")}
+                    onClick={() => setIsSidebarOpen(false)}
+                    className={() =>
+                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
+                        pathname === groupPath("admin/bills") && location.search.includes("tab=monthly")
+                          ? "bg-muted text-primary font-medium"
+                          : ""
+                      }`
+                    }
+                  >
+                    <Receipt className="h-4 w-4" />
+                    Kỳ thu & Một lần
+                  </NavLink>
+                  <NavLink
+                    to={groupPath("admin/bills?tab=reminders")}
+                    onClick={() => setIsSidebarOpen(false)}
+                    className={() =>
+                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
+                        pathname === groupPath("admin/bills") && location.search.includes("tab=reminders")
+                          ? "bg-muted text-primary font-medium"
+                          : ""
+                      }`
+                    }
+                  >
+                    <Bell className="h-4 w-4" />
+                    Nhắc nợ tự động
+                  </NavLink>
+                  <NavLink
+                    to={groupPath("admin/bill-history")}
+                    onClick={() => setIsSidebarOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
+                        isActive ? "bg-muted text-primary font-medium" : ""
+                      }`
+                    }
+                  >
+                    <History className="h-4 w-4" />
+                    Lịch sử thanh toán
+                  </NavLink>
+                </>
+              ) : null}
               {!sharedBills && (isSuperAdmin || allowedTabs.has("matches")) && (
                 <>
                   <NavLink

@@ -15,6 +15,7 @@ interface BillFormProps {
 export function BillForm({ members, busy, recurring = false, initial, onSave }: BillFormProps): JSX.Element {
   const [input, setInput] = useState<SubscriptionInput>({ title: "", amountVnd: 260000, participantIds: [], providerPayerMemberId: "",
     settlementMode: "full_collection",
+    reminderMode: "default",
     billingDate: "", dueDate: "", billingDay: 1, startMonth: "", dueOffsetDays: 3, reminderHour: 9, ...initial });
   const active = members.filter((member) => !member.inactive || input.participantIds.includes(member.id));
   const count = input.participantIds.length;
@@ -65,14 +66,72 @@ export function BillForm({ members, busy, recurring = false, initial, onSave }: 
         </label>
       </div>
     </div>
+    <div className="space-y-2">
+      <Label>Chế độ nhắc nợ Telegram cho khoản thu này</Label>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className={`flex items-start gap-2.5 rounded-lg border p-2.5 cursor-pointer text-xs ${(!input.reminderMode || input.reminderMode === "default") ? "border-primary bg-primary/5" : "bg-card"}`}>
+          <input
+            type="radio"
+            name="reminderMode"
+            className="mt-0.5"
+            checked={!input.reminderMode || input.reminderMode === "default"}
+            onChange={() => setField("reminderMode", "default")}
+          />
+          <div>
+            <p className="font-medium text-sm">Theo mặc định của nhóm</p>
+            <p className="text-muted-foreground">Dùng chế độ thông báo chung được cài đặt trong nhóm.</p>
+          </div>
+        </label>
+        <label className={`flex items-start gap-2.5 rounded-lg border p-2.5 cursor-pointer text-xs ${input.reminderMode === "bill_only" ? "border-primary bg-primary/5" : "bg-card"}`}>
+          <input
+            type="radio"
+            name="reminderMode"
+            className="mt-0.5"
+            checked={input.reminderMode === "bill_only"}
+            onChange={() => setField("reminderMode", "bill_only")}
+          />
+          <div>
+            <p className="font-medium text-sm">Chỉ gửi 1 lần khi có Bill</p>
+            <p className="text-muted-foreground">Chỉ báo lúc mở bill (kèm nợ cũ), không gửi nhắc lặp lại.</p>
+          </div>
+        </label>
+        <label className={`flex items-start gap-2.5 rounded-lg border p-2.5 cursor-pointer text-xs ${input.reminderMode === "full" ? "border-primary bg-primary/5" : "bg-card"}`}>
+          <input
+            type="radio"
+            name="reminderMode"
+            className="mt-0.5"
+            checked={input.reminderMode === "full"}
+            onChange={() => setField("reminderMode", "full")}
+          />
+          <div>
+            <p className="font-medium text-sm">Nhắc nhở đầy đủ</p>
+            <p className="text-muted-foreground">Gửi lúc mở bill + ngày đến hạn + nhắc quá hạn 3 ngày.</p>
+          </div>
+        </label>
+        <label className={`flex items-start gap-2.5 rounded-lg border p-2.5 cursor-pointer text-xs ${input.reminderMode === "none" ? "border-primary bg-primary/5" : "bg-card"}`}>
+          <input
+            type="radio"
+            name="reminderMode"
+            className="mt-0.5"
+            checked={input.reminderMode === "none"}
+            onChange={() => setField("reminderMode", "none")}
+          />
+          <div>
+            <p className="font-medium text-sm">Tắt thông báo</p>
+            <p className="text-muted-foreground">Không gửi bất kỳ tin nhắn Telegram tự động nào.</p>
+          </div>
+        </label>
+      </div>
+    </div>
     {recurring ? <div className="grid gap-4 sm:grid-cols-2">
       <div><Label htmlFor="subscription-month">Tháng bắt đầu thu</Label><Input id="subscription-month" type="month" value={input.startMonth} onChange={(event) => setField("startMonth", event.target.value)} required /></div>
       <div><Label htmlFor="subscription-day">Ngày thu hằng tháng</Label><Input id="subscription-day" type="number" min={1} max={31} value={input.billingDay} onChange={(event) => setField("billingDay", Number(event.target.value))} required /></div>
       <div><Label htmlFor="subscription-due">Số ngày chờ thanh toán</Label><Input id="subscription-due" type="number" min={0} max={30} value={input.dueOffsetDays} onChange={(event) => setField("dueOffsetDays", Number(event.target.value))} required /></div>
       <div><Label htmlFor="subscription-hour">Giờ nhắc thanh toán (giờ Việt Nam)</Label><Input id="subscription-hour" type="number" min={0} max={23} value={input.reminderHour} onChange={(event) => setField("reminderHour", Number(event.target.value))} required /></div>
-    </div> : <div className="grid gap-4 sm:grid-cols-2">
+    </div> : <div className="grid gap-4 sm:grid-cols-3">
       <div><Label htmlFor="bill-date">Ngày lập khoản thu</Label><Input id="bill-date" type="date" value={input.billingDate} onChange={(event) => setField("billingDate", event.target.value)} required /></div>
       <div><Label htmlFor="bill-due">Hạn thanh toán</Label><Input id="bill-due" type="date" min={input.billingDate} value={input.dueDate} onChange={(event) => setField("dueDate", event.target.value)} required /></div>
+      <div><Label htmlFor="bill-hour">Giờ nhắc (giờ VN)</Label><Input id="bill-hour" type="number" min={0} max={23} value={input.reminderHour ?? 9} onChange={(event) => setField("reminderHour", Number(event.target.value))} required /></div>
     </div>}
     {count > 0 && amount >= count ? <div className="rounded-lg bg-muted p-4 text-sm" role="status"><strong>{formatVnd(amount)} ÷ {count} người</strong><p>{formatVnd(Math.floor(amount / count))} mỗi người{amount % count ? `; ${amount % count} người trả thêm 1 VND.` : "."}</p><p className="mt-1 text-muted-foreground">Đây là bản xem trước. Hệ thống sẽ kiểm tra và lưu phần tiền chính xác khi xác nhận.</p></div> : null}
     <Button type="submit" disabled={busy || !valid}>{busy ? "Đang lưu…" : recurring ? "Lưu khoản thu định kỳ" : "Tạo khoản thu"}</Button>

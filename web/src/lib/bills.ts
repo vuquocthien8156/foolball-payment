@@ -7,6 +7,8 @@ export interface BillInput {
   billingDate: string;
   dueDate: string;
   settlementMode?: "full_collection" | "net_offset";
+  reminderMode?: "default" | "bill_only" | "full" | "none";
+  reminderHour?: number;
 }
 export interface SubscriptionInput extends BillInput {
   billingDay: number;
