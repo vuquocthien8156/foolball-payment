@@ -136,11 +136,16 @@ const GroupMembersPage = (): JSX.Element => {
   return groupKindOf(group) === "shared_bills" ? <SharedBillRoute><SharedBillMembers /></SharedBillRoute> : <Members />;
 };
 
-const PublicGroupOutlet = (): JSX.Element => {
+const SportsOnlyRoute = ({ children }: { children: JSX.Element }): JSX.Element => {
   const { group, loading } = useGroup();
-  const groupPath = useGroupPath();
   if (loading) return <LoadingSplash />;
-  return groupKindOf(group) === "shared_bills" ? <Navigate to={groupPath("admin")} replace /> : <Outlet />;
+  return groupKindOf(group) === "sports" ? children : <NotFound />;
+};
+
+const PublicGroupOutlet = (): JSX.Element => {
+  const { loading } = useGroup();
+  if (loading) return <LoadingSplash />;
+  return <Outlet />;
 };
 
 const App = () => {
@@ -173,10 +178,10 @@ const App = () => {
                 {/* Public Routes under /public */}
                 <Route path="public" element={<PublicGroupOutlet />}>
                   <Route index element={<PublicPortal />} />
-                  <Route path="pay" element={<Pay />} />
-                  <Route path="payment-success" element={<PaymentSuccess />} />
-                  <Route path="payment-cancel" element={<PaymentCancel />} />
-                  <Route path="attendance" element={<Attendance />} />
+                  <Route path="pay" element={<SportsOnlyRoute><Pay /></SportsOnlyRoute>} />
+                  <Route path="payment-success" element={<SportsOnlyRoute><PaymentSuccess /></SportsOnlyRoute>} />
+                  <Route path="payment-cancel" element={<SportsOnlyRoute><PaymentCancel /></SportsOnlyRoute>} />
+                  <Route path="attendance" element={<SportsOnlyRoute><Attendance /></SportsOnlyRoute>} />
                   <Route path="team-locked" element={<RequireFeature feature="teamPropose"><TeamLocked /></RequireFeature>} />
                   <Route path="ratings" element={<RequireFeature feature="ratings"><PublicRatings /></RequireFeature>} />
                 </Route>

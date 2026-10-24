@@ -60,6 +60,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { postApiJson, apiRequest } from "@/lib/api";
+import { MatchScheduleModal } from "@/components/matches/MatchScheduleModal";
 import {
   Dialog,
   DialogContent,
@@ -342,6 +343,7 @@ const SetupMatch = () => {
   const [templateMatchDay, setTemplateMatchDay] = useState(4);
   const [templateMatchTime, setTemplateMatchTime] = useState("19:00");
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
 
   const applyTemplate = useCallback((tpl: any) => {
     setSelectedTemplateId(tpl.id);
@@ -1680,7 +1682,19 @@ const SetupMatch = () => {
             </Select>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedTemplateId && (() => {
+              const cur = templates.find((t) => t.id === selectedTemplateId);
+              if (cur?.schedule?.enabled) {
+                return (
+                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded flex items-center gap-1 font-medium">
+                    <Clock className="h-3 w-3" />
+                    Tự động: Thứ {cur.schedule.dayOfWeek === 0 ? "CN" : cur.schedule.dayOfWeek + 1} lúc {cur.schedule.createHour}:00
+                  </span>
+                );
+              }
+              return null;
+            })()}
             {selectedTemplateId && (() => {
               const cur = templates.find((t) => t.id === selectedTemplateId);
               if (cur && !cur.isDefault) {
@@ -1698,6 +1712,15 @@ const SetupMatch = () => {
               }
               return null;
             })()}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsScheduleModalOpen(true)}
+              className="text-xs h-9 gap-1.5"
+            >
+              <Calendar className="h-3.5 w-3.5" />
+              Lịch tự động & Mẫu
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -1819,7 +1842,7 @@ const SetupMatch = () => {
                       </Select>
                     </div>
                     <div>
-                      <Label className="text-[11px]">Thứ đá trận</Label>
+                      <Label className="text-[11px]">{group?.sport === "badminton" ? "Thứ đánh cầu" : "Thứ đá trận"}</Label>
                       <Select
                         value={String(templateMatchDay)}
                         onValueChange={(v) => setTemplateMatchDay(Number(v))}
@@ -3329,6 +3352,13 @@ const SetupMatch = () => {
           </div>
         </div>
       </div>
+      <MatchScheduleModal
+        isOpen={isScheduleModalOpen}
+        onClose={() => {
+          setIsScheduleModalOpen(false);
+          void loadTemplates();
+        }}
+      />
     </div>
   );
 };

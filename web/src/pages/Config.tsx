@@ -458,145 +458,31 @@ const Config = () => {
         {sharedBills ? <Card className="mb-6"><CardHeader><CardTitle>Thu tiền hằng tháng và nhắc thanh toán</CardTitle><CardDescription>Mỗi khoản thu định kỳ có ngày thu, hạn thanh toán và giờ nhắc riêng. Hệ thống tự dừng nhắc khi đã thu đủ.</CardDescription></CardHeader><CardContent><Link className="text-sm underline" to={`/g/${groupId}/admin/subscriptions`}>Quản lý khoản thu định kỳ</Link></CardContent></Card> : null}
         {/* Automated Schedule Card */}
         {!sharedBills && <Card className="shadow-card mb-6">
-          <CardHeader>
+          <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Calendar className="h-5 w-5 text-primary" />
                 <CardTitle>Lịch tạo trận tự động & Điểm danh định kỳ</CardTitle>
               </div>
-              <Switch
-                checked={scheduleEnabled}
-                onCheckedChange={setScheduleEnabled}
-                aria-label="Bật tự động tạo trận"
-              />
+              <span className={`rounded px-2.5 py-0.5 text-xs font-semibold ${scheduleEnabled ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                {scheduleEnabled ? "Đang bật" : "Đang tắt"}
+              </span>
             </div>
             <CardDescription>
-              Hệ thống tự động tạo trận đấu mới ở trạng thái chờ điểm danh, thông báo lên Slack và tự động điểm danh các thành viên cố định.
+              Hệ thống tự động tạo trận đấu mới ở trạng thái chờ điểm danh, thông báo lên Slack/Telegram và tự động điểm danh các thành viên cố định.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {scheduleLoading ? (
-              <div className="flex items-center gap-2 text-muted-foreground p-4">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Đang tải cấu hình...</span>
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="schedule-day">Thứ tạo thông báo điểm danh</Label>
-                    <Select
-                      value={String(scheduleDayOfWeek)}
-                      onValueChange={(val) => setScheduleDayOfWeek(Number(val))}
-                      disabled={!scheduleEnabled}
-                    >
-                      <SelectTrigger id="schedule-day">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {DAYS_OF_WEEK.map((d) => (
-                          <SelectItem key={d.value} value={String(d.value)}>
-                            {d.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="schedule-hour">Giờ thông báo (sáng/chiều)</Label>
-                    <Select
-                      value={String(scheduleCreateHour)}
-                      onValueChange={(val) => setScheduleCreateHour(Number(val))}
-                      disabled={!scheduleEnabled}
-                    >
-                      <SelectTrigger id="schedule-hour">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Array.from({ length: 16 }, (_, i) => i + 7).map((h) => (
-                          <SelectItem key={h} value={String(h)}>
-                            {h < 10 ? `0${h}:00` : `${h}:00`}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="match-day">Thứ đá trận / thi đấu</Label>
-                    <Select
-                      value={String(scheduleMatchDayOfWeek)}
-                      onValueChange={(val) => setScheduleMatchDayOfWeek(Number(val))}
-                      disabled={!scheduleEnabled}
-                    >
-                      <SelectTrigger id="match-day">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {DAYS_OF_WEEK.map((d) => (
-                          <SelectItem key={d.value} value={String(d.value)}>
-                            {d.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="match-time">Giờ thi đấu (HH:mm)</Label>
-                    <Input
-                      id="match-time"
-                      type="time"
-                      value={scheduleMatchTime}
-                      onChange={(e) => setScheduleMatchTime(e.target.value)}
-                      disabled={!scheduleEnabled}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="template-select">Mẫu cấu hình trận đấu áp dụng</Label>
-                  <Select
-                    value={scheduleTemplateId || "default"}
-                    onValueChange={(val) => setScheduleTemplateId(val === "default" ? "" : val)}
-                    disabled={!scheduleEnabled}
-                  >
-                    <SelectTrigger id="template-select">
-                      <SelectValue placeholder="Chọn mẫu trận..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="default">Cấu hình tiêu chuẩn của nhóm</SelectItem>
-                      {templatesList.map((tpl) => (
-                        <SelectItem key={tpl.id} value={tpl.id}>
-                          {tpl.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {templatesList.length === 0 && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      💡 Mẹo: Bạn có thể lưu các mẫu sân khác nhau tại trang Tạo trận đấu.
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap gap-2 pt-2">
-                  <Button onClick={handleScheduleSave} disabled={scheduleSaving}>
-                    {scheduleSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                    Lưu lịch tự động
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={handleScheduleTestRun}
-                    disabled={scheduleTesting}
-                  >
-                    {scheduleTesting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
-                    Chạy thử tạo trận ngay
-                  </Button>
-                </div>
-              </>
-            )}
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
+              <p className="max-w-md">
+                💡 <strong>Quản lý trực tiếp trong Trận đấu:</strong> Bạn có thể cài đặt lịch mặc định của nhóm hoặc lịch tự động riêng biệt cho từng mẫu sân ({group?.sport === "badminton" ? "sân cầu lông" : "sân bóng"}) ngay trong Quản lý Trận đấu & Tạo trận.
+              </p>
+              <Button size="sm" asChild>
+                <Link to={`/g/${groupId}/admin/matches`}>
+                  Mở Quản lý Trận đấu →
+                </Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>}
 

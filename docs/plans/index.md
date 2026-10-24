@@ -4,6 +4,8 @@
 
 Latest master plan: [Group Platform v4 — Multi-Tenant Ownership, Settlement & Automation](group-platform-v4-tenancy-settlement-automation.md) (2026-10-23) records the architecture for RBAC, custom group slugs, match settlement & payout workflow to managers, auto-attendance cron jobs, and multi-template configs.
 
+Shared bills governance: [Shared Bills Settlement, Roles & Multi-Tier Payer Reconciliation](shared-bills-settlement-reconciliation-v1.md) (2026-10-24) records the two-tier settlement model (Super Admin -> Manager -> Member), gross collection vs net offset, and API contracts.
+
 Production execution: [Group production rollout v1](group-production-rollout-v1.md)
 records the user's 2026-10-22 authorization, ordered tasks and live evidence.
 

@@ -1,8 +1,10 @@
-import { groupIdOf, scopedKey } from "@/lib/groups";
+import { groupIdOf, scopedKey, groupKindOf } from "@/lib/groups";
 import { hasFeature } from "@/lib/features";
 import { useGroup, useGroupPath } from "@/contexts/GroupContext";
+import { getApiBaseUrl } from "@/lib/api";
 import {
   Card,
+  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
@@ -44,13 +46,19 @@ interface TopHighlight {
 
 const MIN_MVP_VOTES = 2;
 
-const SharedBillsPublicPortal = ({ groupId, group }: { groupId: string; group: any }) => {
+const SharedBillsPublicPortal = ({
+  groupId,
+  group,
+}: {
+  groupId: string;
+  group: any;
+}) => {
   const [data, setData] = useState<{ bills: any[]; payout: any } | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/public/${groupId}/shared-bills`)
+    fetch(`${getApiBaseUrl()}/public/${groupId}/shared-bills`)
       .then((res) => res.json())
       .then((res) => setData(res))
       .catch((e) => console.error(e))
@@ -72,8 +80,12 @@ const SharedBillsPublicPortal = ({ groupId, group }: { groupId: string; group: a
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-12">
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         <header className="text-center space-y-2">
-          <h1 className="text-3xl font-extrabold tracking-tight">{group?.name || "Chia sẻ chi phí"}</h1>
-          <p className="text-sm text-slate-500">Trang công khai theo dõi các khoản thu và thanh toán của nhóm.</p>
+          <h1 className="text-3xl font-extrabold tracking-tight">
+            {group?.name || "Chia sẻ chi phí"}
+          </h1>
+          <p className="text-sm text-slate-500">
+            Trang công khai theo dõi các khoản thu và thanh toán của nhóm.
+          </p>
         </header>
 
         {payout?.accountNumber ? (
@@ -84,7 +96,8 @@ const SharedBillsPublicPortal = ({ groupId, group }: { groupId: string; group: a
                 Thông tin chuyển khoản
               </CardTitle>
               <CardDescription>
-                Quét mã VietQR hoặc chuyển khoản trực tiếp theo thông tin bên dưới:
+                Quét mã VietQR hoặc chuyển khoản trực tiếp theo thông tin bên
+                dưới:
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -99,16 +112,23 @@ const SharedBillsPublicPortal = ({ groupId, group }: { groupId: string; group: a
                   </div>
                 ) : null}
                 <div className="space-y-2 text-sm text-center sm:text-left">
-                  <p><span className="text-slate-500">Ngân hàng:</span> <strong>{payout.bankName || payout.bankBin}</strong></p>
+                  <p>
+                    <span className="text-slate-500">Ngân hàng:</span>{" "}
+                    <strong>{payout.bankName || payout.bankBin}</strong>
+                  </p>
                   <p className="flex items-center justify-center sm:justify-start gap-2">
                     <span className="text-slate-500">Số tài khoản:</span>
-                    <strong className="font-mono text-base">{payout.accountNumber}</strong>
+                    <strong className="font-mono text-base">
+                      {payout.accountNumber}
+                    </strong>
                     <Button
                       size="sm"
                       variant="ghost"
                       className="h-7 px-2 text-xs"
                       onClick={() => {
-                        void navigator.clipboard.writeText(payout.accountNumber);
+                        void navigator.clipboard.writeText(
+                          payout.accountNumber,
+                        );
                         setCopied(true);
                         setTimeout(() => setCopied(false), 2000);
                       }}
@@ -116,8 +136,13 @@ const SharedBillsPublicPortal = ({ groupId, group }: { groupId: string; group: a
                       {copied ? "Đã chép" : "Sao chép"}
                     </Button>
                   </p>
-                  <p><span className="text-slate-500">Chủ tài khoản:</span> <strong>{payout.accountHolder || "—"}</strong></p>
-                  <p className="text-xs text-slate-400">Nội dung chuyển khoản: Tên của bạn + Tên khoản thu</p>
+                  <p>
+                    <span className="text-slate-500">Chủ tài khoản:</span>{" "}
+                    <strong>{payout.accountHolder || "—"}</strong>
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Nội dung chuyển khoản: Tên của bạn + Tên khoản thu
+                  </p>
                 </div>
               </div>
             </CardContent>
@@ -138,7 +163,10 @@ const SharedBillsPublicPortal = ({ groupId, group }: { groupId: string; group: a
                     <div>
                       <CardTitle className="text-lg">{bill.title}</CardTitle>
                       <CardDescription>
-                        Hạn thanh toán: <strong className="text-slate-700">{bill.dueDate}</strong>
+                        Hạn thanh toán:{" "}
+                        <strong className="text-slate-700">
+                          {bill.dueDate}
+                        </strong>
                       </CardDescription>
                     </div>
                     <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">
@@ -148,19 +176,34 @@ const SharedBillsPublicPortal = ({ groupId, group }: { groupId: string; group: a
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Danh sách thành viên:</p>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                      Danh sách thành viên:
+                    </p>
                     <div className="divide-y rounded-lg border bg-white">
                       {bill.allocations.map((a: any) => (
-                        <div key={a.id} className="flex items-center justify-between p-3 text-sm">
+                        <div
+                          key={a.id}
+                          className="flex items-center justify-between p-3 text-sm"
+                        >
                           <span className="font-medium">{a.name}</span>
                           <div className="flex items-center gap-3">
-                            <span className="font-mono">{a.amountVnd.toLocaleString("vi-VN")} VND</span>
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                              a.state === "paid" ? "bg-emerald-100 text-emerald-700" :
-                              a.state === "covered_by_payer" ? "bg-blue-100 text-blue-700" :
-                              "bg-amber-100 text-amber-700"
-                            }`}>
-                              {a.state === "paid" ? "Đã trả" : a.state === "covered_by_payer" ? "Đã tính phần ứng" : "Chưa trả"}
+                            <span className="font-mono">
+                              {a.amountVnd.toLocaleString("vi-VN")} VND
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                a.state === "paid"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : a.state === "covered_by_payer"
+                                    ? "bg-blue-100 text-blue-700"
+                                    : "bg-amber-100 text-amber-700"
+                              }`}
+                            >
+                              {a.state === "paid"
+                                ? "Đã trả"
+                                : a.state === "covered_by_payer"
+                                  ? "Đã tính phần ứng"
+                                  : "Chưa trả"}
                             </span>
                           </div>
                         </div>
@@ -180,7 +223,7 @@ const SharedBillsPublicPortal = ({ groupId, group }: { groupId: string; group: a
 const PublicPortal = () => {
   const { groupId, group } = useGroup();
   const groupPath = useGroupPath();
-  if (group?.kind === "shared_bills") {
+  if (groupKindOf(group) === "shared_bills") {
     return <SharedBillsPublicPortal groupId={groupId} group={group} />;
   }
   const [highlight, setHighlight] = useState<TopHighlight | null>(null);
@@ -193,7 +236,9 @@ const PublicPortal = () => {
   useEffect(() => {
     const requestNotify = async () => {
       if (typeof Notification === "undefined") return;
-      const prompted = localStorage.getItem(scopedKey("publicNotifyPrompted", groupId));
+      const prompted = localStorage.getItem(
+        scopedKey("publicNotifyPrompted", groupId),
+      );
       if (prompted && Notification.permission === "denied") return;
       const token = await ensureNotificationToken(null, groupId);
       localStorage.setItem(scopedKey("publicNotifyPrompted", groupId), "1");
@@ -205,7 +250,10 @@ const PublicPortal = () => {
   }, [groupId]);
 
   useEffect(() => {
-    if (!hasFeature(groupId, group, "ratings")) { setIsLoadingHighlight(false); return; }
+    if (!hasFeature(groupId, group, "ratings")) {
+      setIsLoadingHighlight(false);
+      return;
+    }
     const fetchHighlight = async () => {
       setIsLoadingHighlight(true);
       try {
@@ -214,7 +262,7 @@ const PublicPortal = () => {
           where("groupId", "==", groupId),
           where("status", "==", "PUBLISHED"),
           orderBy("date", "desc"),
-          limit(3)
+          limit(3),
         );
         const matchesSnapshot = await getDocs(matchesQuery);
 
@@ -232,10 +280,10 @@ const PublicPortal = () => {
             dateObj?.toDate?.() || new Date(dateObj as unknown as string);
 
           const ratingsSnapshot = await getDocs(
-            collection(matchDoc.ref, "ratings")
+            collection(matchDoc.ref, "ratings"),
           );
           const adminRatingsSnapshot = await getDocs(
-            collection(matchDoc.ref, "adminRatings")
+            collection(matchDoc.ref, "adminRatings"),
           );
           if (ratingsSnapshot.empty && adminRatingsSnapshot.empty) continue;
 
@@ -257,7 +305,7 @@ const PublicPortal = () => {
                 current.totalPoints += playerRating.score;
                 current.ratingCount += 1;
                 playerRatings.set(playerRating.memberId, current);
-              }
+              },
             );
 
             if (rating.mvpPlayerId) {
@@ -266,7 +314,7 @@ const PublicPortal = () => {
               }
               mvpVotes.set(
                 rating.mvpPlayerId,
-                (mvpVotes.get(rating.mvpPlayerId) || 0) + 1
+                (mvpVotes.get(rating.mvpPlayerId) || 0) + 1,
               );
             }
           });
@@ -308,14 +356,14 @@ const PublicPortal = () => {
           });
 
           const ratingEntries = Array.from(combinedRatings.entries()).sort(
-            (a, b) => b[1].final - a[1].final
+            (a, b) => b[1].final - a[1].final,
           );
           const topRatingEntry = ratingEntries[0];
           const topRatingEntries =
             ratingEntries.length > 0
               ? ratingEntries.filter(
                   (entry) =>
-                    Math.abs(entry[1].final - ratingEntries[0][1].final) < 1e-9
+                    Math.abs(entry[1].final - ratingEntries[0][1].final) < 1e-9,
                 )
               : [];
 
@@ -329,8 +377,8 @@ const PublicPortal = () => {
               [
                 ...topRatingEntries.map((entry) => entry[0]),
                 topMvpEntry?.[0],
-              ].filter(Boolean) as string[]
-            )
+              ].filter(Boolean) as string[],
+            ),
           );
           const nameCache = new Map<string, string>();
           await Promise.all(
@@ -339,7 +387,7 @@ const PublicPortal = () => {
               if (snap.exists() && groupIdOf(snap.data()) === groupId) {
                 nameCache.set(id, snap.data().name || "Không rõ");
               }
-            })
+            }),
           );
 
           latest = {
@@ -350,7 +398,7 @@ const PublicPortal = () => {
             topScorerNames:
               topRatingEntries.length > 0
                 ? topRatingEntries.map(
-                    (entry) => nameCache.get(entry[0]) || "Không rõ"
+                    (entry) => nameCache.get(entry[0]) || "Không rõ",
                   )
                 : [],
             topScorerFinal: topRatingEntry ? topRatingEntry[1].final : 0,
@@ -375,12 +423,20 @@ const PublicPortal = () => {
   }, [groupId, group]);
 
   useEffect(() => {
-    if (!hasFeature(groupId, group, "scoring")) { setIsLoadingScoreboard(false); return; }
+    if (!hasFeature(groupId, group, "scoring")) {
+      setIsLoadingScoreboard(false);
+      return;
+    }
     const fetchScoreboard = async () => {
       setIsLoadingScoreboard(true);
       try {
         const matchesSnapshot = await getDocs(
-          query(collection(db, "matches"), where("groupId", "==", groupId), orderBy("date", "desc"), limit(25))
+          query(
+            collection(db, "matches"),
+            where("groupId", "==", groupId),
+            orderBy("date", "desc"),
+            limit(25),
+          ),
         );
 
         const winsMap = new Map<
@@ -395,7 +451,7 @@ const PublicPortal = () => {
             continue;
           }
           const sharesSnapshot = await getDocs(
-            collection(matchDoc.ref, "shares")
+            collection(matchDoc.ref, "shares"),
           );
           if (sharesSnapshot.empty) continue;
 
@@ -428,7 +484,7 @@ const PublicPortal = () => {
 
           if (totals.size < 2) continue;
           const sortedTotals = Array.from(totals.entries()).sort(
-            (a, b) => a[1].total - b[1].total
+            (a, b) => a[1].total - b[1].total,
           );
           // Only count a win if there's a single lowest-paying team (no tie at the bottom)
           if (sortedTotals[0][1].total === sortedTotals[1][1].total) continue;
@@ -445,7 +501,7 @@ const PublicPortal = () => {
         }
 
         const sortedWins = Array.from(winsMap.values()).sort(
-          (a, b) => b.wins - a.wins
+          (a, b) => b.wins - a.wins,
         );
 
         setScoreboard(sortedWins);
@@ -482,164 +538,170 @@ const PublicPortal = () => {
           <div className="inline-flex items-center justify-center p-4 bg-primary rounded-2xl shadow-card mb-4">
             <Trophy className="h-10 w-10 text-white" />
           </div>
-          <h1 className="text-4xl font-bold text-foreground">{group?.sport === "badminton" ? group.name : "Football Tools"}</h1>
+          <h1 className="text-4xl font-bold text-foreground">
+            {group?.sport === "badminton" ? group.name : "Football Tools"}
+          </h1>
           <p className="text-muted-foreground mt-2">
             Vui lòng chọn hành động bạn muốn thực hiện.
           </p>
         </div>
 
-        {hasFeature(groupId, group, "ratings") && (<Card className="shadow-card overflow-hidden">
-          <div className="bg-gradient-to-r from-amber-500 via-orange-400 to-yellow-400 p-4 text-white">
-            <CardTitle className="text-lg">Vinh danh trận gần nhất</CardTitle>
-            <CardDescription className="text-white/80">
-              {highlight?.matchDateLabel || "Chưa có dữ liệu"}
-            </CardDescription>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4">
-            <div className="p-4 rounded-xl bg-white/70 backdrop-blur shadow-inner">
-              <div className="flex items-center gap-2 text-amber-600">
-                <Trophy className="h-5 w-5" />
-                <span className="font-semibold">Cầu thủ ấn tượng (vote)</span>
-              </div>
-              {isLoadingHighlight ? (
-                <p className="text-sm text-muted-foreground mt-2">
-                  Đang tải...
-                </p>
-              ) : highlight ? (
-                <div className="mt-2 space-y-1">
-                  <p className="text-lg font-bold text-foreground">
-                    {highlight.mvpName}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {highlight.mvpVotes} phiếu
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground mt-2">
-                  Chưa có dữ liệu.
-                </p>
-              )}
+        {hasFeature(groupId, group, "ratings") && (
+          <Card className="shadow-card overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-500 via-orange-400 to-yellow-400 p-4 text-white">
+              <CardTitle className="text-lg">Vinh danh trận gần nhất</CardTitle>
+              <CardDescription className="text-white/80">
+                {highlight?.matchDateLabel || "Chưa có dữ liệu"}
+              </CardDescription>
             </div>
-
-            <div className="p-4 rounded-xl bg-white/70 backdrop-blur shadow-inner">
-              <div className="flex items-center gap-2 text-emerald-600">
-                <TrendingUp className="h-5 w-5" />
-                <span className="font-semibold">MVP (điểm cao nhất)</span>
-              </div>
-              {isLoadingHighlight ? (
-                <p className="text-sm text-muted-foreground mt-2">
-                  Đang tải...
-                </p>
-              ) : highlight ? (
-                <div className="mt-2 space-y-1">
-                  <p className="text-lg font-bold text-foreground">
-                    {highlight.topScorerNames.length > 0
-                      ? highlight.topScorerNames.join(", ")
-                      : "Chưa có"}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {highlight.topScorerFinal.toFixed(2)} điểm cuối /10{" "}
-                    {highlight.topScorerNames.length > 1 && "(Đồng MVP)"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Peer: {highlight.topScorerPeer.toFixed(2)} /5 • Admin:{" "}
-                    {highlight.hasAdminScore
-                      ? `${highlight.topScorerAdmin.toFixed(2)} /5`
-                      : "Chưa chấm"}
-                  </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4">
+              <div className="p-4 rounded-xl bg-white/70 backdrop-blur shadow-inner">
+                <div className="flex items-center gap-2 text-amber-600">
+                  <Trophy className="h-5 w-5" />
+                  <span className="font-semibold">Cầu thủ ấn tượng (vote)</span>
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground mt-2">
-                  Chưa có dữ liệu.
-                </p>
-              )}
-            </div>
-          </div>
-        </Card>)}
-
-        {hasFeature(groupId, group, "scoring") && (<Card className="shadow-card">
-          <CardHeader>
-            <CardTitle>Bảng tỉ số</CardTitle>
-          </CardHeader>
-          <div className="px-4 pb-6">
-            {isLoadingScoreboard ? (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Đang tổng hợp dữ liệu...
-              </div>
-            ) : scoreboard.length >= 2 && scoreboard.length <= 2 ? (
-              <div className="relative bg-muted/30 rounded-3xl border shadow-inner p-4 flex items-center justify-between gap-4">
-                {scoreboard.map((team) => (
-                  <div
-                    key={team.teamId}
-                    className="flex-1 text-center space-y-1"
-                  >
-                    <p className="text-lg font-semibold text-foreground">
-                      {team.teamName}
+                {isLoadingHighlight ? (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Đang tải...
+                  </p>
+                ) : highlight ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-lg font-bold text-foreground">
+                      {highlight.mvpName}
                     </p>
-                    <p className="text-4xl font-extrabold text-primary">
-                      {team.wins}
+                    <p className="text-sm text-muted-foreground">
+                      {highlight.mvpVotes} phiếu
                     </p>
                   </div>
-                ))}
-                <div className="absolute left-1/2 -translate-x-1/2 text-center">
-                  <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-lg font-bold shadow">
-                    VS
-                  </div>
-                </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Chưa có dữ liệu.
+                  </p>
+                )}
               </div>
-            ) : scoreboard.length >= 3 ? (
-              <div className="bg-muted/30 rounded-3xl border shadow-inner p-4 space-y-3">
-                {scoreboard.map((team, idx) => (
-                  <div
-                    key={team.teamId}
-                    className="flex items-center justify-between px-3 py-2 rounded-xl bg-background/60"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-lg font-bold text-muted-foreground w-6 text-center">
-                        {idx + 1}
-                      </span>
+
+              <div className="p-4 rounded-xl bg-white/70 backdrop-blur shadow-inner">
+                <div className="flex items-center gap-2 text-emerald-600">
+                  <TrendingUp className="h-5 w-5" />
+                  <span className="font-semibold">MVP (điểm cao nhất)</span>
+                </div>
+                {isLoadingHighlight ? (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Đang tải...
+                  </p>
+                ) : highlight ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-lg font-bold text-foreground">
+                      {highlight.topScorerNames.length > 0
+                        ? highlight.topScorerNames.join(", ")
+                        : "Chưa có"}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {highlight.topScorerFinal.toFixed(2)} điểm cuối /10{" "}
+                      {highlight.topScorerNames.length > 1 && "(Đồng MVP)"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Peer: {highlight.topScorerPeer.toFixed(2)} /5 • Admin:{" "}
+                      {highlight.hasAdminScore
+                        ? `${highlight.topScorerAdmin.toFixed(2)} /5`
+                        : "Chưa chấm"}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Chưa có dữ liệu.
+                  </p>
+                )}
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {hasFeature(groupId, group, "scoring") && (
+          <Card className="shadow-card">
+            <CardHeader>
+              <CardTitle>Bảng tỉ số</CardTitle>
+            </CardHeader>
+            <div className="px-4 pb-6">
+              {isLoadingScoreboard ? (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Đang tổng hợp dữ liệu...
+                </div>
+              ) : scoreboard.length >= 2 && scoreboard.length <= 2 ? (
+                <div className="relative bg-muted/30 rounded-3xl border shadow-inner p-4 flex items-center justify-between gap-4">
+                  {scoreboard.map((team) => (
+                    <div
+                      key={team.teamId}
+                      className="flex-1 text-center space-y-1"
+                    >
                       <p className="text-lg font-semibold text-foreground">
                         {team.teamName}
                       </p>
+                      <p className="text-4xl font-extrabold text-primary">
+                        {team.wins}
+                      </p>
                     </div>
-                    <p className="text-3xl font-extrabold text-primary">
-                      {team.wins}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : scoreboard.length === 1 ? (
-              <div className="relative bg-muted/30 rounded-3xl border shadow-inner p-4 flex items-center justify-between gap-4">
-                {[
-                  scoreboard[0],
-                  { teamId: "pending", teamName: "Đang cập nhật", wins: 0 },
-                ].map((team) => (
-                  <div
-                    key={team.teamId}
-                    className="flex-1 text-center space-y-1"
-                  >
-                    <p className="text-lg font-semibold text-foreground">
-                      {team.teamName}
-                    </p>
-                    <p className="text-4xl font-extrabold text-primary">
-                      {team.wins}
-                    </p>
-                  </div>
-                ))}
-                <div className="absolute left-1/2 -translate-x-1/2 text-center">
-                  <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-lg font-bold shadow">
-                    VS
+                  ))}
+                  <div className="absolute left-1/2 -translate-x-1/2 text-center">
+                    <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-lg font-bold shadow">
+                      VS
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Chưa có dữ liệu thống kê.
-              </p>
-            )}
-          </div>
-        </Card>)}
+              ) : scoreboard.length >= 3 ? (
+                <div className="bg-muted/30 rounded-3xl border shadow-inner p-4 space-y-3">
+                  {scoreboard.map((team, idx) => (
+                    <div
+                      key={team.teamId}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl bg-background/60"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg font-bold text-muted-foreground w-6 text-center">
+                          {idx + 1}
+                        </span>
+                        <p className="text-lg font-semibold text-foreground">
+                          {team.teamName}
+                        </p>
+                      </div>
+                      <p className="text-3xl font-extrabold text-primary">
+                        {team.wins}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : scoreboard.length === 1 ? (
+                <div className="relative bg-muted/30 rounded-3xl border shadow-inner p-4 flex items-center justify-between gap-4">
+                  {[
+                    scoreboard[0],
+                    { teamId: "pending", teamName: "Đang cập nhật", wins: 0 },
+                  ].map((team) => (
+                    <div
+                      key={team.teamId}
+                      className="flex-1 text-center space-y-1"
+                    >
+                      <p className="text-lg font-semibold text-foreground">
+                        {team.teamName}
+                      </p>
+                      <p className="text-4xl font-extrabold text-primary">
+                        {team.wins}
+                      </p>
+                    </div>
+                  ))}
+                  <div className="absolute left-1/2 -translate-x-1/2 text-center">
+                    <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-lg font-bold shadow">
+                      VS
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Chưa có dữ liệu thống kê.
+                </p>
+              )}
+            </div>
+          </Card>
+        )}
 
         <div className="space-y-6">
           <Link to={groupPath("public/attendance")} className="block">
@@ -673,21 +735,23 @@ const PublicPortal = () => {
               </CardHeader>
             </Card>
           </Link>
-          {hasFeature(groupId, group, "ratings") && (<Link to={groupPath("public/ratings")} className="block">
-            <Card className="shadow-card hover:shadow-card-hover transition-all cursor-pointer group">
-              <CardHeader className="flex flex-row items-center gap-4">
-                <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center group-hover:scale-110 transition-transform shadow-card">
-                  <TrendingUp className="h-6 w-6 text-white" />
-                </div>
-                <div>
-                  <CardTitle className="text-xl">Xem lịch sử trận</CardTitle>
-                  <CardDescription>
-                    Ratings, MVP/ấn tượng và live notes của các trận đã đấu.
-                  </CardDescription>
-                </div>
-              </CardHeader>
-            </Card>
-          </Link>)}
+          {hasFeature(groupId, group, "ratings") && (
+            <Link to={groupPath("public/ratings")} className="block">
+              <Card className="shadow-card hover:shadow-card-hover transition-all cursor-pointer group">
+                <CardHeader className="flex flex-row items-center gap-4">
+                  <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center group-hover:scale-110 transition-transform shadow-card">
+                    <TrendingUp className="h-6 w-6 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-xl">Xem lịch sử trận</CardTitle>
+                    <CardDescription>
+                      Ratings, MVP/ấn tượng và live notes của các trận đã đấu.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
         </div>
       </div>
     </div>

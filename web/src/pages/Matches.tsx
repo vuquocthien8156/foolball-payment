@@ -128,6 +128,7 @@ import { aggregateLiveStats, AggregatedStat } from "@/lib/liveStats";
 import { useActionConfigs } from "@/hooks/useActionConfigs";
 import { postApiJson, apiRequest } from "@/lib/api";
 import html2canvas from "html2canvas";
+import { MatchScheduleModal } from "@/components/matches/MatchScheduleModal";
 
 interface Match {
   id: string;
@@ -547,6 +548,7 @@ const Matches = () => {
     [matches],
   );
   const [isDebtModalOpen, setIsDebtModalOpen] = useState(false);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [pendingSharesMap, setPendingSharesMap] = useState<
     Map<
       string,
@@ -1460,6 +1462,14 @@ const Matches = () => {
             <Button onClick={() => navigate(groupPath("admin/setup"))}>
               <PlusCircle className="mr-2 h-4 w-4" />
               Tạo trận đấu mới
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setIsScheduleModalOpen(true)}
+              className="gap-1.5"
+            >
+              <Calendar className="mr-2 h-4 w-4" />
+              Lịch tự động & Mẫu
             </Button>
             <Button
               variant="outline"
@@ -3123,6 +3133,10 @@ const Matches = () => {
             )}
           </div>
         </div>
+        <MatchScheduleModal
+          isOpen={isScheduleModalOpen}
+          onClose={() => setIsScheduleModalOpen(false)}
+        />
         <Dialog open={isDebtModalOpen} onOpenChange={setIsDebtModalOpen}>
           <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0">
             <div className="px-6 pt-6 pb-4">
