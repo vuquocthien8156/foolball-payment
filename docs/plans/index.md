@@ -7,6 +7,8 @@ Latest master plan: [Group Platform v4 — Multi-Tenant Ownership, Settlement & 
 Shared bills governance: [Shared Bills Settlement, Roles & Multi-Tier Payer Reconciliation](shared-bills-settlement-reconciliation-v1.md) (2026-10-24) records the two-tier settlement model (Super Admin -> Manager -> Member), gross collection vs net offset, and API contracts.
 
 PayOS consolidation & settlement evolution: [Shared Bills Consolidation, Subscription Catch-Up & Platform Settlement](shared-bills-consolidation-and-platform-settlement-v1.md) (2026-10-24) records multi-period consolidation, subscription catch-up, collection progress flags, and 1-click Super Admin member linking.
+ 
+Expense engine alignment & subsidies: [General Subsidy/Deduction & Shared Bill Synchronization](subsidy-deduction-and-shared-bill-sync-v1.md) (2026-10-24) records generalized subsidy/deductions, safe recalculation on paid matches, and the rule to reuse the expense engine across Shared Bills.
 
 Production execution: [Group production rollout v1](group-production-rollout-v1.md)
 records the user's 2026-10-22 authorization, ordered tasks and live evidence.

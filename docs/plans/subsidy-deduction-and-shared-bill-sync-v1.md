@@ -43,3 +43,42 @@
 - `web/tests/*.test.mjs`
 - `web/` build (`npm run build`)
 - Live deployment (`firebase deploy --only functions,hosting`)
+
+---
+
+## 3. Implementation Details: Safe Existing Match Recalculation & Subsidy Sync
+
+### Problem Observed
+When a manager edits an existing match that already has paid shares (e.g., 10 out of 15 members paid):
+- Clicking "Tính tiền" (`handleSave`) was intentionally blocked by the guard `if (existingShares.some(status === "PAID"))` to prevent overwriting existing debts or causing duplicate entries.
+- Clicking "Lưu thay đổi" (`handleUpdateMatchConfig`) only updated top-level match metadata (`totalAmount`, `expenseItems`, `teamConfigs`), but did not synchronize new expense items into the subcollection `matches/:id/shares`.
+- As a result, the subsidy share (e.g. 200,000 VND) was not added to `shares`, leaving total shares at 350,000 VND while match total was 550,000 VND.
+
+### Solution
+1. In `handleUpdateMatchConfig` ("Lưu thay đổi"):
+   - Scans `expenseItems` for `SUBSIDY` items.
+   - For any subsidy assigned to a `targetMemberId`:
+     - Checks if a share already exists for this member in the match.
+     - If exists, updates amount and breakdown.
+     - If not, inserts a new share with `teamId: "pool"`, `status: "PENDING"`, and breakdown `[Trợ giá] <desc> (<note>)`.
+   - Leaves all other player shares untouched.
+2. In `handleSave` ("Tính tiền"):
+   - When recalculating a match, matches existing shares by `memberId` to preserve `status: "PAID"`, `paidAt`, `channel`, and `orderCode`.
+   - Preserved unit test compatibility by requiring managers to use "Lưu thay đổi" to update configs on partially paid matches.
+3. In `Matches.tsx`:
+   - Non-team subsidy shares (`teamId: "pool"` or `sponsor`) render with badge `Trợ giá / Thu riêng` instead of `Đội pool`.
+
+---
+
+## 4. Architectural Rule: Shared Bills Expense Engine Alignment
+
+> **Rule (MANDATORY)**:
+> The Shared Bills module (`Bills.tsx` / `BillForm.tsx`) must not maintain disconnected, bespoke split logic.
+> It MUST align with and reuse the general expense breakdown engine pioneered in Match Setup:
+> 1. Multi-expense breakdown (individual items, shared items, equal splits).
+> 2. Generalized **Subsidy / Deduction ("Trợ giá / Trừ tiền chung")** for company sponsorships, group fund discounts, or external subsidies.
+> 3. Individual add-ons and member-specific exemptions.
+> 4. Non-participating payer/sponsor support without forcing attendance.
+>
+> Any future enhancements to cost calculation, deduction types, or debt breakdown must be shared between sports matches and shared bill platforms.
+

@@ -1183,12 +1183,67 @@ const SetupMatch = () => {
       } else {
         delete matchData.status;
       }
-      await updateDoc(matchRef, matchData);
+      const batch = writeBatch(db);
+      batch.update(matchRef, matchData);
+
+      // Sync subsidy shares so sponsor members appear in the debt list even when match has paid shares
+      const existingSharesSnap = await getDocs(
+        collection(db, "matches", matchId, "shares"),
+      );
+
+      const subsidyExpenses = expenseItems.filter(
+        (e) => e.type === "SUBSIDY" && e.targetMemberId && e.amount > 0,
+      );
+
+      subsidyExpenses.forEach((exp) => {
+        const existingShare = existingSharesSnap.docs.find(
+          (d) =>
+            d.data().memberId === exp.targetMemberId &&
+            (d.data().teamId === "pool" || d.data().calculationDetails?.isIndividual),
+        );
+        const customDesc = exp.description?.trim() || "Trợ giá";
+        const noteDesc = exp.note?.trim() ? ` (${exp.note.trim()})` : "";
+        const breakdownItem = {
+          expenseId: exp.id,
+          description: `[Trợ giá] ${customDesc}${noteDesc}`,
+          amount: exp.amount,
+        };
+
+        if (existingShare) {
+          batch.update(existingShare.ref, {
+            amount: exp.amount,
+            expenseBreakdown: [breakdownItem],
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          const newShareRef = doc(collection(matchRef, "shares"));
+          batch.set(newShareRef, {
+            matchId: matchRef.id,
+            memberId: exp.targetMemberId,
+            teamId: "pool",
+            amount: exp.amount,
+            status: "PENDING",
+            orderCode: "",
+            expenseBreakdown: [breakdownItem],
+            calculationDetails: {
+              isIndividual: true,
+            },
+            groupId,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      });
+
+      await batch.commit();
       toast({
         title: "Đã lưu!",
-        description: usesTeams
-          ? "Chỉ cập nhật cấu hình/đội hình, chưa tính tiền."
-          : "Đã cập nhật thông tin và người tham gia, chưa tính tiền.",
+        description:
+          subsidyExpenses.length > 0
+            ? "Đã lưu thay đổi và đồng bộ khoản trợ giá vào danh sách thanh toán."
+            : usesTeams
+              ? "Chỉ cập nhật cấu hình/đội hình, chưa tính tiền."
+              : "Đã cập nhật thông tin và người tham gia, chưa tính tiền.",
       });
     } catch (error) {
       toast({
@@ -1652,17 +1707,60 @@ const SetupMatch = () => {
         batch.set(matchRef, { ...matchData, createdAt: serverTimestamp() });
       }
 
+      // Map existing shares by memberId so we preserve PAID status and payment metadata
+      const existingSharesByMember = new Map<
+        string,
+        { id: string; ref: any; data: any }
+      >();
       existingSharesSnapshot?.forEach((snapshot) => {
-        batch.delete(snapshot.ref);
+        const d = snapshot.data();
+        if (d.memberId) {
+          existingSharesByMember.set(d.memberId, {
+            id: snapshot.id,
+            ref: snapshot.ref,
+            data: d,
+          });
+        }
       });
 
+      // Delete existing shares that are no longer in the new shares list
+      const newMemberIds = new Set(shares.map((s) => s.memberId));
+      existingSharesSnapshot?.forEach((snapshot) => {
+        const d = snapshot.data();
+        if (!newMemberIds.has(d.memberId)) {
+          batch.delete(snapshot.ref);
+        }
+      });
+
+      // Update or create shares, preserving PAID status and payment metadata
       shares.forEach((share) => {
-        const shareRef = doc(collection(matchRef, "shares"));
-        batch.set(shareRef, {
-          ...share,
-          groupId,
-          createdAt: serverTimestamp(),
-        });
+        const existing = existingSharesByMember.get(share.memberId);
+        const shareRef = existing
+          ? existing.ref
+          : doc(collection(matchRef, "shares"));
+        const finalStatus =
+          existing?.data?.status === "PAID" ? "PAID" : share.status;
+        const finalPaidAt =
+          existing?.data?.status === "PAID"
+            ? existing.data.paidAt || new Date().toISOString()
+            : undefined;
+        const finalChannel = existing?.data?.channel || undefined;
+        const finalOrderCode = existing?.data?.orderCode || share.orderCode;
+
+        batch.set(
+          shareRef,
+          {
+            ...share,
+            status: finalStatus,
+            ...(finalPaidAt ? { paidAt: finalPaidAt } : {}),
+            ...(finalChannel ? { channel: finalChannel } : {}),
+            ...(finalOrderCode ? { orderCode: finalOrderCode } : {}),
+            groupId,
+            updatedAt: serverTimestamp(),
+            ...(existing ? {} : { createdAt: serverTimestamp() }),
+          },
+          { merge: true },
+        );
       });
 
       await batch.commit();

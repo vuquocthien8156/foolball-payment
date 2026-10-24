@@ -8,5 +8,6 @@ Welcome to the documentation for the Football Payment and Shared Billing Platfor
   - [Group Platform v4 — Multi-Tenant Ownership, Settlement & Automation](plans/group-platform-v4-tenancy-settlement-automation.md)
   - [Shared Bills Settlement, Roles & Multi-Tier Payer Reconciliation](plans/shared-bills-settlement-reconciliation-v1.md)
   - [Shared Bills Consolidation, Subscription Catch-Up & Platform Settlement](plans/shared-bills-consolidation-and-platform-settlement-v1.md)
+  - [General Subsidy/Deduction & Shared Bill Synchronization](plans/subsidy-deduction-and-shared-bill-sync-v1.md)
   - [Group Platform v3 Master Specs](plans/group-platform-v3.md)
   - [Group Production Rollout](plans/group-production-rollout-v1.md)
