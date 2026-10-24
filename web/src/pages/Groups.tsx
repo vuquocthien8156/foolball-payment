@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { useAuth } from "@/contexts/AuthContext";
 import { apiRequest } from "@/lib/api";
 import { GROUP_SPORTS, SPORT_LABELS, GroupSport, GroupKind, groupKindOf, groupPath } from "@/lib/groups";
 import { usePlatformAccount } from "@/hooks/usePlatformAccount";
@@ -9,6 +11,7 @@ import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -60,6 +63,7 @@ function slugifyName(text: string) {
 const Groups = () => {
   const navigate = useNavigate();
   const { account } = usePlatformAccount();
+  const { user } = useAuth();
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -72,6 +76,7 @@ const Groups = () => {
   const [sport, setSport] = useState<GroupSport | "">("");
   const [kind, setKind] = useState<GroupKind>("sports");
   const [busy, setBusy] = useState(false);
+  const [autoAddMeMember, setAutoAddMeMember] = useState(true);
 
   // Edit Group State
   const [editGroup, setEditGroup] = useState<Group | null>(null);
@@ -134,6 +139,22 @@ const Groups = () => {
         payload.id = slug.trim().toLowerCase();
       }
       const created = await apiRequest("POST", "/platform/groups", payload);
+
+      if (autoAddMeMember && user) {
+        try {
+          await addDoc(collection(db, "members"), {
+            groupId: created.id,
+            name: account?.displayName || user.displayName || "Quản lý nhóm",
+            accountUid: user.uid,
+            isPlatformOwner: account?.role === "owner",
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } catch (mErr) {
+          console.warn("Could not auto-seed creator member:", mErr);
+        }
+      }
+
       toast({ title: "Tạo nhóm thành công!" });
       navigate(groupPath(created.id, "admin"));
     } catch (err: any) {
@@ -602,6 +623,23 @@ const Groups = () => {
               </Select>
             </div>}
 
+            <div className="flex items-start space-x-2 pt-2 border-t">
+              <Checkbox
+                id="auto-add-member"
+                checked={autoAddMeMember}
+                onCheckedChange={(checked) => setAutoAddMeMember(!!checked)}
+                className="mt-0.5"
+              />
+              <div className="grid gap-0.5 leading-none">
+                <Label htmlFor="auto-add-member" className="text-xs font-medium cursor-pointer">
+                  Tự động thêm tôi làm thành viên trong nhóm này
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Tạo hồ sơ thành viên gắn liền với tài khoản của bạn để dễ dàng điểm danh và tự động theo dõi tiền hoàn khi ứng tiền sân.
+                </p>
+              </div>
+            </div>
+
             <DialogFooter className="pt-2">
               <Button variant="outline" type="button" onClick={() => setOpen(false)}>
                 Hủy
@@ -937,8 +975,11 @@ const Groups = () => {
                   </div>
                 </div>
               ) : !settlementData.isSuperAdmin ? (
-                <div className="p-3 text-xs text-muted-foreground text-center rounded-lg border border-dashed bg-muted/10">
-                  🎉 Bạn hiện không có trận nào tự ứng tiền đang chờ Super Admin hoàn lại.
+                <div className="p-3 text-xs text-muted-foreground rounded-lg border border-dashed bg-muted/10 space-y-1">
+                  <p className="text-center font-medium">🎉 Bạn hiện không có trận nào tự ứng tiền đang chờ Super Admin hoàn lại.</p>
+                  <p className="text-[11px] text-center text-muted-foreground/80">
+                    💡 Mẹo: Nếu bạn có ứng tiền sân ở các nhóm, hãy vào mục <strong>&ldquo;Thành viên&rdquo;</strong> của nhóm đó và bấm <strong>&ldquo;⭐ Tôi là thành viên này&rdquo;</strong> để hệ thống tự động nhận diện và tính tiền hoàn cho bạn tại đây!
+                  </p>
                 </div>
               ) : null)}
 

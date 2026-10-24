@@ -26,6 +26,24 @@ export function loadSource(relativePath, mocks = {}, context = {}, transformers)
       if (id === "react/jsx-runtime") {
         return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) };
       }
+      if (id === "@/contexts/AuthContext") {
+        return { useAuth: () => ({ user: { uid: "test-uid", displayName: "Test User" }, loading: false }) };
+      }
+      if (id === "firebase/firestore") {
+        return {
+          collection: () => ({}),
+          addDoc: async () => ({ id: "mock-doc-id" }),
+          updateDoc: async () => {},
+          serverTimestamp: () => ({}),
+          doc: () => ({}),
+          getDoc: async () => ({ exists: () => false, data: () => ({}) }),
+          getDocs: async () => ({ docs: [] }),
+          query: () => ({}),
+          where: () => ({}),
+          orderBy: () => ({}),
+          collectionGroup: () => ({}),
+        };
+      }
       if (id.startsWith("@/components/") || id === "lucide-react") {
         return new Proxy({}, { get: (_, key) => key });
       }

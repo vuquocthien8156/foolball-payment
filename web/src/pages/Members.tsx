@@ -1,4 +1,5 @@
 import { useGroup } from "@/contexts/GroupContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { groupIdOf } from "@/lib/groups";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,7 @@ interface Member {
   inactive?: boolean;
   isPriority?: boolean;
   autoCoverWhenPayer?: boolean;
+  accountUid?: string | null;
 }
 
 interface MemberStats {
@@ -259,6 +261,7 @@ const MemberDetails = ({ memberId }: MemberDetailsProps) => {
 
 const Members = () => {
   const { groupId } = useGroup();
+  const { user } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
@@ -278,7 +281,54 @@ const Members = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
+  const [claimingId, setClaimingId] = useState<string | null>(null);
   const { toast } = useToast();
+
+  const handleClaimSelf = async (memberId: string) => {
+    if (!user) {
+      toast({ variant: "destructive", title: "Vui lòng đăng nhập" });
+      return;
+    }
+    setClaimingId(memberId);
+    try {
+      await updateDoc(doc(db, "members", memberId), {
+        accountUid: user.uid,
+        updatedAt: serverTimestamp(),
+      });
+      setMembers((prev) =>
+        prev.map((m) => (m.id === memberId ? { ...m, accountUid: user.uid } : m))
+      );
+      toast({
+        title: "Đã liên kết hồ sơ của bạn thành công",
+        description: "Từ nay các trận bạn ứng tiền trong nhóm này sẽ tự động được nhận diện vào bảng đối soát hoàn tiền.",
+      });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Lỗi liên kết", description: err.message });
+    } finally {
+      setClaimingId(null);
+    }
+  };
+
+  const handleUnclaimSelf = async (memberId: string) => {
+    if (!user) return;
+    setClaimingId(memberId);
+    try {
+      await updateDoc(doc(db, "members", memberId), {
+        accountUid: null,
+        updatedAt: serverTimestamp(),
+      });
+      setMembers((prev) =>
+        prev.map((m) => (m.id === memberId ? { ...m, accountUid: null } : m))
+      );
+      toast({
+        title: "Đã hủy liên kết tài khoản với hồ sơ này",
+      });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Lỗi hủy liên kết", description: err.message });
+    } finally {
+      setClaimingId(null);
+    }
+  };
 
   const fetchMembersAndStats = useCallback(async () => {
     setIsLoading(true);
@@ -875,7 +925,59 @@ const Members = () => {
                                   {member.nickname}
                                 </Badge>
                               )}
-                              <div className="flex flex-wrap gap-1 mt-1">
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                {member.accountUid === user?.uid && (
+                                  <div className="flex items-center gap-1">
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Badge className="bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40 text-[11px] font-medium cursor-default">
+                                          ⭐ Bạn (Tài khoản của bạn)
+                                        </Badge>
+                                      </TooltipTrigger>
+                                      <TooltipContent className="max-w-xs text-xs">
+                                        Hồ sơ này đã liên kết với tài khoản đăng nhập của bạn. Khi bạn đứng ra ứng tiền sân cho trận đấu, hệ thống sẽ tự động nhận diện và tính đối soát cho bạn.
+                                      </TooltipContent>
+                                    </Tooltip>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleUnclaimSelf(member.id);
+                                      }}
+                                      disabled={claimingId === member.id}
+                                      className="text-[10px] text-muted-foreground hover:text-destructive underline"
+                                      title="Hủy liên kết tài khoản"
+                                    >
+                                      Hủy
+                                    </button>
+                                  </div>
+                                )}
+
+                                {!member.accountUid && user && (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleClaimSelf(member.id);
+                                        }}
+                                        disabled={claimingId === member.id}
+                                        className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 transition-colors font-medium"
+                                      >
+                                        {claimingId === member.id ? (
+                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                        ) : (
+                                          <span>⭐ Tôi là thành viên này</span>
+                                        )}
+                                      </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs text-xs">
+                                      Bấm để nhận diện đây là hồ sơ của bạn trong nhóm này. Giúp hệ thống tự động ghi nhận các khoản bạn tự ứng tiền vào bảng đối soát.
+                                    </TooltipContent>
+                                  </Tooltip>
+                                )}
+
                                 {member.isPriority && (
                                   <Badge
                                     variant="outline"
@@ -1092,6 +1194,43 @@ const Members = () => {
                   <Label htmlFor="edit-inactive">Inactive (ẩn khỏi điểm danh & setup)</Label>
                 </div>
 
+                <div className="border-t pt-3 space-y-1.5">
+                  <Label className="text-xs text-muted-foreground font-medium">Liên kết tài khoản hệ thống</Label>
+                  {editingMember.accountUid === user?.uid ? (
+                    <div className="flex items-center justify-between p-2 rounded bg-amber-500/10 border border-amber-500/30 text-xs">
+                      <span className="text-amber-700 dark:text-amber-300 font-medium">⭐ Đang liên kết với tài khoản của bạn</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[11px] text-destructive hover:bg-destructive/10"
+                        onClick={() => {
+                          handleUnclaimSelf(editingMember.id);
+                          setEditingMember({ ...editingMember, accountUid: null });
+                        }}
+                      >
+                        Hủy liên kết
+                      </Button>
+                    </div>
+                  ) : editingMember.accountUid ? (
+                    <div className="p-2 rounded bg-muted text-xs text-muted-foreground">
+                      Đã liên kết với tài khoản UID: <span className="font-mono">{editingMember.accountUid}</span>
+                    </div>
+                  ) : user ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs gap-1.5"
+                      onClick={() => {
+                        handleClaimSelf(editingMember.id);
+                        setEditingMember({ ...editingMember, accountUid: user.uid });
+                      }}
+                    >
+                      ⭐ Liên kết hồ sơ này với tài khoản của tôi
+                    </Button>
+                  ) : null}
+                </div>
               </div>
               <div className="flex justify-end gap-2">
                 <Button

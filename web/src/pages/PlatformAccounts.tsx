@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { apiRequest } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Users, Check } from "lucide-react";
+import { Loader2, Users, Check, Search, Pencil, X } from "lucide-react";
 
 const PlatformAccounts = () => {
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
@@ -26,12 +26,19 @@ const PlatformAccounts = () => {
   const [resetUid, setResetUid] = useState<string | null>(null);
   const [createdAccount, setCreatedAccount] = useState<{ email: string } | null>(null);
 
+  // Edit Account state
+  const [editAccount, setEditAccount] = useState<PlatformAccount | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editRole, setEditRole] = useState<"user" | "owner">("user");
+  const [editBusy, setEditBusy] = useState(false);
+
   // Link Members state
   const [linkingAccount, setLinkingAccount] = useState<PlatformAccount | null>(null);
   const [linkGroups, setLinkGroups] = useState<any[]>([]);
   const [linkLoading, setLinkLoading] = useState(false);
   const [selectedMemberKeys, setSelectedMemberKeys] = useState<Set<string>>(new Set());
   const [savingLinks, setSavingLinks] = useState(false);
+  const [memberSearchQuery, setMemberSearchQuery] = useState("");
 
   const loadAccounts = async () => {
     try { setAccounts(await apiRequest("GET", "/platform/accounts")); }
@@ -80,8 +87,39 @@ const PlatformAccounts = () => {
     finally { setPassword(""); setBusy(false); }
   };
 
+  const openEditModal = (account: PlatformAccount) => {
+    setEditAccount(account);
+    setEditDisplayName(account.displayName || "");
+    setEditRole(account.role);
+  };
+
+  const handleSaveEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editAccount) return;
+    const name = editDisplayName.trim();
+    if (name.length < 1 || name.length > 60) {
+      toast({ variant: "destructive", title: "Tên hiển thị phải từ 1 đến 60 ký tự" });
+      return;
+    }
+    setEditBusy(true);
+    try {
+      await apiRequest("PATCH", `/platform/accounts/${editAccount.uid}`, {
+        displayName: name,
+        role: editRole,
+      });
+      await loadAccounts();
+      toast({ title: "Đã cập nhật thông tin tài khoản thành công" });
+      setEditAccount(null);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Không thể cập nhật tài khoản", description: err.message });
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
   const openLinkModal = async (account: PlatformAccount) => {
     setLinkingAccount(account);
+    setMemberSearchQuery("");
     setLinkLoading(true);
     try {
       const res = await apiRequest("GET", `/platform/accounts/${account.uid}/members`);
@@ -100,6 +138,22 @@ const PlatformAccounts = () => {
       setLinkLoading(false);
     }
   };
+
+  const filteredLinkGroups = useMemo(() => {
+    const q = memberSearchQuery.trim().toLowerCase();
+    if (!q) return linkGroups;
+    return linkGroups
+      .map((grp: any) => {
+        const groupMatches = grp.groupName?.toLowerCase().includes(q);
+        const matchedMembers = (grp.members || []).filter((m: any) =>
+          groupMatches ||
+          m.name?.toLowerCase().includes(q) ||
+          (m.nickname && m.nickname.toLowerCase().includes(q))
+        );
+        return { ...grp, members: matchedMembers };
+      })
+      .filter((grp: any) => grp.members && grp.members.length > 0);
+  }, [linkGroups, memberSearchQuery]);
 
   const toggleMemberKey = (key: string) => {
     setSelectedMemberKeys((prev) => {
@@ -191,6 +245,17 @@ const PlatformAccounts = () => {
                     Liên kết thành viên
                   </Button>
 
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1 text-xs"
+                    onClick={() => openEditModal(account)}
+                    title="Chỉnh sửa thông tin tài khoản"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Sửa
+                  </Button>
+
                   {account.role !== "owner" ? (
                     <>
                       <Button size="sm" variant="outline" disabled={busy} onClick={() => handleRoleChange(account, "owner")}>
@@ -250,6 +315,68 @@ const PlatformAccounts = () => {
       </DialogContent>
     </Dialog>
 
+    {/* Edit Account Dialog */}
+    <Dialog open={editAccount !== null} onOpenChange={(val) => { if (!val) setEditAccount(null); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Pencil className="h-4 w-4" />
+            Chỉnh sửa tài khoản
+          </DialogTitle>
+          <DialogDescription>
+            Cập nhật tên hiển thị hoặc vai trò trên nền tảng cho tài khoản {editAccount?.email}.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSaveEdit} className="space-y-4">
+          <div>
+            <Label htmlFor="edit-account-email">Email</Label>
+            <Input id="edit-account-email" disabled value={editAccount?.email || ""} className="bg-muted text-muted-foreground" />
+          </div>
+          <div>
+            <Label htmlFor="edit-account-name">Tên hiển thị</Label>
+            <Input
+              id="edit-account-name"
+              required
+              maxLength={60}
+              value={editDisplayName}
+              onChange={(e) => setEditDisplayName(e.target.value)}
+              placeholder="Nhập tên hiển thị..."
+            />
+          </div>
+          <div>
+            <Label htmlFor="edit-account-role">Vai trò trên nền tảng</Label>
+            <Select
+              value={editRole}
+              onValueChange={(val: "user" | "owner") => setEditRole(val)}
+              disabled={editAccount?.role === "owner"}
+            >
+              <SelectTrigger id="edit-account-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="user">Người dùng (Quản lý các nhóm được giao/tự tạo)</SelectItem>
+                <SelectItem value="owner">Chủ nền tảng (Super Admin - Toàn quyền mọi nhóm & tài khoản)</SelectItem>
+              </SelectContent>
+            </Select>
+            {editAccount?.role === "owner" && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Tài khoản Chủ nền tảng không thể hạ cấp qua form này vì lý do bảo mật.
+              </p>
+            )}
+          </div>
+          <DialogFooter className="pt-2">
+            <Button type="button" variant="outline" onClick={() => setEditAccount(null)} disabled={editBusy}>
+              Hủy
+            </Button>
+            <Button type="submit" disabled={editBusy} className="gap-1.5">
+              {editBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+              Lưu thay đổi
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+
     <Dialog open={resetUid !== null} onOpenChange={(value) => { if (!value) { setResetUid(null); setPassword(""); } }}>
       <DialogContent>
         <DialogHeader>
@@ -277,6 +404,25 @@ const PlatformAccounts = () => {
           </DialogDescription>
         </DialogHeader>
 
+        <div className="relative pt-1">
+          <Search className="absolute left-3 top-3.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="Tìm thành viên theo tên, biệt danh hoặc tên nhóm..."
+            value={memberSearchQuery}
+            onChange={(e) => setMemberSearchQuery(e.target.value)}
+            className="pl-9 pr-9"
+          />
+          {memberSearchQuery && (
+            <button
+              type="button"
+              onClick={() => setMemberSearchQuery("")}
+              className="absolute right-3 top-3.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
         <div className="flex-1 overflow-y-auto py-2 space-y-4">
           {linkLoading ? (
             <div className="flex items-center justify-center py-12">
@@ -284,8 +430,13 @@ const PlatformAccounts = () => {
             </div>
           ) : linkGroups.length === 0 ? (
             <p className="text-center text-sm text-muted-foreground py-8">Chưa có nhóm nào hoặc không có thành viên.</p>
+          ) : filteredLinkGroups.length === 0 ? (
+            <div className="text-center py-8 space-y-1">
+              <p className="text-sm font-medium">Không tìm thấy thành viên phù hợp</p>
+              <p className="text-xs text-muted-foreground">Không có kết quả nào khớp với "{memberSearchQuery}".</p>
+            </div>
           ) : (
-            linkGroups.map((grp: any) => (
+            filteredLinkGroups.map((grp: any) => (
               <div key={grp.groupId} className="border rounded-lg p-3 space-y-2 bg-muted/20">
                 <div className="flex items-center justify-between border-b pb-1.5">
                   <span className="font-semibold text-sm text-foreground">{grp.groupName}</span>

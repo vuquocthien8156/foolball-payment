@@ -51,6 +51,13 @@ function createPlatformRouter({ db, auth, FieldValue }) {
       ...(role !== undefined ? { role } : {}),
       updatedAt: FieldValue.serverTimestamp()
     });
+    if (displayName !== undefined) {
+      try {
+        await auth.updateUser(req.params.uid, { displayName: displayName.trim() });
+      } catch (err) {
+        console.warn("Could not sync auth displayName:", err.message);
+      }
+    }
     if (status === "disabled") await auth.revokeRefreshTokens(req.params.uid);
     res.json({ uid: req.params.uid });
   }));
