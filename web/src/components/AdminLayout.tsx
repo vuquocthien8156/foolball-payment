@@ -17,6 +17,7 @@ import {
   Receipt,
   Bell,
   History,
+  LayoutGrid,
 } from "lucide-react";
 import {
   Card,
@@ -143,164 +144,196 @@ const AdminLayout = () => {
             </div>
 
           </div>
-          <div className="flex-1">
-            <nav className="grid items-start px-2 text-sm font-medium lg:px-4">
-              {/* {(isSuperAdmin || allowedTabs.has("dashboard")) && (
-                <NavLink
-                  to={groupPath("admin/dashboard")}
-                  onClick={() => setIsSidebarOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                      isActive ? "bg-muted text-primary" : ""
-                    }`
-                  }
-                >
-                  <Home className="h-4 w-4" />
-                  Dashboard
-                </NavLink>
-              )} */}
-              {account && <NavLink to="/platform" className="text-sm underline">Nền tảng</NavLink>}
+          <div className="flex-1 overflow-y-auto py-3">
+            <nav className="space-y-5 px-3 text-sm font-medium lg:px-4">
               {sharedBills && isSuperAdmin ? (
                 <>
-                  <NavLink
-                    to={groupPath("admin/bills?tab=recurring")}
-                    onClick={() => setIsSidebarOpen(false)}
-                    className={() =>
-                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                        pathname === groupPath("admin/bills") && (!location.search || location.search.includes("tab=recurring"))
-                          ? "bg-muted text-primary font-medium"
-                          : ""
-                      }`
-                    }
-                  >
-                    <Repeat className="h-4 w-4" />
-                    Thu định kỳ
-                  </NavLink>
-                  <NavLink
-                    to={groupPath("admin/bills?tab=monthly")}
-                    onClick={() => setIsSidebarOpen(false)}
-                    className={() =>
-                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                        pathname === groupPath("admin/bills") && location.search.includes("tab=monthly")
-                          ? "bg-muted text-primary font-medium"
-                          : ""
-                      }`
-                    }
-                  >
-                    <Receipt className="h-4 w-4" />
-                    Kỳ thu & Một lần
-                  </NavLink>
-                  <NavLink
-                    to={groupPath("admin/bills?tab=reminders")}
-                    onClick={() => setIsSidebarOpen(false)}
-                    className={() =>
-                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                        pathname === groupPath("admin/bills") && location.search.includes("tab=reminders")
-                          ? "bg-muted text-primary font-medium"
-                          : ""
-                      }`
-                    }
-                  >
-                    <Bell className="h-4 w-4" />
-                    Nhắc nợ tự động
-                  </NavLink>
-                  <NavLink
-                    to={groupPath("admin/bill-history")}
-                    onClick={() => setIsSidebarOpen(false)}
-                    className={({ isActive }) =>
-                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                        isActive ? "bg-muted text-primary font-medium" : ""
-                      }`
-                    }
-                  >
-                    <History className="h-4 w-4" />
-                    Lịch sử thanh toán
-                  </NavLink>
+                  {/* Section: Khoản thu */}
+                  <div className="space-y-1">
+                    <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                      Khoản thu
+                    </div>
+                    <NavLink
+                      to={groupPath("admin/bills?tab=recurring")}
+                      onClick={() => setIsSidebarOpen(false)}
+                      className={() =>
+                        `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
+                          pathname === groupPath("admin/bills") && (!location.search || location.search.includes("tab=recurring"))
+                            ? "bg-muted text-primary font-medium"
+                            : ""
+                        }`
+                      }
+                    >
+                      <Repeat className="h-4 w-4" />
+                      Thu định kỳ
+                    </NavLink>
+                    <NavLink
+                      to={groupPath("admin/bills?tab=monthly")}
+                      onClick={() => setIsSidebarOpen(false)}
+                      className={() =>
+                        `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
+                          pathname === groupPath("admin/bills") && location.search.includes("tab=monthly")
+                            ? "bg-muted text-primary font-medium"
+                            : ""
+                        }`
+                      }
+                    >
+                      <Receipt className="h-4 w-4" />
+                      Kỳ thu & Một lần
+                    </NavLink>
+                    <NavLink
+                      to={groupPath("admin/bill-history")}
+                      onClick={() => setIsSidebarOpen(false)}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
+                          isActive ? "bg-muted text-primary font-medium" : ""
+                        }`
+                      }
+                    >
+                      <History className="h-4 w-4" />
+                      Lịch sử thanh toán
+                    </NavLink>
+                  </div>
+
+                  {/* Section: Tự động hoá */}
+                  <div className="space-y-1">
+                    <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                      Tự động hoá
+                    </div>
+                    <NavLink
+                      to={groupPath("admin/bills?tab=reminders")}
+                      onClick={() => setIsSidebarOpen(false)}
+                      className={() =>
+                        `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
+                          pathname === groupPath("admin/bills") && location.search.includes("tab=reminders")
+                            ? "bg-muted text-primary font-medium"
+                            : ""
+                        }`
+                      }
+                    >
+                      <Bell className="h-4 w-4" />
+                      Nhắc nợ tự động
+                    </NavLink>
+                  </div>
                 </>
               ) : null}
-              {!sharedBills && (isSuperAdmin || allowedTabs.has("matches")) && (
-                <>
+
+              {!sharedBills && (
+                <div className="space-y-1">
+                  <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                    Hoạt động
+                  </div>
+                  {(isSuperAdmin || allowedTabs.has("matches")) && (
+                    <NavLink
+                      to={groupPath("admin/matches")}
+                      onClick={() => setIsSidebarOpen(false)}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
+                          isActive ? "bg-muted text-primary" : ""
+                        }`
+                      }
+                    >
+                      <Trophy className="h-4 w-4" />
+                      Quản lý Trận đấu
+                    </NavLink>
+                  )}
+                  {!groupLoading && hasFeature(groupId, group, "scoring") && (isSuperAdmin || allowedTabs.has("scoring")) ? (
+                    <NavLink
+                      to={groupPath("admin/scoring")}
+                      onClick={() => setIsSidebarOpen(false)}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
+                          isActive ? "bg-muted text-primary" : ""
+                        }`
+                      }
+                    >
+                      <ClipboardCheck className="h-4 w-4" />
+                      Chấm điểm
+                    </NavLink>
+                  ) : null}
+                  {!groupLoading && hasFeature(groupId, group, "liveNotes") && (isSuperAdmin || allowedTabs.has("live")) ? (
+                    <NavLink
+                      to={groupPath("admin/live")}
+                      onClick={() => setIsSidebarOpen(false)}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
+                          isActive ? "bg-muted text-primary" : ""
+                        }`
+                      }
+                    >
+                      <Activity className="h-4 w-4" />
+                      Ghi chú live
+                    </NavLink>
+                  ) : null}
+                </div>
+              )}
+
+              {/* Section: Quản lý nhóm */}
+              <div className="space-y-1">
+                <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                  Quản lý nhóm
+                </div>
+                {isSuperAdmin || allowedTabs.has("members") ? (
                   <NavLink
-                    to={groupPath("admin/matches")}
+                    to={groupPath("admin/members")}
                     onClick={() => setIsSidebarOpen(false)}
                     className={({ isActive }) =>
-                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
+                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
                         isActive ? "bg-muted text-primary" : ""
                       }`
                     }
                   >
-                    <Trophy className="h-4 w-4" />
-                    Quản lý Trận đấu
+                    <Users className="h-4 w-4" />
+                    Thành viên
                   </NavLink>
-                </>
-              )}
-              {isSuperAdmin || allowedTabs.has("members") ? (
-                <NavLink
-                  to={groupPath("admin/members")}
-                  onClick={() => setIsSidebarOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                      isActive ? "bg-muted text-primary" : ""
-                    }`
-                  }
-                >
-                  <Users className="h-4 w-4" />
-                  Thành viên
-                </NavLink>
-              ) : null}
-              {!groupLoading && hasFeature(groupId, group, "scoring") && (isSuperAdmin || allowedTabs.has("scoring")) ? (
-                <NavLink
-                  to={groupPath("admin/scoring")}
-                  onClick={() => setIsSidebarOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                      isActive ? "bg-muted text-primary" : ""
-                    }`
-                  }
-                >
-                  <ClipboardCheck className="h-4 w-4" />
-                  Chấm điểm
-                </NavLink>
-              ) : null}
-              {!groupLoading && hasFeature(groupId, group, "liveNotes") && (isSuperAdmin || allowedTabs.has("live")) ? (
-                <NavLink
-                  to={groupPath("admin/live")}
-                  onClick={() => setIsSidebarOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                      isActive ? "bg-muted text-primary" : ""
-                    }`
-                  }
-                >
-                  <Activity className="h-4 w-4" />
-                  Ghi chú live
-                </NavLink>
-              ) : null}
-              {(isSuperAdmin || allowedTabs.has("public")) ? (
-                <NavLink
-                  to={groupPath("public")}
-                  onClick={() => setIsSidebarOpen(false)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary"
-                >
-                  <Globe className="h-4 w-4" />
-                  Trang Public
-                </NavLink>
-              ) : null}
-              {isSuperAdmin || allowedTabs.has("members") ? (
-                <NavLink
-                  to={groupPath("admin/config")}
-                  onClick={() => setIsSidebarOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:text-primary ${
-                      isActive ? "bg-muted text-primary" : ""
-                    }`
-                  }
-                >
-                  <Settings className="h-4 w-4" />
-                  Cấu hình
-                </NavLink>
+                ) : null}
+                {isSuperAdmin || allowedTabs.has("public") ? (
+                  <NavLink
+                    to={groupPath("public")}
+                    onClick={() => setIsSidebarOpen(false)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary"
+                  >
+                    <Globe className="h-4 w-4" />
+                    Trang Public
+                  </NavLink>
+                ) : null}
+                {isSuperAdmin || allowedTabs.has("members") ? (
+                  <NavLink
+                    to={groupPath("admin/config")}
+                    onClick={() => setIsSidebarOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
+                        isActive ? "bg-muted text-primary" : ""
+                      }`
+                    }
+                  >
+                    <Settings className="h-4 w-4" />
+                    Cấu hình
+                  </NavLink>
+                ) : null}
+              </div>
+
+              {/* Section: Hệ thống (nếu có tài khoản platform) */}
+              {account ? (
+                <div className="space-y-1 pt-2 border-t">
+                  <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                    Hệ thống
+                  </div>
+                  <NavLink
+                    to="/platform"
+                    onClick={() => setIsSidebarOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted/60 hover:text-primary ${
+                        isActive ? "bg-muted text-primary font-medium" : ""
+                      }`
+                    }
+                  >
+                    <LayoutGrid className="h-4 w-4" />
+                    Nền tảng
+                  </NavLink>
+                </div>
               ) : null}
             </nav>
           </div>
