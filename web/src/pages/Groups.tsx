@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Users, Trash2, Shield, Loader2, UserPlus, X, Pencil, CreditCard, Copy, ExternalLink, QrCode, CheckCircle2, ArrowRight, Check } from "lucide-react";
+import { Users, Trash2, Shield, Loader2, UserPlus, X, Pencil, CreditCard, Copy, ExternalLink, QrCode, CheckCircle2, ArrowRight, Check, ChevronDown, ChevronUp } from "lucide-react";
 
 type Group = {
   id: string;
@@ -88,6 +88,7 @@ const Groups = () => {
   const [settlingAllPast, setSettlingAllPast] = useState(false);
   const [settlingMatchId, setSettlingMatchId] = useState<string | null>(null);
   const [linkingMemberId, setLinkingMemberId] = useState<string | null>(null);
+  const [showOwnerMatches, setShowOwnerMatches] = useState(false);
 
   // Delete Group State
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
@@ -341,6 +342,22 @@ const Groups = () => {
       });
     } finally {
       setLinkingMemberId(null);
+    }
+  };
+
+  const handleSettleOwnerMatches = async (groupId: string, matches: any[]) => {
+    if (!matches?.length) return;
+    try {
+      const matchIds = matches.map((m: any) => m.id);
+      await apiRequest("POST", "/platform/settlement/batch-settle", {
+        groupId,
+        matchIds,
+        note: "Super Admin self-settled all matches",
+      });
+      toast({ title: `Đã đóng đối soát ${matches.length} trận bạn tự ứng thành công` });
+      await fetchSettlementOverview();
+    } catch {
+      toast({ variant: "destructive", title: "Không thể đóng đối soát" });
     }
   };
 
@@ -847,174 +864,313 @@ const Groups = () => {
                           </div>
 
                           {/* Grouped by Member / Payer */}
-                          <div className="space-y-3">
-                            {payerGroups.map((payerGroup: any, pIdx: number) => (
-                              <div
-                                key={pIdx}
-                                className="rounded-lg border border-border/70 bg-muted/20 overflow-hidden"
-                              >
-                                {/* Payer Header */}
-                                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-muted/40 border-b">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <Badge
-                                      variant="outline"
-                                      className={`text-xs px-2 py-0.5 font-medium ${
-                                        payerGroup.isOwner
-                                          ? "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800"
-                                          : payerGroup.isManager
-                                            ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
-                                            : "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
-                                      }`}
-                                    >
-                                      👤 Người ứng: {payerGroup.payerName}
-                                      {payerGroup.isOwner
-                                        ? " 👑 (Bạn - Super Admin)"
-                                        : payerGroup.isManager
-                                          ? " (Quản lý nhóm)"
-                                          : " (Thành viên)"}
-                                    </Badge>
+                          {(() => {
+                            const regularPayerGroups = payerGroups.filter((pg: any) => !pg.isOwner);
+                            const ownerPayerGroups = payerGroups.filter((pg: any) => pg.isOwner);
+                            const totalOwnerMatches = ownerPayerGroups.reduce((sum: number, pg: any) => sum + (pg.matches?.length || 0), 0);
 
-                                    {payerGroup.isOwner ? (
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-[11px] text-muted-foreground italic">
-                                          (Đã tự giữ tiền PayOS - Không cần hoàn)
-                                        </span>
-                                        {payerGroup.payerId && (
+                            return (
+                              <div className="space-y-3">
+                                {regularPayerGroups.length === 0 && ownerPayerGroups.length > 0 && !showOwnerMatches ? (
+                                  <div className="p-3 text-xs text-muted-foreground text-center rounded-lg border border-dashed bg-muted/10">
+                                    🎉 Nhóm này không có trận nào của thành viên khác cần hoàn tiền. (Các trận còn lại do bạn tự ứng).
+                                  </div>
+                                ) : null}
+
+                                {/* 1. Regular Payers needing reimbursement */}
+                                {regularPayerGroups.map((payerGroup: any, pIdx: number) => (
+                                  <div
+                                    key={pIdx}
+                                    className="rounded-lg border border-border/70 bg-muted/20 overflow-hidden"
+                                  >
+                                    {/* Payer Header */}
+                                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-muted/40 border-b">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <Badge
+                                          variant="outline"
+                                          className={`text-xs px-2 py-0.5 font-medium ${
+                                            payerGroup.isManager
+                                              ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
+                                              : "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
+                                          }`}
+                                        >
+                                          👤 Người ứng: {payerGroup.payerName}
+                                          {payerGroup.isManager ? " (Quản lý nhóm)" : " (Thành viên)"}
+                                        </Badge>
+
+                                        {payerGroup.payerId ? (
                                           <Button
                                             size="sm"
                                             variant="ghost"
                                             disabled={linkingMemberId === payerGroup.payerId}
-                                            className="h-5 text-[10px] px-1.5 text-muted-foreground hover:text-destructive"
-                                            onClick={() => handleToggleOwnerMember(item.groupId, payerGroup.payerId, false)}
+                                            className="h-5 text-[10px] px-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                                            onClick={() => handleToggleOwnerMember(item.groupId, payerGroup.payerId, true)}
                                           >
                                             {linkingMemberId === payerGroup.payerId ? (
-                                              <Loader2 className="h-3 w-3 animate-spin" />
+                                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
                                             ) : (
-                                              "Hủy liên kết"
+                                              "⭐ "
                                             )}
+                                            Đây là tôi (Super Admin)
                                           </Button>
-                                        )}
+                                        ) : null}
                                       </div>
-                                    ) : payerGroup.payerId ? (
-                                      <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        disabled={linkingMemberId === payerGroup.payerId}
-                                        className="h-5 text-[10px] px-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
-                                        onClick={() => handleToggleOwnerMember(item.groupId, payerGroup.payerId, true)}
-                                      >
-                                        {linkingMemberId === payerGroup.payerId ? (
-                                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                        ) : (
-                                          "⭐ "
-                                        )}
-                                        Đây là tôi (Super Admin)
-                                      </Button>
-                                    ) : null}
-                                  </div>
 
-                                  <div className="flex items-center gap-2 text-xs">
-                                    <span className="text-muted-foreground">
-                                      {payerGroup.matches?.length || 0} trận:
-                                    </span>
-                                    <strong
-                                      className={`${
-                                        payerGroup.isOwner
-                                          ? "text-slate-400 line-through"
-                                          : "text-emerald-600 dark:text-emerald-400"
-                                      } font-bold`}
-                                    >
-                                      {payerGroup.totalAmount?.toLocaleString()} VND
-                                    </strong>
-                                  </div>
-                                </div>
+                                      <div className="flex items-center gap-2 text-xs">
+                                        <span className="text-muted-foreground">
+                                          {payerGroup.matches?.length || 0} trận:
+                                        </span>
+                                        <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                          {payerGroup.totalAmount?.toLocaleString()} VND
+                                        </strong>
+                                      </div>
+                                    </div>
 
-                                {/* Matches List for this Payer */}
-                                <div className="divide-y divide-border/50">
-                                  {payerGroup.matches?.map((match: any) => {
-                                    const matchDate = match.date ? new Date(match.date) : null;
-                                    const dateFormatted = matchDate && !isNaN(matchDate.getTime())
-                                      ? matchDate.toLocaleDateString("vi-VN", {
-                                          weekday: "short",
-                                          day: "2-digit",
-                                          month: "2-digit",
-                                          year: "numeric",
-                                          hour: "2-digit",
-                                          minute: "2-digit",
-                                        })
-                                      : (match.date || "Trận đấu");
+                                    {/* Matches List for this Payer */}
+                                    <div className="divide-y divide-border/50">
+                                      {payerGroup.matches?.map((match: any) => {
+                                        const matchDate = match.date ? new Date(match.date) : null;
+                                        const dateFormatted = matchDate && !isNaN(matchDate.getTime())
+                                          ? matchDate.toLocaleDateString("vi-VN", {
+                                              weekday: "short",
+                                              day: "2-digit",
+                                              month: "2-digit",
+                                              year: "numeric",
+                                              hour: "2-digit",
+                                              minute: "2-digit",
+                                            })
+                                          : (match.date || "Trận đấu");
 
-                                    return (
-                                      <div
-                                        key={match.id}
-                                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-muted/30 transition-colors"
-                                      >
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                          <span className="font-semibold text-foreground">
-                                            📅 {dateFormatted}
-                                          </span>
-                                          {match.venueName && (
-                                            <span className="text-muted-foreground">
-                                              • {match.venueName}
-                                            </span>
-                                          )}
-                                          {/* Collection Progress Badge */}
-                                          {match.isFullyCollected ? (
-                                            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
-                                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                              Đã thu đủ ({match.collectedAmount?.toLocaleString()}đ)
-                                            </span>
-                                          ) : match.collectedAmount > 0 ? (
-                                            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
-                                              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                                              Mới thu {match.collectedAmount?.toLocaleString()} / {match.totalAmount?.toLocaleString()}đ (còn {match.pendingSharesCount} người)
-                                            </span>
-                                          ) : (
-                                            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
-                                              <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                                              Chưa thu được tiền (0đ)
-                                            </span>
-                                          )}
-                                        </div>
-
-                                        <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
-                                          <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                                            {match.totalAmount?.toLocaleString()} VND
-                                          </span>
-                                          {match.isOwnerPayer ? (
-                                            <span className="text-[11px] text-muted-foreground italic px-2 py-0.5 rounded bg-muted/60">
-                                              Đã tự giữ tiền
-                                            </span>
-                                          ) : (
-                                            <Button
-                                              size="sm"
-                                              variant="outline"
-                                              className="h-6 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800"
-                                              disabled={settlingMatchId === match.id}
-                                              onClick={() =>
-                                                handleSettleSingleMatch(
-                                                  match,
-                                                  item.groupId,
-                                                  payerGroup.payerName
-                                                )
-                                              }
-                                            >
-                                              {settlingMatchId === match.id ? (
-                                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                              ) : (
-                                                <Check className="h-3 w-3 mr-1" />
+                                        return (
+                                          <div
+                                            key={match.id}
+                                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-muted/30 transition-colors"
+                                          >
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className="font-semibold text-foreground">
+                                                📅 {dateFormatted}
+                                              </span>
+                                              {match.venueName && (
+                                                <span className="text-muted-foreground">
+                                                  • {match.venueName}
+                                                </span>
                                               )}
-                                              Đã hoàn
-                                            </Button>
-                                          )}
-                                        </div>
+                                              {/* Collection Progress Badge */}
+                                              {match.isFullyCollected ? (
+                                                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
+                                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                                  Đã thu đủ ({match.collectedAmount?.toLocaleString()}đ)
+                                                </span>
+                                              ) : match.collectedAmount > 0 ? (
+                                                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
+                                                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                                  Mới thu {match.collectedAmount?.toLocaleString()} / {match.totalAmount?.toLocaleString()}đ (còn {match.pendingSharesCount} người)
+                                                </span>
+                                              ) : (
+                                                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+                                                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                                                  Chưa thu được tiền (0đ)
+                                                </span>
+                                              )}
+                                            </div>
+
+                                            <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
+                                              <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                                {match.totalAmount?.toLocaleString()} VND
+                                              </span>
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-6 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800"
+                                                disabled={settlingMatchId === match.id}
+                                                onClick={() =>
+                                                  handleSettleSingleMatch(
+                                                    match,
+                                                    item.groupId,
+                                                    payerGroup.payerName
+                                                  )
+                                                }
+                                              >
+                                                {settlingMatchId === match.id ? (
+                                                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                                ) : (
+                                                  <Check className="h-3 w-3 mr-1" />
+                                                )}
+                                                Đã hoàn
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ))}
+
+                                {/* 2. Owner Payers: Hidden by default, collapsible */}
+                                {ownerPayerGroups.length > 0 ? (
+                                  <div className="pt-1">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-6 text-[11px] text-muted-foreground hover:text-foreground gap-1.5 px-2"
+                                        onClick={() => setShowOwnerMatches((prev) => !prev)}
+                                      >
+                                        {showOwnerMatches ? (
+                                          <>
+                                            <ChevronUp className="h-3.5 w-3.5" />
+                                            Ẩn {totalOwnerMatches} trận bạn tự ứng (Đã tự giữ tiền PayOS)
+                                          </>
+                                        ) : (
+                                          <>
+                                            <ChevronDown className="h-3.5 w-3.5" />
+                                            Xem {totalOwnerMatches} trận bạn tự ứng (Đã tự giữ tiền PayOS - Không cần hoàn)
+                                          </>
+                                        )}
+                                      </Button>
+                                      {showOwnerMatches && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 text-[10px] text-purple-700 hover:text-purple-800 hover:bg-purple-50 dark:hover:bg-purple-950/40 px-2 font-medium"
+                                          onClick={() => handleSettleOwnerMatches(item.groupId, ownerPayerGroups.flatMap((pg: any) => pg.matches || []))}
+                                        >
+                                          ✓ Hoàn tất đối soát tất cả ({totalOwnerMatches} trận)
+                                        </Button>
+                                      )}
+                                    </div>
+
+                                    {showOwnerMatches && (
+                                      <div className="mt-2 space-y-3 opacity-95">
+                                        {ownerPayerGroups.map((payerGroup: any, pIdx: number) => (
+                                          <div
+                                            key={`owner_${pIdx}`}
+                                            className="rounded-lg border border-purple-200/80 bg-purple-50/20 dark:border-purple-900/50 dark:bg-purple-950/10 overflow-hidden"
+                                          >
+                                            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-purple-50/50 dark:bg-purple-950/30 border-b border-purple-200/50">
+                                              <div className="flex items-center gap-2 flex-wrap">
+                                                <Badge
+                                                  variant="outline"
+                                                  className="text-xs px-2 py-0.5 font-medium bg-purple-100/70 text-purple-800 border-purple-300 dark:bg-purple-950/60 dark:text-purple-200"
+                                                >
+                                                  👤 Người ứng: {payerGroup.payerName} 👑 (Bạn - Super Admin)
+                                                </Badge>
+                                                <span className="text-[11px] text-muted-foreground italic">
+                                                  (Đã tự giữ tiền PayOS - Không cần hoàn)
+                                                </span>
+                                                {payerGroup.payerId && (
+                                                  <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    disabled={linkingMemberId === payerGroup.payerId}
+                                                    className="h-5 text-[10px] px-1.5 text-muted-foreground hover:text-destructive"
+                                                    onClick={() => handleToggleOwnerMember(item.groupId, payerGroup.payerId, false)}
+                                                  >
+                                                    {linkingMemberId === payerGroup.payerId ? (
+                                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                                    ) : (
+                                                      "Hủy liên kết"
+                                                    )}
+                                                  </Button>
+                                                )}
+                                              </div>
+
+                                              <div className="flex items-center gap-2 text-xs">
+                                                <span className="text-muted-foreground">
+                                                  {payerGroup.matches?.length || 0} trận:
+                                                </span>
+                                                <strong className="text-slate-400 line-through font-bold">
+                                                  {payerGroup.totalAmount?.toLocaleString()} VND
+                                                </strong>
+                                              </div>
+                                            </div>
+
+                                            <div className="divide-y divide-purple-100/60 dark:divide-purple-950/40">
+                                              {payerGroup.matches?.map((match: any) => {
+                                                const matchDate = match.date ? new Date(match.date) : null;
+                                                const dateFormatted = matchDate && !isNaN(matchDate.getTime())
+                                                  ? matchDate.toLocaleDateString("vi-VN", {
+                                                      weekday: "short",
+                                                      day: "2-digit",
+                                                      month: "2-digit",
+                                                      year: "numeric",
+                                                      hour: "2-digit",
+                                                      minute: "2-digit",
+                                                    })
+                                                  : (match.date || "Trận đấu");
+
+                                                return (
+                                                  <div
+                                                    key={match.id}
+                                                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-purple-50/30 transition-colors"
+                                                  >
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                      <span className="font-semibold text-foreground">
+                                                        📅 {dateFormatted}
+                                                      </span>
+                                                      {match.venueName && (
+                                                        <span className="text-muted-foreground">
+                                                          • {match.venueName}
+                                                        </span>
+                                                      )}
+                                                      {match.isFullyCollected ? (
+                                                        <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                                          Đã thu đủ ({match.collectedAmount?.toLocaleString()}đ)
+                                                        </span>
+                                                      ) : match.collectedAmount > 0 ? (
+                                                        <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                                                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                                          Mới thu {match.collectedAmount?.toLocaleString()} / {match.totalAmount?.toLocaleString()}đ (còn {match.pendingSharesCount} người)
+                                                        </span>
+                                                      ) : (
+                                                        <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                                                          <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                                                          Chưa thu được tiền (0đ)
+                                                        </span>
+                                                      )}
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
+                                                      <span className="font-bold text-slate-400 line-through">
+                                                        {match.totalAmount?.toLocaleString()} VND
+                                                      </span>
+                                                      <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-6 text-[11px] px-2 text-purple-700 hover:text-purple-800 hover:bg-purple-50 dark:hover:bg-purple-950/30 border-purple-300 dark:border-purple-800"
+                                                        disabled={settlingMatchId === match.id}
+                                                        onClick={() =>
+                                                          handleSettleSingleMatch(
+                                                            match,
+                                                            item.groupId,
+                                                            payerGroup.payerName
+                                                          )
+                                                        }
+                                                      >
+                                                        {settlingMatchId === match.id ? (
+                                                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                                        ) : (
+                                                          <Check className="h-3 w-3 mr-1" />
+                                                        )}
+                                                        Đã giữ tiền & Đóng đối soát
+                                                      </Button>
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        ))}
                                       </div>
-                                    );
-                                  })}
-                                </div>
+                                    )}
+                                  </div>
+                                ) : null}
                               </div>
-                            ))}
-                          </div>
+                            );
+                          })()}
 
                           {/* Recipient Account info */}
                           <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-muted/40 p-2.5 rounded-lg">
