@@ -87,6 +87,7 @@ const Groups = () => {
   const [batchSettlingGid, setBatchSettlingGid] = useState<string | null>(null);
   const [settlingAllPast, setSettlingAllPast] = useState(false);
   const [settlingMatchId, setSettlingMatchId] = useState<string | null>(null);
+  const [linkingMemberId, setLinkingMemberId] = useState<string | null>(null);
 
   // Delete Group State
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
@@ -258,10 +259,20 @@ const Groups = () => {
   };
 
   const handleBatchSettleGroup = async (groupItem: any) => {
-    if (!groupItem?.pendingMatches?.length) return;
+    const matchesToSettle = (groupItem?.pendingMatches || []).filter((m: any) => !m.isOwnerPayer);
+    if (!matchesToSettle.length) return;
+
+    const uncollectedCount = matchesToSettle.filter((m: any) => !m.isFullyCollected).length;
+    if (uncollectedCount > 0) {
+      const confirmed = window.confirm(
+        `Cảnh báo: Có ${uncollectedCount} trận chưa thu đủ tiền từ thành viên.\n\nBạn có chắc chắn muốn hoàn tiền cho tất cả ${matchesToSettle.length} trận không?`
+      );
+      if (!confirmed) return;
+    }
+
     setBatchSettlingGid(groupItem.groupId);
     try {
-      const matchIds = groupItem.pendingMatches.map((m: any) => m.id);
+      const matchIds = matchesToSettle.map((m: any) => m.id);
       await apiRequest("POST", "/platform/settlement/batch-settle", {
         groupId: groupItem.groupId,
         matchIds,
@@ -276,12 +287,19 @@ const Groups = () => {
     }
   };
 
-  const handleSettleSingleMatch = async (matchId: string, groupId: string, payerName: string) => {
-    setSettlingMatchId(matchId);
+  const handleSettleSingleMatch = async (match: any, groupId: string, payerName: string) => {
+    if (!match.isFullyCollected) {
+      const confirmed = window.confirm(
+        `Cảnh báo: Trận đấu này chưa thu đủ tiền từ các thành viên (Mới thu ${match.collectedAmount?.toLocaleString() || 0} / ${match.totalAmount?.toLocaleString()} VND).\n\nBạn có chắc chắn muốn hoàn tiền trước cho người ứng không?`
+      );
+      if (!confirmed) return;
+    }
+
+    setSettlingMatchId(match.id);
     try {
       await apiRequest("POST", "/platform/settlement/batch-settle", {
         groupId,
-        matchIds: [matchId],
+        matchIds: [match.id],
         note: `Settled single match for payer ${payerName}`,
       });
       toast({
@@ -297,6 +315,32 @@ const Groups = () => {
       });
     } finally {
       setSettlingMatchId(null);
+    }
+  };
+
+  const handleToggleOwnerMember = async (groupId: string, memberId: string, isPlatformOwner: boolean) => {
+    setLinkingMemberId(memberId);
+    try {
+      await apiRequest("POST", "/platform/settlement/link-owner-member", {
+        groupId,
+        memberId,
+        isPlatformOwner,
+      });
+      toast({
+        title: isPlatformOwner ? "Đã gán thành viên là Super Admin" : "Đã hủy gán Super Admin",
+        description: isPlatformOwner
+          ? "Các trận do thành viên này ứng sẽ không cần hoàn tiền (tiền đã về PayOS của bạn)."
+          : "Thành viên này sẽ được tính hoàn tiền bình thường.",
+      });
+      await fetchSettlementOverview();
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi cập nhật thành viên",
+        description: err.message || "Không thể cập nhật liên kết Super Admin",
+      });
+    } finally {
+      setLinkingMemberId(null);
     }
   };
 
@@ -811,22 +855,75 @@ const Groups = () => {
                               >
                                 {/* Payer Header */}
                                 <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-muted/40 border-b">
-                                  <Badge
-                                    variant="outline"
-                                    className={`text-xs px-2 py-0.5 font-medium ${
-                                      payerGroup.isManager
-                                        ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
-                                        : "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
-                                    }`}
-                                  >
-                                    👤 Người ứng: {payerGroup.payerName}
-                                    {payerGroup.isManager ? " (Quản lý nhóm)" : " (Thành viên)"}
-                                  </Badge>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-xs px-2 py-0.5 font-medium ${
+                                        payerGroup.isOwner
+                                          ? "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800"
+                                          : payerGroup.isManager
+                                            ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
+                                            : "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
+                                      }`}
+                                    >
+                                      👤 Người ứng: {payerGroup.payerName}
+                                      {payerGroup.isOwner
+                                        ? " 👑 (Bạn - Super Admin)"
+                                        : payerGroup.isManager
+                                          ? " (Quản lý nhóm)"
+                                          : " (Thành viên)"}
+                                    </Badge>
+
+                                    {payerGroup.isOwner ? (
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[11px] text-muted-foreground italic">
+                                          (Đã tự giữ tiền PayOS - Không cần hoàn)
+                                        </span>
+                                        {payerGroup.payerId && (
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            disabled={linkingMemberId === payerGroup.payerId}
+                                            className="h-5 text-[10px] px-1.5 text-muted-foreground hover:text-destructive"
+                                            onClick={() => handleToggleOwnerMember(item.groupId, payerGroup.payerId, false)}
+                                          >
+                                            {linkingMemberId === payerGroup.payerId ? (
+                                              <Loader2 className="h-3 w-3 animate-spin" />
+                                            ) : (
+                                              "Hủy liên kết"
+                                            )}
+                                          </Button>
+                                        )}
+                                      </div>
+                                    ) : payerGroup.payerId ? (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        disabled={linkingMemberId === payerGroup.payerId}
+                                        className="h-5 text-[10px] px-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                                        onClick={() => handleToggleOwnerMember(item.groupId, payerGroup.payerId, true)}
+                                      >
+                                        {linkingMemberId === payerGroup.payerId ? (
+                                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                        ) : (
+                                          "⭐ "
+                                        )}
+                                        Đây là tôi (Super Admin)
+                                      </Button>
+                                    ) : null}
+                                  </div>
+
                                   <div className="flex items-center gap-2 text-xs">
                                     <span className="text-muted-foreground">
                                       {payerGroup.matches?.length || 0} trận:
                                     </span>
-                                    <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                    <strong
+                                      className={`${
+                                        payerGroup.isOwner
+                                          ? "text-slate-400 line-through"
+                                          : "text-emerald-600 dark:text-emerald-400"
+                                      } font-bold`}
+                                    >
                                       {payerGroup.totalAmount?.toLocaleString()} VND
                                     </strong>
                                   </div>
@@ -861,32 +958,55 @@ const Groups = () => {
                                               • {match.venueName}
                                             </span>
                                           )}
+                                          {/* Collection Progress Badge */}
+                                          {match.isFullyCollected ? (
+                                            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
+                                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                              Đã thu đủ ({match.collectedAmount?.toLocaleString()}đ)
+                                            </span>
+                                          ) : match.collectedAmount > 0 ? (
+                                            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
+                                              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                              Mới thu {match.collectedAmount?.toLocaleString()} / {match.totalAmount?.toLocaleString()}đ (còn {match.pendingSharesCount} người)
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+                                              <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                                              Chưa thu được tiền (0đ)
+                                            </span>
+                                          )}
                                         </div>
 
                                         <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
                                           <span className="font-bold text-emerald-600 dark:text-emerald-400">
                                             {match.totalAmount?.toLocaleString()} VND
                                           </span>
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            className="h-6 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800"
-                                            disabled={settlingMatchId === match.id}
-                                            onClick={() =>
-                                              handleSettleSingleMatch(
-                                                match.id,
-                                                item.groupId,
-                                                payerGroup.payerName
-                                              )
-                                            }
-                                          >
-                                            {settlingMatchId === match.id ? (
-                                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                            ) : (
-                                              <Check className="h-3 w-3 mr-1" />
-                                            )}
-                                            Đã hoàn
-                                          </Button>
+                                          {match.isOwnerPayer ? (
+                                            <span className="text-[11px] text-muted-foreground italic px-2 py-0.5 rounded bg-muted/60">
+                                              Đã tự giữ tiền
+                                            </span>
+                                          ) : (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="h-6 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800"
+                                              disabled={settlingMatchId === match.id}
+                                              onClick={() =>
+                                                handleSettleSingleMatch(
+                                                  match,
+                                                  item.groupId,
+                                                  payerGroup.payerName
+                                                )
+                                              }
+                                            >
+                                              {settlingMatchId === match.id ? (
+                                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                              ) : (
+                                                <Check className="h-3 w-3 mr-1" />
+                                              )}
+                                              Đã hoàn
+                                            </Button>
+                                          )}
                                         </div>
                                       </div>
                                     );
@@ -924,7 +1044,7 @@ const Groups = () => {
                                 size="sm"
                                 variant="default"
                                 className="h-7 text-xs"
-                                disabled={batchSettlingGid === item.groupId}
+                                disabled={batchSettlingGid === item.groupId || item.pendingCount === 0}
                                 onClick={() => handleBatchSettleGroup(item)}
                               >
                                 {batchSettlingGid === item.groupId ? (

@@ -386,6 +386,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           id: mDoc.id,
           name: mData.name,
           nickname: mData.nickname || "",
+          isPlatformOwner: !!mData.isPlatformOwner,
         });
       });
 
@@ -395,45 +396,82 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         .where("status", "in", ["PUBLISHED", "COMPLETED"])
         .get();
 
+      const pendingMatchDocs = matchesSnap.docs.filter((mDoc) => mDoc.data().payoutStatus !== "PAID_OUT");
+
+      // Concurrently query shares for all pending matches to calculate collection progress
+      const sharesSnapshots = await Promise.all(
+        pendingMatchDocs.map((mDoc) => db.collection(`matches/${mDoc.id}/shares`).get())
+      );
+
       const pendingMatches = [];
       let groupPendingAmount = 0;
 
-      matchesSnap.docs.forEach((mDoc) => {
+      pendingMatchDocs.forEach((mDoc, idx) => {
         const m = mDoc.data();
-        if (m.payoutStatus !== "PAID_OUT") {
-          const amount = Number(m.totalAmount) || 0;
-          groupPendingAmount += amount;
+        const sharesSnap = sharesSnapshots[idx];
+        let collectedAmount = 0;
+        let totalShareAmount = 0;
+        let pendingSharesCount = 0;
+        let paidSharesCount = 0;
 
-          let paidByName = "";
-          let isManagerPayer = false;
-          if (m.paidByMemberId && membersMap.has(m.paidByMemberId)) {
-            const memberObj = membersMap.get(m.paidByMemberId);
-            paidByName = memberObj.name;
-          } else if (m.paidByMemberId) {
-            paidByName = "Thành viên #" + m.paidByMemberId.slice(0, 6);
+        sharesSnap.docs.forEach((sDoc) => {
+          const s = sDoc.data();
+          const amt = Number(s.amount) || 0;
+          totalShareAmount += amt;
+          if (s.status === "PAID") {
+            collectedAmount += amt;
+            paidSharesCount++;
           } else {
-            paidByName = managerName || "Quản lý nhóm";
-            isManagerPayer = true;
+            pendingSharesCount++;
           }
+        });
 
-          let dateIso = null;
-          if (m.date?.toDate) {
-            dateIso = m.date.toDate().toISOString();
-          } else if (m.date) {
-            dateIso = new Date(m.date).toISOString();
-          }
+        const isFullyCollected = totalShareAmount > 0 ? (pendingSharesCount === 0) : false;
+        const amount = Number(m.totalAmount) || 0;
 
-          pendingMatches.push({
-            id: mDoc.id,
-            date: dateIso,
-            totalAmount: amount,
-            venueName: m.venueName || null,
-            status: m.status,
-            paidByMemberId: m.paidByMemberId || null,
-            paidByMemberName: paidByName,
-            isManagerPayer,
-          });
+        let paidByName = "";
+        let isManagerPayer = false;
+        let isOwnerPayer = false;
+
+        if (m.paidByMemberId && membersMap.has(m.paidByMemberId)) {
+          const memberObj = membersMap.get(m.paidByMemberId);
+          paidByName = memberObj.name;
+          isOwnerPayer = !!memberObj.isPlatformOwner;
+        } else if (m.paidByMemberId) {
+          paidByName = "Thành viên #" + m.paidByMemberId.slice(0, 6);
+        } else {
+          paidByName = managerName || "Quản lý nhóm";
+          isManagerPayer = true;
         }
+
+        // Only count towards group pending reimbursement if payer is NOT the Super Admin
+        if (!isOwnerPayer) {
+          groupPendingAmount += amount;
+        }
+
+        let dateIso = null;
+        if (m.date?.toDate) {
+          dateIso = m.date.toDate().toISOString();
+        } else if (m.date) {
+          dateIso = new Date(m.date).toISOString();
+        }
+
+        pendingMatches.push({
+          id: mDoc.id,
+          date: dateIso,
+          totalAmount: amount,
+          venueName: m.venueName || null,
+          status: m.status,
+          paidByMemberId: m.paidByMemberId || null,
+          paidByMemberName: paidByName,
+          isManagerPayer,
+          isOwnerPayer,
+          collectedAmount,
+          totalShareAmount,
+          pendingSharesCount,
+          paidSharesCount,
+          isFullyCollected,
+        });
       });
 
       // Sort pending matches by date descending
@@ -452,6 +490,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
             payerId: pm.paidByMemberId || null,
             payerName: pm.paidByMemberName,
             isManager: pm.isManagerPayer,
+            isOwner: pm.isOwnerPayer,
             totalAmount: 0,
             matches: [],
           });
@@ -462,9 +501,10 @@ function createPlatformRouter({ db, auth, FieldValue }) {
       });
       const payerGroups = Array.from(payerGroupsMap.values());
 
-      if (pendingMatches.length > 0) {
+      const pendingMatchesNeedingReimbursement = pendingMatches.filter((pm) => !pm.isOwnerPayer);
+      if (pendingMatchesNeedingReimbursement.length > 0) {
         pendingGroupsCount++;
-        pendingMatchesCount += pendingMatches.length;
+        pendingMatchesCount += pendingMatchesNeedingReimbursement.length;
         totalPendingAmount += groupPendingAmount;
       }
 
@@ -484,7 +524,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         pendingMatches,
         payerGroups,
         pendingAmount: groupPendingAmount,
-        pendingCount: pendingMatches.length,
+        pendingCount: pendingMatchesNeedingReimbursement.length,
       });
     }
 
@@ -498,6 +538,25 @@ function createPlatformRouter({ db, auth, FieldValue }) {
       },
       groups: groupsData,
     });
+  }));
+
+  // Link or Unlink a member as Platform Owner / Super Admin (Only Super Admin can set this)
+  router.post("/settlement/link-owner-member", requireOwner, wrap(async (req, res) => {
+    const { groupId, memberId, isPlatformOwner } = req.body || {};
+    if (!groupId || !memberId || typeof isPlatformOwner !== "boolean") {
+      return res.status(400).json({ error: "INVALID_INPUT" });
+    }
+    const memberRef = db.collection("members").doc(memberId);
+    const snap = await memberRef.get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: "MEMBER_NOT_FOUND" });
+    }
+    await memberRef.update({
+      isPlatformOwner,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: req.uid,
+    });
+    res.json({ success: true, memberId, isPlatformOwner });
   }));
 
   // Batch Settle Matches (Super Admin marks matches as paid out)
