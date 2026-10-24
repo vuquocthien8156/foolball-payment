@@ -78,9 +78,28 @@
 
 ---
 
+### Slice 5: Account Editing, Modal Search & Self-Service Member Linking (Completed)
+1. **Edit Account Dialog in `PlatformAccounts.tsx`**:
+   - Added `[✏️ Sửa]` button for all accounts.
+   - Allows updating `displayName` and `role` with safety guards preventing owner self-demotion.
+   - Syncs `displayName` update to both Firestore and Firebase Auth (`auth.updateUser`).
+2. **Search Box in Linking Modal (`PlatformAccounts.tsx`)**:
+   - Live search input filtering by member name, nickname, or group name.
+   - Preserves selected member keys during active search filtering.
+3. **Self-Service Claim in `Members.tsx`**:
+   - `[⭐ Tôi là thành viên này]` 1-click self-claim button for logged-in users.
+   - `⭐ Bạn (Tài khoản của bạn)` badge with tooltip explanation and unclaim capability.
+   - Account linking status displayed inside the Edit Member dialog.
+4. **Auto-Seed Member on Group Creation (`Groups.tsx`)**:
+   - `☑ Tự động thêm tôi làm thành viên trong nhóm này` checkbox when creating a new group.
+   - Automatically provisions a linked member profile with `accountUid = user.uid`.
+5. **Manager Guidance Tip Banner (`Groups.tsx`)**:
+   - Callout banner displayed in Settlement Modal guiding managers to self-claim if they have not linked their profile yet.
+
+---
+
 ## 4. Verification & Testing
-1. Run `node --test web/tests/*.test.mjs` to ensure zero regressions on auth, groups, and settlements.
-2. Build frontend via `npm run build` in `web/`.
-3. Test batch settle of all matches for regular payers.
-4. Test linking a member (e.g. `Thiên Nhỏ`) to an account and verifying automatic recognition.
-5. Deploy to Firebase and verify in production.
+1. Run `node --test web/tests/*.test.mjs` (220 tests passed).
+2. Build frontend via `npm run build` in `web/` (build passed cleanly).
+3. Deployed both Cloud Functions and Firebase Hosting to live production.
+
