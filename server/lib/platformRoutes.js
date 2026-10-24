@@ -391,7 +391,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         result.push({
           groupId: gid,
           groupName: gData.name || gid,
-          sport: gData.sport || "sports",
+          sport: gData.sport || (gData.kind === "shared_bills" ? "Chia tiền định kỳ" : "Thể thao"),
           members,
         });
       }

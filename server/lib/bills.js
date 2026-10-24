@@ -198,13 +198,15 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
       name: doc.data().name,
       inactive: !!doc.data().inactive,
       autoCoverWhenPayer: doc.data().autoCoverWhenPayer !== false,
+      accountUid: doc.data().accountUid || null,
     }));
   }
 
   async function saveMember(gid, id, input, actorUid) {
     if (!isValidGroupId(gid) || !validId(id) || typeof input.name !== "string" || !input.name.trim() || input.name.trim().length > 60 ||
         (input.inactive !== undefined && typeof input.inactive !== "boolean") ||
-        (input.autoCoverWhenPayer !== undefined && typeof input.autoCoverWhenPayer !== "boolean")) reject(400, "INVALID_MEMBER");
+        (input.autoCoverWhenPayer !== undefined && typeof input.autoCoverWhenPayer !== "boolean") ||
+        (input.accountUid !== undefined && input.accountUid !== null && typeof input.accountUid !== "string")) reject(400, "INVALID_MEMBER");
     const ref = db.collection("members").doc(id);
     return db.runTransaction(async (tx) => {
       const [group, member] = await tx.getAll(groupRef(gid), ref);
@@ -215,6 +217,7 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
         name: input.name.trim(),
         inactive: input.inactive ?? false,
         autoCoverWhenPayer: input.autoCoverWhenPayer ?? true,
+        ...(input.accountUid !== undefined ? { accountUid: input.accountUid } : {}),
         updatedBy: actorUid,
         updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });

@@ -1,4 +1,4 @@
-export interface BillMember { id: string; name: string; inactive: boolean; bankInfo?: { bankCode?: string; accountNumber?: string; accountName?: string } | null }
+export interface BillMember { id: string; name: string; inactive: boolean; accountUid?: string | null; bankInfo?: { bankCode?: string; accountNumber?: string; accountName?: string } | null }
 export interface BillInput {
   title: string;
   amountVnd: number;

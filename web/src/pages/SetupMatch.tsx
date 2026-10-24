@@ -35,6 +35,7 @@ import {
   Trash2,
   Plus,
   X,
+  Sparkles,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -117,8 +118,9 @@ interface ExpenseItem {
   amount: number;
   exemptMemberIds: string[];
   teamPercents?: { [teamId: string]: number };
-  type?: "SHARED" | "INDIVIDUAL" | "EQUAL";
+  type?: "SHARED" | "INDIVIDUAL" | "EQUAL" | "SUBSIDY";
   targetMemberId?: string;
+  note?: string;
 }
 
 interface Share {
@@ -313,15 +315,14 @@ const SetupMatch = () => {
 
   const getTeamEffectivePercent = (teamId: string) => {
     if (!usesTeams) return teamId === "A" ? 100 : 0;
-    const totalExpenseAmount = expenseItems.reduce(
-      (sum, e) => sum + e.amount,
-      0,
-    );
+    const totalExpenseAmount = expenseItems
+      .filter((e) => e.type !== "SUBSIDY")
+      .reduce((sum, e) => sum + e.amount, 0);
     if (totalExpenseAmount <= 0) return teamId === "C" ? 0 : 50;
 
     const teamTotalAmount = expenseItems.reduce((sum, expense) => {
       if (expense.amount <= 0) return sum;
-      if (expense.type === "INDIVIDUAL") return sum;
+      if (expense.type === "INDIVIDUAL" || expense.type === "SUBSIDY") return sum;
       const teamPercent =
         expense.teamPercents?.[teamId] ??
         teams.find((t) => t.id === teamId)?.percent ??
@@ -394,7 +395,9 @@ const SetupMatch = () => {
     if (!newTemplateName.trim()) return;
     setIsSavingTemplate(true);
     try {
-      const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
+      const totalAmount = expenseItems
+        .filter((e) => e.type !== "SUBSIDY")
+        .reduce((sum, e) => sum + e.amount, 0);
       const payload = {
         name: newTemplateName.trim(),
         isDefault: isDefaultTemplate,
@@ -881,10 +884,22 @@ const SetupMatch = () => {
   };
 
   const calculatedShares = useMemo(() => {
-    const totalExpenseAmount = expenseItems.reduce(
-      (sum, e) => sum + e.amount,
-      0,
-    );
+    const totalSubsidyAmount = expenseItems
+      .filter((e) => e.type === "SUBSIDY")
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const totalSharedExpenses = expenseItems
+      .filter((e) => e.type !== "SUBSIDY" && e.type !== "INDIVIDUAL")
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const totalIndividualExpenses = expenseItems
+      .filter((e) => e.type === "INDIVIDUAL")
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const grandMatchTotal = totalSharedExpenses + totalIndividualExpenses;
+    const netSharedPool = Math.max(0, totalSharedExpenses - totalSubsidyAmount);
+    const subsidyDiscountFactor = totalSharedExpenses > 0 ? netSharedPool / totalSharedExpenses : 1;
+
     const memberAmounts: {
       [key: string]: {
         totalAmount: number;
@@ -892,11 +907,30 @@ const SetupMatch = () => {
       };
     } = {};
 
-    if (totalExpenseAmount <= 0) return memberAmounts;
+    if (grandMatchTotal <= 0 && totalSubsidyAmount <= 0) return memberAmounts;
 
     // Loop through each expense
     expenseItems.forEach((expense) => {
       if (expense.amount <= 0) return;
+
+      if (expense.type === "SUBSIDY") {
+        if (expense.targetMemberId) {
+          if (!memberAmounts[expense.targetMemberId]) {
+            memberAmounts[expense.targetMemberId] = {
+              totalAmount: 0,
+              details: [],
+            };
+          }
+          memberAmounts[expense.targetMemberId].totalAmount += expense.amount;
+          const customDesc = expense.description?.trim() || "Trợ giá / Hỗ trợ";
+          const noteDesc = expense.note?.trim() ? ` (${expense.note.trim()})` : "";
+          memberAmounts[expense.targetMemberId].details.push({
+            description: `[Trợ giá] ${customDesc}${noteDesc}`,
+            amount: expense.amount,
+          });
+        }
+        return;
+      }
 
       if (expense.type === "INDIVIDUAL") {
         if (expense.targetMemberId) {
@@ -929,9 +963,10 @@ const SetupMatch = () => {
         });
 
         if (eligibleMembers.length > 0) {
+          const effectiveAmount = Math.round(expense.amount * subsidyDiscountFactor);
           const shares = distributeAmountByWeights(
             eligibleMembers,
-            expense.amount,
+            effectiveAmount,
           );
           eligibleMembers.forEach((member) => {
             const memberAmount = shares.get(member.id) || 0;
@@ -943,8 +978,9 @@ const SetupMatch = () => {
               member.percent && member.percent < 100
                 ? ` (${member.percent}%)`
                 : "";
+            const subsidyNote = totalSubsidyAmount > 0 ? " [Đã trừ trợ giá]" : "";
             memberAmounts[member.id].details.push({
-              description: (expense.description || "Chia đều") + weightDesc,
+              description: (expense.description || "Chia đều") + weightDesc + subsidyNote,
               amount: memberAmount,
             });
           });
@@ -964,7 +1000,8 @@ const SetupMatch = () => {
         if (eligibleMembers.length === 0) return;
 
         const teamPercent = expense.teamPercents?.[team.id] ?? team.percent;
-        const teamTotal = Math.round(expense.amount * (teamPercent / 100));
+        const effectiveExpenseAmount = Math.round(expense.amount * subsidyDiscountFactor);
+        const teamTotal = Math.round(effectiveExpenseAmount * (teamPercent / 100));
 
         const shares = distributeAmountByWeights(eligibleMembers, teamTotal);
         eligibleMembers.forEach((member) => {
@@ -977,8 +1014,9 @@ const SetupMatch = () => {
             member.percent && member.percent < 100
               ? ` (${member.percent}%)`
               : "";
+          const subsidyNote = totalSubsidyAmount > 0 ? " [Đã trừ trợ giá]" : "";
           memberAmounts[member.id].details.push({
-            description: (expense.description || "Tiền sân") + weightDesc,
+            description: (expense.description || "Tiền sân") + weightDesc + subsidyNote,
             amount: memberAmount,
           });
         });
@@ -990,14 +1028,17 @@ const SetupMatch = () => {
       (sum, item) => sum + item.totalAmount,
       0,
     );
-    const diff = totalExpenseAmount - calculatedTotal;
+    const diff = grandMatchTotal - calculatedTotal;
     if (diff !== 0 && Object.keys(memberAmounts).length > 0) {
-      const lastMemberId = Object.keys(memberAmounts).pop();
-      if (lastMemberId) {
-        memberAmounts[lastMemberId].totalAmount += diff;
+      const eligibleAdjustId =
+        Object.keys(memberAmounts).find(
+          (id) => !expenseItems.some((e) => e.type === "SUBSIDY" && e.targetMemberId === id)
+        ) || Object.keys(memberAmounts)[0];
+      if (eligibleAdjustId && memberAmounts[eligibleAdjustId]) {
+        memberAmounts[eligibleAdjustId].totalAmount += diff;
         const lastDetail =
-          memberAmounts[lastMemberId].details[
-            memberAmounts[lastMemberId].details.length - 1
+          memberAmounts[eligibleAdjustId].details[
+            memberAmounts[eligibleAdjustId].details.length - 1
           ];
         if (lastDetail) {
           lastDetail.amount += diff;
@@ -1024,8 +1065,14 @@ const SetupMatch = () => {
     Object.entries(calculatedShares).forEach(([memberId, share]) => {
       if (!activeMemberIds.has(memberId) && share.totalAmount > 0) {
         const member = allMembers.find((m) => m.id === memberId);
+        const subsidyItem = expenseItems.find(
+          (e) => e.type === "SUBSIDY" && e.targetMemberId === memberId,
+        );
+        const label = subsidyItem
+          ? `${member?.name || "Unknown"} [Trợ giá: ${subsidyItem.description || "Hỗ trợ"}]`
+          : `${member?.name || "Unknown"} (Đòi riêng ngoài đội)`;
         otherShares.push({
-          name: `${member?.name || "Unknown"} (Đòi riêng ngoài đội)`,
+          name: label,
           amount: share.totalAmount,
         });
       }
@@ -1102,7 +1149,9 @@ const SetupMatch = () => {
     if (!matchId) return;
     setIsUpdatingConfig(true);
     try {
-      const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
+      const totalAmount = expenseItems
+        .filter((e) => e.type !== "SUBSIDY")
+        .reduce((sum, e) => sum + e.amount, 0);
       const matchRef = doc(db, "matches", matchId);
       const matchData: any = {
         date: createMatchDate(date, time),
@@ -1155,7 +1204,9 @@ const SetupMatch = () => {
   const handleCreateMatchForAttendance = async () => {
     setIsCreating(true);
     try {
-      const totalAmount = expenseItems.reduce((sum, e) => sum + e.amount, 0);
+      const totalAmount = expenseItems
+        .filter((e) => e.type !== "SUBSIDY")
+        .reduce((sum, e) => sum + e.amount, 0);
       const matchRef = doc(collection(db, "matches"));
       const matchData = {
         groupId,
@@ -1235,6 +1286,13 @@ const SetupMatch = () => {
           variant: "destructive",
         });
         return;
+      } else if (expense.type === "SUBSIDY" && !expense.targetMemberId) {
+        toast({
+          title: `Lỗi thông tin ở Khoản ${i + 1}`,
+          description: `Vui lòng chọn người thanh toán cho khoản trợ giá "${expense.description || "Trợ giá"}"`,
+          variant: "destructive",
+        });
+        return;
       } else if (expense.type === "EQUAL") {
         const totalMembers = activeTeams.reduce(
           (sum, t) => sum + t.members.length,
@@ -1250,10 +1308,27 @@ const SetupMatch = () => {
         }
       }
     }
-    const numericTotalAmount = expenseItems.reduce(
-      (sum, e) => sum + e.amount,
-      0,
-    );
+
+    const totalSubsidyAmount = expenseItems
+      .filter((e) => e.type === "SUBSIDY")
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const totalSharedExpenses = expenseItems
+      .filter((e) => e.type !== "SUBSIDY" && e.type !== "INDIVIDUAL")
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    if (totalSubsidyAmount > totalSharedExpenses) {
+      toast({
+        title: "Lỗi trợ giá",
+        description: `Tổng số tiền trợ giá (${formatCurrency(totalSubsidyAmount)}) không được vượt quá tổng chi phí chung (${formatCurrency(totalSharedExpenses)})`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const numericTotalAmount = expenseItems
+      .filter((e) => e.type !== "SUBSIDY")
+      .reduce((sum, e) => sum + e.amount, 0);
     if (numericTotalAmount <= 0) {
       toast({
         title: "Lỗi số tiền",
@@ -1320,8 +1395,46 @@ const SetupMatch = () => {
         }
       >();
 
+      const netSharedPool = Math.max(0, totalSharedExpenses - totalSubsidyAmount);
+      const subsidyDiscountFactor =
+        totalSharedExpenses > 0 ? netSharedPool / totalSharedExpenses : 1;
+
       expenseItems.forEach((expense) => {
         if (expense.amount <= 0) return;
+
+        if (expense.type === "SUBSIDY") {
+          if (expense.targetMemberId) {
+            let memberTeamId = "pool";
+            activeTeams.forEach((t) => {
+              if (t.members.some((m) => m.id === expense.targetMemberId)) {
+                memberTeamId = t.id;
+              }
+            });
+
+            if (!memberSharesMap.has(expense.targetMemberId)) {
+              memberSharesMap.set(expense.targetMemberId, {
+                memberId: expense.targetMemberId,
+                teamId: memberTeamId,
+                totalAmount: 0,
+                expenseBreakdown: [],
+                calculationDetails: {
+                  isIndividual: true,
+                },
+              });
+            }
+
+            const memberShare = memberSharesMap.get(expense.targetMemberId)!;
+            memberShare.totalAmount += expense.amount;
+            const customDesc = expense.description?.trim() || "Trợ giá / Hỗ trợ";
+            const noteDesc = expense.note?.trim() ? ` (${expense.note.trim()})` : "";
+            memberShare.expenseBreakdown.push({
+              expenseId: expense.id,
+              description: `[Trợ giá] ${customDesc}${noteDesc}`,
+              amount: expense.amount,
+            });
+          }
+          return;
+        }
 
         if (expense.type === "INDIVIDUAL") {
           if (expense.targetMemberId) {
@@ -1370,9 +1483,12 @@ const SetupMatch = () => {
           });
 
           if (eligibleMembers.length > 0) {
+            const effectiveAmount = Math.round(
+              expense.amount * subsidyDiscountFactor,
+            );
             const shares = distributeAmountByWeights(
               eligibleMembers.map((e) => e.member),
-              expense.amount,
+              effectiveAmount,
             );
 
             eligibleMembers.forEach(({ member, teamId }) => {
@@ -1401,9 +1517,10 @@ const SetupMatch = () => {
                 member.percent && member.percent < 100
                   ? ` (${member.percent}%)`
                   : "";
+              const subsidyNote = totalSubsidyAmount > 0 ? " [Đã trừ trợ giá]" : "";
               memberShare.expenseBreakdown.push({
                 expenseId: expense.id,
-                description: (expense.description || "Chia đều") + weightDesc,
+                description: (expense.description || "Chia đều") + weightDesc + subsidyNote,
                 amount: memberAmount,
               });
             });
@@ -1422,7 +1539,12 @@ const SetupMatch = () => {
           if (eligibleMembers.length === 0) return;
 
           const teamPercent = expense.teamPercents?.[team.id] ?? team.percent;
-          const teamTotal = Math.round(expense.amount * (teamPercent / 100));
+          const effectiveExpenseAmount = Math.round(
+            expense.amount * subsidyDiscountFactor,
+          );
+          const teamTotal = Math.round(
+            effectiveExpenseAmount * (teamPercent / 100),
+          );
 
           const shares = distributeAmountByWeights(eligibleMembers, teamTotal);
 
@@ -1453,9 +1575,10 @@ const SetupMatch = () => {
               member.percent && member.percent < 100
                 ? ` (${member.percent}%)`
                 : "";
+            const subsidyNote = totalSubsidyAmount > 0 ? " [Đã trừ trợ giá]" : "";
             memberShare.expenseBreakdown.push({
               expenseId: expense.id,
-              description: (expense.description || "Tiền sân") + weightDesc,
+              description: (expense.description || "Tiền sân") + weightDesc + subsidyNote,
               amount: memberAmount,
             });
           });
@@ -1481,7 +1604,14 @@ const SetupMatch = () => {
       const calculatedTotal = shares.reduce((sum, s) => sum + s.amount, 0);
       const diff = numericTotalAmount - calculatedTotal;
       if (diff !== 0 && shares.length > 0) {
-        shares[shares.length - 1].amount += diff;
+        const eligibleShare =
+          shares.find(
+            (s) =>
+              !expenseItems.some(
+                (e) => e.type === "SUBSIDY" && e.targetMemberId === s.memberId,
+              ),
+          ) || shares[shares.length - 1];
+        eligibleShare.amount += diff;
       }
 
       const batch = writeBatch(db);
@@ -2099,6 +2229,23 @@ const SetupMatch = () => {
                     >
                       Thu riêng một người
                     </Button>
+                    <Button
+                      type="button"
+                      variant={
+                        expense.type === "SUBSIDY" ? "default" : "outline"
+                      }
+                      size="sm"
+                      onClick={() =>
+                        handleUpdateExpense(expense.id, "type", "SUBSIDY")
+                      }
+                      className={
+                        expense.type === "SUBSIDY"
+                          ? "bg-amber-600 hover:bg-amber-700 text-white"
+                          : "border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                      }
+                    >
+                      Trợ giá (Trừ tiền chung)
+                    </Button>
                   </div>
                 </div>
 
@@ -2348,59 +2495,202 @@ const SetupMatch = () => {
                     </Popover>
                   </div>
                 )}
+
+                {expense.type === "SUBSIDY" && (
+                  <div className="space-y-4 pt-2 bg-amber-50/60 dark:bg-amber-950/20 p-3.5 rounded-lg border border-amber-200 dark:border-amber-800">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        <span>Khoản trợ giá / hỗ trợ (Giảm tiền chung sân bóng)</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Khoản tiền này sẽ được trừ thẳng vào tổng tiền chung cần chia của trận đấu. Người được chọn dưới đây sẽ nhận một hóa đơn thanh toán riêng tương ứng với số tiền hỗ trợ này.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor={`expense-target-subsidy-${expense.id}`}>
+                          Người thanh toán khoản hỗ trợ <span className="text-destructive">*</span>
+                        </Label>
+                        <Popover
+                          open={activePopoverId === `subsidy-target-${expense.id}`}
+                          onOpenChange={(open) =>
+                            setActivePopoverId(
+                              open ? `subsidy-target-${expense.id}` : null,
+                            )
+                          }
+                        >
+                          <PopoverTrigger asChild>
+                            <Button
+                              id={`expense-target-subsidy-${expense.id}`}
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={
+                                activePopoverId === `subsidy-target-${expense.id}`
+                              }
+                              className="w-full justify-between font-normal bg-background"
+                            >
+                              {expense.targetMemberId
+                                ? (() => {
+                                    const m = allMembers.find(
+                                      (member) =>
+                                        member.id === expense.targetMemberId,
+                                    );
+                                    return m
+                                      ? `${m.name}${m.nickname ? ` (${m.nickname})` : ""}`
+                                      : "Chọn người thanh toán...";
+                                  })()
+                                : "Chọn người thanh toán..."}
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            className="w-[var(--radix-popover-trigger-width)] p-0"
+                            align="start"
+                          >
+                            <Command>
+                              <CommandInput placeholder="Tìm thành viên..." />
+                              <CommandList>
+                                <CommandEmpty>
+                                  Không tìm thấy thành viên.
+                                </CommandEmpty>
+                                <CommandGroup>
+                                  {allMembers.map((m) => (
+                                    <CommandItem
+                                      key={m.id}
+                                      value={`${m.name} ${m.nickname || ""}`}
+                                      onSelect={() => {
+                                        handleUpdateExpense(
+                                          expense.id,
+                                          "targetMemberId",
+                                          m.id,
+                                        );
+                                        setActivePopoverId(null);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          expense.targetMemberId === m.id
+                                            ? "opacity-100"
+                                            : "opacity-0",
+                                        )}
+                                      />
+                                      {m.name}
+                                      {m.nickname ? ` (${m.nickname})` : ""}
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor={`expense-note-${expense.id}`}>
+                          Ghi chú chi tiết (Tùy chọn)
+                        </Label>
+                        <Input
+                          id={`expense-note-${expense.id}`}
+                          placeholder="VD: Công ty tài trợ tháng 10, Quỹ nhóm..."
+                          value={expense.note || ""}
+                          onChange={(e) =>
+                            handleUpdateExpense(
+                              expense.id,
+                              "note",
+                              e.target.value,
+                            )
+                          }
+                          className="bg-background"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
-            <div className="pt-2 border-t">
-              <div className="flex items-center justify-between text-lg font-semibold">
-                <span>Tổng cộng:</span>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="text-primary cursor-help border-b border-dashed border-primary">
-                        {expenseItems
-                          .reduce((sum, e) => sum + e.amount, 0)
-                          .toLocaleString()}{" "}
-                        VND
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent className="p-3 max-w-[280px]">
-                      <div className="space-y-2 text-xs">
-                        <p className="font-bold border-b pb-1">
-                          Chi tiết phân chia:
-                        </p>
-                        {matchDivisionDetails.teamShares.map((ts, idx) => (
-                          <div key={idx} className="flex justify-between gap-4">
-                            <span>{ts.name}:</span>
-                            <span className="font-semibold">
-                              {Math.round(ts.amount).toLocaleString()}đ
-                            </span>
-                          </div>
-                        ))}
-                        {matchDivisionDetails.otherShares.map((os, idx) => (
-                          <div
-                            key={idx}
-                            className="flex justify-between gap-4 text-destructive"
-                          >
-                            <span>{os.name}:</span>
-                            <span className="font-semibold">
-                              {Math.round(os.amount).toLocaleString()}đ
-                            </span>
-                          </div>
-                        ))}
-                        <div className="border-t pt-1 mt-1 flex justify-between font-bold text-primary">
-                          <span>Tổng đã chia:</span>
-                          <span>
-                            {Math.round(
-                              matchDivisionDetails.totalDivided,
-                            ).toLocaleString()}
-                            đ
+            <div className="pt-3 border-t space-y-2">
+              {(() => {
+                const totalSubsidyAmount = expenseItems
+                  .filter((e) => e.type === "SUBSIDY")
+                  .reduce((sum, e) => sum + e.amount, 0);
+                const grandTotal = expenseItems
+                  .filter((e) => e.type !== "SUBSIDY")
+                  .reduce((sum, e) => sum + e.amount, 0);
+                const netShared = Math.max(0, grandTotal - totalSubsidyAmount);
+
+                return (
+                  <>
+                    {totalSubsidyAmount > 0 && (
+                      <div className="text-xs space-y-1 bg-muted/40 p-2.5 rounded-md border text-muted-foreground">
+                        <div className="flex justify-between">
+                          <span>Tổng chi phí trận đấu (trả người ứng):</span>
+                          <span className="font-medium text-foreground">
+                            {grandTotal.toLocaleString()} VND
                           </span>
                         </div>
+                        <div className="flex justify-between text-amber-600 dark:text-amber-400 font-medium">
+                          <span>Khoản trợ giá / hỗ trợ trừ vào tiền chung:</span>
+                          <span>-{totalSubsidyAmount.toLocaleString()} VND</span>
+                        </div>
+                        <div className="flex justify-between border-t pt-1 font-semibold text-foreground">
+                          <span>Còn lại phân bổ cho các người chơi:</span>
+                          <span>{netShared.toLocaleString()} VND</span>
+                        </div>
                       </div>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
+                    )}
+                    <div className="flex items-center justify-between text-lg font-semibold pt-1">
+                      <span>Tổng chi phí trận đấu:</span>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="text-primary cursor-help border-b border-dashed border-primary">
+                              {grandTotal.toLocaleString()} VND
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="p-3 max-w-[280px]">
+                            <div className="space-y-2 text-xs">
+                              <p className="font-bold border-b pb-1">
+                                Chi tiết phân chia:
+                              </p>
+                              {matchDivisionDetails.teamShares.map((ts, idx) => (
+                                <div key={idx} className="flex justify-between gap-4">
+                                  <span>{ts.name}:</span>
+                                  <span className="font-semibold">
+                                    {Math.round(ts.amount).toLocaleString()}đ
+                                  </span>
+                                </div>
+                              ))}
+                              {matchDivisionDetails.otherShares.map((os, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex justify-between gap-4 text-amber-600 dark:text-amber-400"
+                                >
+                                  <span>{os.name}:</span>
+                                  <span className="font-semibold">
+                                    {Math.round(os.amount).toLocaleString()}đ
+                                  </span>
+                                </div>
+                              ))}
+                              <div className="border-t pt-1 mt-1 flex justify-between font-bold text-primary">
+                                <span>Tổng đã chia:</span>
+                                <span>
+                                  {Math.round(
+                                    matchDivisionDetails.totalDivided,
+                                  ).toLocaleString()}
+                                  đ
+                                </span>
+                              </div>
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </CardContent>
         </Card>
@@ -2728,6 +3018,18 @@ const SetupMatch = () => {
                       0,
                     );
 
+                    const totalSubsidyAmount = expenseItems
+                      .filter((e) => e.type === "SUBSIDY")
+                      .reduce((sum, e) => sum + e.amount, 0);
+
+                    const totalSharedExpenses = expenseItems
+                      .filter((e) => e.type !== "SUBSIDY" && e.type !== "INDIVIDUAL")
+                      .reduce((sum, e) => sum + e.amount, 0);
+
+                    const netSharedPool = Math.max(0, totalSharedExpenses - totalSubsidyAmount);
+                    const subsidyDiscountFactor =
+                      totalSharedExpenses > 0 ? netSharedPool / totalSharedExpenses : 1;
+
                     // Gom các chi tiết khoản tiền của các thành viên trong đội dựa trên cấu hình chi phí và đính kèm %
                     const teamDetails: {
                       description: string;
@@ -2736,6 +3038,26 @@ const SetupMatch = () => {
 
                     expenseItems.forEach((expense) => {
                       if (expense.amount <= 0) return;
+
+                      if (expense.type === "SUBSIDY") {
+                        const teamSubsidyAmount = team.members.reduce(
+                          (sum, m) => {
+                            if (expense.targetMemberId === m.id) {
+                              return sum + expense.amount;
+                            }
+                            return sum;
+                          },
+                          0,
+                        );
+                        if (teamSubsidyAmount > 0) {
+                          const customDesc = expense.description?.trim() || "Trợ giá";
+                          teamDetails.push({
+                            description: `[Trợ giá] ${customDesc}`,
+                            amount: teamSubsidyAmount,
+                          });
+                        }
+                        return;
+                      }
 
                       if (expense.type === "INDIVIDUAL") {
                         const teamIndividualAmount = team.members.reduce(
@@ -2770,9 +3092,12 @@ const SetupMatch = () => {
                         });
 
                         if (allEligibleMembers.length > 0) {
+                          const effectiveAmount = Math.round(
+                            expense.amount * subsidyDiscountFactor,
+                          );
                           const shares = distributeAmountByWeights(
                             allEligibleMembers,
-                            expense.amount,
+                            effectiveAmount,
                           );
                           let teamEqualAmount = 0;
                           team.members.forEach((m) => {
@@ -2785,8 +3110,9 @@ const SetupMatch = () => {
                           });
 
                           if (teamEqualAmount > 0) {
+                            const subsidyNote = totalSubsidyAmount > 0 ? " [Đã trừ trợ giá]" : "";
                             teamDetails.push({
-                              description: `${expense.description || "Chia đều"} (Chia đều)`,
+                              description: `${expense.description || "Chia đều"} (Chia đều)${subsidyNote}`,
                               amount: teamEqualAmount,
                             });
                           }
@@ -2799,8 +3125,11 @@ const SetupMatch = () => {
                         expense.teamPercents?.[team.id] ??
                         teams.find((t) => t.id === team.id)?.percent ??
                         0;
+                      const effectiveExpenseAmount = Math.round(
+                        expense.amount * subsidyDiscountFactor,
+                      );
                       const teamTotal = Math.round(
-                        expense.amount * (teamPercent / 100),
+                        effectiveExpenseAmount * (teamPercent / 100),
                       );
 
                       const eligibleMembers = team.members.filter(
@@ -2820,8 +3149,9 @@ const SetupMatch = () => {
                         });
 
                         if (teamSharedAmount > 0) {
+                          const subsidyNote = totalSubsidyAmount > 0 ? " [Đã trừ trợ giá]" : "";
                           teamDetails.push({
-                            description: `${expense.description || "Tiền sân"} (${teamPercent}%)`,
+                            description: `${expense.description || "Tiền sân"} (${teamPercent}%)${subsidyNote}`,
                             amount: teamSharedAmount,
                           });
                         }
