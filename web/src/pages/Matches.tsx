@@ -693,7 +693,9 @@ const Matches = () => {
             id: doc.id,
             ...doc.data(),
             teamName:
-              teamNames[doc.data().teamId] || `Đội ${doc.data().teamId}`,
+              doc.data().teamId === "pool" || doc.data().teamId === "sponsor"
+                ? "Trợ giá / Thu riêng"
+                : teamNames[doc.data().teamId] || `Đội ${doc.data().teamId}`,
           }) as Share,
       );
       setShares(sharesList);
@@ -3070,7 +3072,18 @@ const Matches = () => {
                               <TableCell className="font-medium">
                                 {members.get(share.memberId) || "Không rõ"}
                               </TableCell>
-                              <TableCell>{share.teamName}</TableCell>
+                              <TableCell>
+                                {share.teamId === "pool" || share.teamId === "sponsor" ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-amber-700 dark:text-amber-300 border-amber-300 bg-amber-50/50 dark:bg-amber-950/20 text-xs font-normal"
+                                  >
+                                    Trợ giá / Thu riêng
+                                  </Badge>
+                                ) : (
+                                  share.teamName
+                                )}
+                              </TableCell>
                               <TableCell>
                                 <div className="space-y-1">
                                   <div className="font-semibold">

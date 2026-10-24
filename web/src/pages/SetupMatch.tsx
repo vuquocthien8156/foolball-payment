@@ -3485,6 +3485,96 @@ const SetupMatch = () => {
           ))}
         </div>
 
+        {/* Dedicated section for External / Sponsor Shares (Không cần tham gia vào sân) */}
+        {(() => {
+          const activeMemberIds = new Set(
+            activeTeams.flatMap((t) => t.members.map((m) => m.id)),
+          );
+          const externalShares = Object.entries(calculatedShares).filter(
+            ([memberId, share]) =>
+              !activeMemberIds.has(memberId) && share.totalAmount > 0,
+          );
+
+          if (externalShares.length === 0) return null;
+
+          return (
+            <Card className="mb-6 shadow-card border-amber-300/80 dark:border-amber-800 bg-amber-50/40 dark:bg-amber-950/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2 text-amber-800 dark:text-amber-300">
+                  <Sparkles className="h-4 w-4" />
+                  Khoản thu Trợ giá & Thu riêng ngoài đội ({externalShares.length})
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Thành viên dưới đây <strong>không cần kéo vào đội / không tham gia đá bóng</strong>. Họ chỉ nhận hóa đơn đóng tiền trợ giá hoặc khoản đòi riêng tương ứng.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {externalShares.map(([memberId, share]) => {
+                    const member = allMembers.find((m) => m.id === memberId);
+                    const isSubsidy = expenseItems.some(
+                      (e) =>
+                        e.type === "SUBSIDY" && e.targetMemberId === memberId,
+                    );
+                    return (
+                      <div
+                        key={memberId}
+                        className="p-3 rounded-lg border bg-card shadow-xs space-y-2"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-sm">
+                                {member?.name || "Unknown"}
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className={
+                                  isSubsidy
+                                    ? "bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 border-amber-300 text-[11px]"
+                                    : "text-[11px]"
+                                }
+                              >
+                                {isSubsidy
+                                  ? "⭐ Nhà tài trợ / Trợ giá"
+                                  : "Thu riêng"}
+                              </Badge>
+                            </div>
+                            {member?.nickname && (
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                ({member.nickname})
+                              </p>
+                            )}
+                          </div>
+                          <span className="font-bold text-primary">
+                            {share.totalAmount.toLocaleString()}đ
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-muted-foreground border-t pt-1.5 space-y-1">
+                          {share.details.map((detail, idx) => (
+                            <div
+                              key={idx}
+                              className="flex justify-between gap-2"
+                            >
+                              <span className="truncate">
+                                {detail.description}:
+                              </span>
+                              <span className="font-medium text-foreground shrink-0">
+                                {detail.amount.toLocaleString()}đ
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()}
+
         <div className="sticky bottom-0 z-10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 rounded-xl border bg-background/95 backdrop-blur p-4 shadow-lg">
           {/* Nhóm 1: Tiện ích & Cấu hình mẫu mặc định */}
           <div className="flex flex-wrap items-center gap-2">
