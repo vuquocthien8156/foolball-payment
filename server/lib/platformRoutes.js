@@ -1,6 +1,6 @@
 const express = require("express");
 const { randomInt } = require("node:crypto");
-const { makeGroupId, isValidSport, isValidGroupId, groupKindOf, isValidGroupKind } = require("./groups");
+const { makeGroupId, isValidSport, isValidGroupId, groupKindOf, isValidGroupKind, groupIdOf, DEFAULT_GROUP_ID } = require("./groups");
 const { createAuthMiddleware } = require("./auth");
 const validPassword = (value) => typeof value === "string" && value.length >= 8 && value.length <= 128;
 const validName = (value) => typeof value === "string" && value.trim().length >= 1 && value.trim().length <= 60;
@@ -352,29 +352,39 @@ function createPlatformRouter({ db, auth, FieldValue }) {
   // Get all members across all groups and check which ones are linked to :uid
   router.get("/accounts/:uid/members", requireOwner, wrap(async (req, res) => {
     const targetUid = req.params.uid;
-    const groupsSnap = await db.collection("groups").where("status", "==", "active").get();
-    const result = [];
+    const allGroups = (await db.collection("groups").get()).docs.filter(
+      (d) => d.exists && d.data()?.status !== "deleted"
+    );
+    const allMembersSnap = await db.collection("members").get();
 
-    for (const gDoc of groupsSnap.docs) {
+    // Group members by groupIdOf(mData)
+    const membersByGroup = new Map();
+    allMembersSnap.docs.forEach((mDoc) => {
+      const mData = mDoc.data();
+      const gid = groupIdOf(mData);
+      if (!membersByGroup.has(gid)) {
+        membersByGroup.set(gid, []);
+      }
+      membersByGroup.get(gid).push({
+        id: mDoc.id,
+        name: mData.name || "Chưa đặt tên",
+        nickname: mData.nickname || "",
+        accountUid: mData.accountUid || null,
+        isLinked: mData.accountUid === targetUid,
+      });
+    });
+
+    const result = [];
+    for (const gDoc of allGroups) {
       const gid = gDoc.id;
       const gData = gDoc.data();
-      const memSnap = await db.collection("members").where("groupId", "==", gid).get();
-      const members = memSnap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          name: data.name,
-          nickname: data.nickname || "",
-          accountUid: data.accountUid || null,
-          isLinked: data.accountUid === targetUid,
-        };
-      });
-
+      const members = membersByGroup.get(gid) || [];
+      members.sort((a, b) => a.name.localeCompare(b.name, "vi"));
       if (members.length > 0) {
         result.push({
           groupId: gid,
-          groupName: gData.name,
-          sport: gData.sport,
+          groupName: gData.name || gid,
+          sport: gData.sport || "sports",
           members,
         });
       }
