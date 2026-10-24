@@ -180,7 +180,95 @@ const sendPushToTokens = async (tokens, payload) => {
 apiRoutes.post("/create-payment-link", async (req, res) => {
   const groupId = req.body?.groupId || DEFAULT_GROUP_ID;
   if (!isValidGroupId(groupId)) return res.status(400).json({ error: "INVALID_GROUP" });
-  const { shareIds, sharePaths, memberId, memberIds, ratings } = req.body || {};
+  const { shareIds, sharePaths, memberId, memberIds, ratings, billAllocations } = req.body || {};
+
+  // --- Shared Bills PayOS Checkout ---
+  if (Array.isArray(billAllocations) && billAllocations.length > 0) {
+    const validId = (id) => typeof id === "string" && id.length > 0 && !id.includes("/");
+    if (!validId(memberId) || billAllocations.length > 50 ||
+        !billAllocations.every((it) => it && validId(it.billId) && validId(it.allocationId))) {
+      return res.status(400).json({ error: "INVALID_BILL_ALLOCATIONS" });
+    }
+    try {
+      const db = admin.firestore();
+      const allocRefs = billAllocations.map((it) => db.doc(`groups/${groupId}/bills/${it.billId}/allocations/${it.allocationId}`));
+      const allocDocs = await db.getAll(...allocRefs);
+      if (allocDocs.some((d) => !d.exists)) {
+        return res.status(409).json({ error: "Some bill allocations have changed. Reload and select them again." });
+      }
+      if (allocDocs.some((d) => d.data().memberId !== memberId || d.data().state !== "unpaid" || !Number.isSafeInteger(d.data().amountVnd) || d.data().amountVnd <= 0)) {
+        return res.status(409).json({ error: "Selected bill allocations must be unpaid and belong to the member." });
+      }
+      const totalAmount = allocDocs.reduce((sum, d) => sum + d.data().amountVnd, 0);
+      if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0) {
+        return res.status(400).json({ error: "Total amount must be positive." });
+      }
+      const orderCode = Date.now();
+      const memberDoc = await db.collection("members").doc(memberId).get();
+      const memberName = memberDoc.exists ? memberDoc.data().name : "";
+      const removeDiacritics = (str) => {
+        return str
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/đ/g, "d")
+          .replace(/Đ/g, "D");
+      };
+      const cleanName = removeDiacritics(memberName)
+        .replace(/[^a-zA-Z0-9\s]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const shortCode = String(orderCode).slice(-6);
+      const namePart = cleanName.slice(0, 18).trim();
+      const description = `${namePart} ${shortCode}`.slice(0, 25);
+
+      const origin = process.env.PAYOS_RETURN_URL
+        ? new URL(process.env.PAYOS_RETURN_URL).origin
+        : "https://thienbun-payment.web.app";
+
+      const paymentData = {
+        orderCode,
+        amount: totalAmount,
+        description,
+        items: [
+          {
+            name: "Khoan chia tien",
+            quantity: 1,
+            price: totalAmount,
+          },
+        ],
+        returnUrl: `${origin}/g/${groupId}/public/payment-success`,
+        cancelUrl: `${origin}/g/${groupId}/public/payment-cancel`,
+      };
+
+      await db.collection("paymentRequests").doc(String(orderCode)).set({
+        orderCode,
+        groupId,
+        memberId,
+        totalAmount,
+        kind: "shared_bills",
+        billAllocations,
+        status: "PENDING",
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      let paymentLink;
+      if (isMuted()) {
+        console.log("[muted] payos bill checkout", orderCode);
+        paymentLink = { checkoutUrl: `${origin}/g/${groupId}/public/payment-success?orderCode=${orderCode}&status=PAID` };
+      } else {
+        paymentLink = await payos.paymentRequests.create(paymentData);
+      }
+      return res.json({
+        checkoutUrl: paymentLink.checkoutUrl,
+        orderCode,
+        amount: totalAmount,
+      });
+    } catch (err) {
+      console.error("PayOS bill checkout error:", err);
+      return res.status(500).json({ error: err.message || "PAYMENT_GATEWAY_ERROR" });
+    }
+  }
+
   const isGroupPayment = sharePaths !== undefined || memberIds !== undefined;
   const validId = (id) => typeof id === "string" && id.length > 0 && !id.includes("/");
   const selectedMembers = isGroupPayment ? memberIds : [memberId];
@@ -366,6 +454,44 @@ const payosWebhookHandler = async (req, res) => {
         }
         const paymentRequestData = paymentRequestSnap.data();
         if (paymentRequestData.status === "PAID") return;
+
+        // Shared bills webhook processing
+        if (paymentRequestData.kind === "shared_bills" || Array.isArray(paymentRequestData.billAllocations)) {
+          const allocItems = paymentRequestData.billAllocations || [];
+          const timestamp = FieldValue.serverTimestamp();
+          for (const item of allocItems) {
+            const allocRef = db.doc(`groups/${paymentRequestData.groupId}/bills/${item.billId}/allocations/${item.allocationId}`);
+            const allocSnap = await transaction.get(allocRef);
+            if (allocSnap.exists && allocSnap.data().state !== "paid") {
+              transaction.update(allocRef, {
+                state: "paid",
+                paidAt: timestamp,
+                channel: "PAYOS",
+                payosOrderCode: orderCode,
+              });
+              const billRef = db.doc(`groups/${paymentRequestData.groupId}/bills/${item.billId}`);
+              const allAllocSnap = await transaction.get(billRef.collection("allocations"));
+              const stillUnpaid = allAllocSnap.docs.some((d) => d.id === item.allocationId ? false : d.data().state === "unpaid");
+              transaction.update(billRef, { state: stillUnpaid ? "open" : "closed", updatedAt: timestamp });
+              const eventRef = billRef.collection("paymentEvents").doc(String(orderCode));
+              transaction.set(eventRef, {
+                type: "confirm",
+                memberId: paymentRequestData.memberId,
+                actorUid: "payos_webhook",
+                amountVnd: allocSnap.data().amountVnd,
+                method: "payos",
+                transferReference: String(orderCode),
+                createdAt: timestamp,
+              });
+            }
+          }
+          transaction.update(paymentRequestRef, {
+            status: "PAID",
+            paidAt: timestamp,
+            webhook: webhookData,
+          });
+          return;
+        }
 
         // Use the immutable selection: another checkout may replace payosOrderCode.
         let shareDocs;

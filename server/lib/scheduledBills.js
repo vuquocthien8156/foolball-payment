@@ -34,12 +34,13 @@ function createSubscriptionService({ db, FieldValue }) {
     const ref = refFor(gid, sid);
     requireMonth(input.startMonth);
     billingDateFor(input.startMonth, input.billingDay);
-    if (!Number.isInteger(input.dueOffsetDays) || input.dueOffsetDays < 0 || input.dueOffsetDays > 30 ||
+    const dueOffsetDays = input.dueOffsetDays ?? 0;
+    if (!Number.isInteger(dueOffsetDays) || dueOffsetDays < 0 || dueOffsetDays > 30 ||
         !Number.isInteger(input.reminderHour) || input.reminderHour < 0 || input.reminderHour > 23 ||
         typeof input.title !== "string" || !input.title.trim() || input.title.trim().length > 100 ||
         !Array.isArray(input.participantIds) || input.participantIds.length < 1 || input.participantIds.length > 50 ||
         !input.participantIds.every(validId)) reject(400, "INVALID_SUBSCRIPTION");
-    return db.runTransaction(async (tx) => {
+    const result = await db.runTransaction(async (tx) => {
       const [group, existing, ...members] = await tx.getAll(db.doc(`groups/${gid}`), ref,
         ...input.participantIds.map((id) => db.doc(`members/${id}`)));
       checkGroup(group);
@@ -54,13 +55,14 @@ function createSubscriptionService({ db, FieldValue }) {
         : (prior?.settlementMode || "full_collection");
       tx.set(ref, { title: input.title.trim(), amountVnd: input.amountVnd, participantIds: input.participantIds,
         providerPayerMemberId: input.providerPayerMemberId, billingDay: input.billingDay, startMonth: input.startMonth,
-        dueOffsetDays: input.dueOffsetDays, reminderHour: input.reminderHour, timeZone: "Asia/Ho_Chi_Minh",
+        dueOffsetDays, reminderHour: input.reminderHour, timeZone: "Asia/Ho_Chi_Minh",
         reminderMode, settlementMode,
         revision: (prior?.revision || 0) + 1, enabled: prior ? prior.enabled : true,
         nextPeriod: prior?.nextPeriod || input.startMonth, createdBy: prior?.createdBy || actorUid,
         createdAt: prior?.createdAt || FieldValue.serverTimestamp(), updatedBy: actorUid, updatedAt: FieldValue.serverTimestamp(), lastError: null });
       return { id: sid };
     });
+    return result;
   }
   async function setEnabled(gid, sid, enabled, startMonth, actorUid) {
     const ref = refFor(gid, sid);
@@ -78,42 +80,59 @@ function createSubscriptionService({ db, FieldValue }) {
     checkGroup(await db.doc(`groups/${gid}`).get());
     return (await db.collection(`groups/${gid}/subscriptions`).get()).docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   }
-  return { save, list, pause: (gid, sid, actorUid) => setEnabled(gid, sid, false, null, actorUid), resume: (gid, sid, month, actorUid) => setEnabled(gid, sid, true, month, actorUid) };
+  return {
+    save,
+    list,
+    pause: (gid, sid, actorUid) => setEnabled(gid, sid, false, null, actorUid),
+    resume: (gid, sid, month, actorUid) => setEnabled(gid, sid, true, month, actorUid),
+    runNow: (gid) => runScheduledBillsForGroup({ db, FieldValue, groupId: gid, forceHour: true }),
+  };
 }
 
-async function runScheduledBills({ db, FieldValue, now = new Date() }) {
+async function runScheduledBillsForGroup({ db, FieldValue, groupId, now = new Date(), forceHour = false }) {
   const local = new Date(now.getTime() + 7 * 3600000);
   const today = local.toISOString().slice(0, 10);
   const service = createBillService({ db, FieldValue, now: () => now });
+  const subscriptions = await db.collection(`groups/${groupId}/subscriptions`).where("enabled", "==", true).get();
+  const results = [];
+  for (const subscription of subscriptions.docs) {
+    for (let count = 0; count < 12; count++) {
+      const current = await subscription.ref.get();
+      const data = current.data();
+      if (!data?.enabled) break;
+      try {
+        const billingDate = billingDateFor(data.nextPeriod, data.billingDay);
+        if (billingDate > today || (!forceHour && billingDate === today && local.getUTCHours() < data.reminderHour)) break;
+        await service.create({
+          groupId,
+          billId: `${subscription.id}_${data.nextPeriod}`,
+          input: { ...data, billingDate, dueDate: addDays(billingDate, data.dueOffsetDays ?? 0) },
+          actorUid: "monthly_job",
+          occurrence: { subscriptionId: subscription.id, periodKey: data.nextPeriod, revision: data.revision, nextPeriod: nextMonth(data.nextPeriod) },
+        });
+        results.push({ groupId, subscriptionId: subscription.id, period: data.nextPeriod, ok: true });
+      } catch (error) {
+        if (error.message === "SUBSCRIPTION_CHANGED") continue;
+        await subscription.ref.update({ lastError: error.status ? error.message : "GENERATION_FAILED", lastErrorAt: FieldValue.serverTimestamp() });
+        results.push({ groupId, subscriptionId: subscription.id, ok: false });
+        break;
+      }
+    }
+  }
+  await queueCatchupSummary({ db, groupId, now });
+  await ensureBillNotifications({ db, groupId, now });
+  return results;
+}
+
+async function runScheduledBills({ db, FieldValue, now = new Date() }) {
   const groups = await db.collection("groups").where("status", "==", "active").get();
   const results = [];
   for (const group of groups.docs) {
     if (groupKindOf(group.data()) !== "shared_bills") continue;
-    const subscriptions = await db.collection(`groups/${group.id}/subscriptions`).where("enabled", "==", true).get();
-    for (const subscription of subscriptions.docs) {
-      for (let count = 0; count < 12; count++) {
-        const current = await subscription.ref.get();
-        const data = current.data();
-        if (!data?.enabled) break;
-        try {
-          const billingDate = billingDateFor(data.nextPeriod, data.billingDay);
-          if (billingDate > today || (billingDate === today && local.getUTCHours() < data.reminderHour)) break;
-          await service.create({ groupId: group.id, billId: `${subscription.id}_${data.nextPeriod}`,
-            input: { ...data, billingDate, dueDate: addDays(billingDate, data.dueOffsetDays) }, actorUid: "monthly_job",
-            occurrence: { subscriptionId: subscription.id, periodKey: data.nextPeriod, revision: data.revision, nextPeriod: nextMonth(data.nextPeriod) } });
-          results.push({ groupId: group.id, subscriptionId: subscription.id, period: data.nextPeriod, ok: true });
-        } catch (error) {
-          if (error.message === "SUBSCRIPTION_CHANGED") continue;
-          await subscription.ref.update({ lastError: error.status ? error.message : "GENERATION_FAILED", lastErrorAt: FieldValue.serverTimestamp() });
-          results.push({ groupId: group.id, subscriptionId: subscription.id, ok: false });
-          break;
-        }
-      }
-    }
-    await queueCatchupSummary({ db, groupId: group.id, now });
-    await ensureBillNotifications({ db, groupId: group.id, now });
+    const groupResults = await runScheduledBillsForGroup({ db, FieldValue, groupId: group.id, now, forceHour: false });
+    results.push(...groupResults);
   }
   return results;
 }
 
-module.exports = { requireMonth, billingDateFor, nextMonth, addDays, createSubscriptionService, runScheduledBills };
+module.exports = { requireMonth, billingDateFor, nextMonth, addDays, createSubscriptionService, runScheduledBills, runScheduledBillsForGroup };

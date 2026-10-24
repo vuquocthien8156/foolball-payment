@@ -50,6 +50,7 @@ function createBillRouter({ db, auth, FieldValue }) {
     next();
   }, requireGroupRole({ manager: true }));
   router.get("/:groupId/subscriptions", route(async (req, res) => res.json(await subscriptions.list(req.params.groupId))));
+  router.post("/:groupId/subscriptions/run-now", route(async (req, res) => res.json(await subscriptions.runNow(req.params.groupId))));
   router.put("/:groupId/subscriptions/:subscriptionId", route(async (req, res) => res.json(await subscriptions.save(req.params.groupId, req.params.subscriptionId, req.body, req.uid))));
   router.post("/:groupId/subscriptions/:subscriptionId/pause", route(async (req, res) => res.json(await subscriptions.pause(req.params.groupId, req.params.subscriptionId, req.uid))));
   router.post("/:groupId/subscriptions/:subscriptionId/resume", route(async (req, res) => res.json(await subscriptions.resume(req.params.groupId, req.params.subscriptionId, req.body?.startMonth, req.uid))));

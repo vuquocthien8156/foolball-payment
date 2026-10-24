@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   AlertCircle,
   ExternalLink,
+  Play,
 } from "lucide-react";
 
 interface TelegramConfig {
@@ -78,6 +79,7 @@ const Bills = () => {
   const [draftSubId, setDraftSubId] = useState(() => crypto.randomUUID());
   const [resumingSubId, setResumingSubId] = useState<string | null>(null);
   const [resumeMonth, setResumeMonth] = useState("");
+  const [isRunningNow, setIsRunningNow] = useState(false);
 
   // Telegram reminder settings state
   const [tgEnabled, setTgEnabled] = useState(false);
@@ -151,6 +153,7 @@ const Bills = () => {
     try {
       const sid = editingSub && editingSub !== "new" ? editingSub.id : draftSubId;
       await apiRequest("PUT", `/groups/${groupId}/subscriptions/${sid}`, input);
+      await apiRequest("POST", `/groups/${groupId}/subscriptions/run-now`).catch(() => {});
       setEditingSub(null);
       setDraftSubId(crypto.randomUUID());
       toast({ title: "Đã lưu khoản thu định kỳ" });
@@ -182,6 +185,27 @@ const Bills = () => {
       setError(billError(cause));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleRunNow = async (): Promise<void> => {
+    setIsRunningNow(true);
+    try {
+      const res = (await apiRequest("POST", `/groups/${groupId}/subscriptions/run-now`)) as Array<{ period: string; ok: boolean }>;
+      const createdCount = Array.isArray(res) ? res.filter((r) => r.ok).length : 0;
+      toast({
+        title: "Đã chạy tạo kỳ thu",
+        description: createdCount > 0 ? `Đã tạo ${createdCount} kỳ thu mới.` : "Tất cả các kỳ thu đã được cập nhật mới nhất.",
+      });
+      await loadData();
+    } catch (cause: unknown) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi chạy tạo kỳ thu",
+        description: billError(cause),
+      });
+    } finally {
+      setIsRunningNow(false);
     }
   };
 
@@ -298,13 +322,24 @@ const Bills = () => {
                 Tự động tạo khoản thu và nhắc nợ hằng tháng (Netflix, Spotify, sinh hoạt, nhà trọ...).
               </p>
             </div>
-            <Button
-              onClick={() => setEditingSub(editingSub ? null : "new")}
-              className="flex items-center gap-1.5"
-            >
-              <PlusCircle className="h-4 w-4" />
-              {editingSub ? "Đóng biểu mẫu" : "Thêm khoản thu định kỳ"}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                disabled={busy || isRunningNow}
+                onClick={handleRunNow}
+                className="flex items-center gap-1.5"
+              >
+                <Play className="h-4 w-4" />
+                {isRunningNow ? "Đang tạo kỳ thu…" : "Chạy tạo kỳ thu ngay"}
+              </Button>
+              <Button
+                onClick={() => setEditingSub(editingSub ? null : "new")}
+                className="flex items-center gap-1.5"
+              >
+                <PlusCircle className="h-4 w-4" />
+                {editingSub ? "Đóng biểu mẫu" : "Thêm khoản thu định kỳ"}
+              </Button>
+            </div>
           </div>
 
           {editingSub ? (

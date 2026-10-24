@@ -16,9 +16,16 @@ import {
   Loader2,
   Trophy,
   TrendingUp,
+  Check,
+  CheckSquare,
+  Square,
+  Copy,
+  QrCode,
+  ArrowRight,
+  ExternalLink,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   collection,
   doc,
@@ -55,7 +62,11 @@ const SharedBillsPublicPortal = ({
 }) => {
   const [data, setData] = useState<{ bills: any[]; payout: any } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const [copiedAcc, setCopiedAcc] = useState(false);
+  const [copiedAmount, setCopiedAmount] = useState(false);
+  const [selectedMemberId, setSelectedMemberId] = useState<string>("");
+  const [selectedAllocationKeys, setSelectedAllocationKeys] = useState<Set<string>>(new Set());
+  const [isPayingPayOS, setIsPayingPayOS] = useState(false);
 
   useEffect(() => {
     fetch(`${getApiBaseUrl()}/public/${groupId}/shared-bills`)
@@ -65,6 +76,116 @@ const SharedBillsPublicPortal = ({
       .finally(() => setLoading(false));
   }, [groupId]);
 
+  const bills = data?.bills || [];
+  const payout = data?.payout;
+
+  // Extract all unique members from bills allocations
+  const allMembers = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const b of bills) {
+      for (const a of b.allocations || []) {
+        if (a.memberId && a.name) map.set(a.memberId, a.name);
+      }
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [bills]);
+
+  // Find all unpaid allocations across all open bills for the selected member
+  const memberUnpaidAllocations = useMemo(() => {
+    if (!selectedMemberId) return [];
+    const list: Array<{
+      key: string;
+      billId: string;
+      billTitle: string;
+      billingDate: string;
+      allocationId: string;
+      amountVnd: number;
+    }> = [];
+    for (const b of bills) {
+      for (const a of b.allocations || []) {
+        if (a.memberId === selectedMemberId && a.state === "unpaid") {
+          list.push({
+            key: `${b.id}__${a.id}`,
+            billId: b.id,
+            billTitle: b.title,
+            billingDate: b.billingDate || b.dueDate || "",
+            allocationId: a.id,
+            amountVnd: a.amountVnd,
+          });
+        }
+      }
+    }
+    return list;
+  }, [bills, selectedMemberId]);
+
+  // When selected member changes, default to selecting all their unpaid allocations
+  useEffect(() => {
+    if (selectedMemberId && memberUnpaidAllocations.length > 0) {
+      setSelectedAllocationKeys(new Set(memberUnpaidAllocations.map((it) => it.key)));
+    } else {
+      setSelectedAllocationKeys(new Set());
+    }
+  }, [selectedMemberId, memberUnpaidAllocations]);
+
+  const toggleAllocation = (key: string) => {
+    setSelectedAllocationKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedAllocationKeys.size === memberUnpaidAllocations.length) {
+      setSelectedAllocationKeys(new Set());
+    } else {
+      setSelectedAllocationKeys(new Set(memberUnpaidAllocations.map((it) => it.key)));
+    }
+  };
+
+  const selectedAllocations = useMemo(() => {
+    return memberUnpaidAllocations.filter((it) => selectedAllocationKeys.has(it.key));
+  }, [memberUnpaidAllocations, selectedAllocationKeys]);
+
+  const totalSelected = useMemo(() => {
+    return selectedAllocations.reduce((sum, it) => sum + it.amountVnd, 0);
+  }, [selectedAllocations]);
+
+  const selectedMemberName = useMemo(() => {
+    return allMembers.find((m) => m.id === selectedMemberId)?.name || "";
+  }, [allMembers, selectedMemberId]);
+
+  const handlePayOS = async () => {
+    if (selectedAllocations.length === 0 || !selectedMemberId) return;
+    setIsPayingPayOS(true);
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/create-payment-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          groupId,
+          memberId: selectedMemberId,
+          billAllocations: selectedAllocations.map((it) => ({
+            billId: it.billId,
+            allocationId: it.allocationId,
+          })),
+        }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || "Không thể tạo liên kết thanh toán PayOS");
+      if (resData.checkoutUrl) {
+        window.location.href = resData.checkoutUrl;
+      }
+    } catch (err: any) {
+      alert(err.message || "Lỗi tạo thanh toán");
+    } finally {
+      setIsPayingPayOS(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -73,84 +194,215 @@ const SharedBillsPublicPortal = ({
     );
   }
 
-  const bills = data?.bills || [];
-  const payout = data?.payout;
+  const memoTransfer = `${selectedMemberName} ${selectedAllocations.map((a) => a.billTitle).join(" ")}`.slice(0, 40);
+
+  const vietQrUrl = payout?.bankBin && payout?.accountNumber && totalSelected > 0
+    ? `https://img.vietqr.io/image/${payout.bankBin}-${payout.accountNumber}-compact.png?amount=${totalSelected}&addInfo=${encodeURIComponent(memoTransfer)}&accountName=${encodeURIComponent(payout.accountHolder || "")}`
+    : payout?.bankBin && payout?.accountNumber
+      ? `https://img.vietqr.io/image/${payout.bankBin}-${payout.accountNumber}-compact.png?accountName=${encodeURIComponent(payout.accountHolder || "")}`
+      : null;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-12">
-      <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
+      <div className="max-w-3xl mx-auto px-4 py-8 space-y-8">
         <header className="text-center space-y-2">
           <h1 className="text-3xl font-extrabold tracking-tight">
             {group?.name || "Chia sẻ chi phí"}
           </h1>
           <p className="text-sm text-slate-500">
-            Trang công khai theo dõi các khoản thu và thanh toán của nhóm.
+            Trang công khai theo dõi và thanh toán các khoản thu của nhóm.
           </p>
         </header>
 
-        {payout?.accountNumber ? (
-          <Card className="border-emerald-200/60 bg-gradient-to-br from-emerald-50/50 to-white shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2 text-emerald-800">
-                <CreditCard className="h-5 w-5 text-emerald-600" />
-                Thông tin chuyển khoản
-              </CardTitle>
-              <CardDescription>
-                Quét mã VietQR hoặc chuyển khoản trực tiếp theo thông tin bên
-                dưới:
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-col sm:flex-row items-center gap-6 justify-center">
-                {payout.bankBin && payout.accountNumber ? (
-                  <div className="rounded-xl border bg-white p-2 shadow-sm">
-                    <img
-                      src={`https://img.vietqr.io/image/${payout.bankBin}-${payout.accountNumber}-compact.png?accountName=${encodeURIComponent(payout.accountHolder || "")}`}
-                      alt="VietQR Chuyển khoản"
-                      className="w-48 h-auto rounded-lg"
-                    />
+        {/* Member Debt Consolidation & Pay Box */}
+        <Card className="border-primary/30 shadow-md bg-white overflow-hidden">
+          <CardHeader className="bg-primary/5 pb-4 border-b">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <CreditCard className="h-5 w-5 text-primary" />
+              Thanh toán phần của bạn (Gom nợ nhiều kỳ)
+            </CardTitle>
+            <CardDescription>
+              Chọn tên thành viên để xem danh sách các kỳ nợ và thanh toán tự động qua PayOS hoặc VietQR.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-5 space-y-5">
+            <div>
+              <label htmlFor="member-select" className="text-xs font-semibold text-slate-600 block mb-1.5 uppercase tracking-wider">
+                1. Chọn tên của bạn:
+              </label>
+              <select
+                id="member-select"
+                value={selectedMemberId}
+                onChange={(e) => setSelectedMemberId(e.target.value)}
+                className="w-full rounded-lg border border-input bg-white px-3 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary font-medium"
+              >
+                <option value="">-- Bấm để chọn tên thành viên --</option>
+                {allMembers.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedMemberId ? (
+              memberUnpaidAllocations.length === 0 ? (
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-emerald-800 text-sm flex items-center gap-3">
+                  <Check className="h-5 w-5 text-emerald-600 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Tuyệt vời, {selectedMemberName}!</p>
+                    <p className="text-xs text-emerald-700 mt-0.5">Bạn không còn khoản nợ nào đang chờ thanh toán.</p>
                   </div>
-                ) : null}
-                <div className="space-y-2 text-sm text-center sm:text-left">
-                  <p>
-                    <span className="text-slate-500">Ngân hàng:</span>{" "}
-                    <strong>{payout.bankName || payout.bankBin}</strong>
-                  </p>
-                  <p className="flex items-center justify-center sm:justify-start gap-2">
-                    <span className="text-slate-500">Số tài khoản:</span>
-                    <strong className="font-mono text-base">
-                      {payout.accountNumber}
-                    </strong>
+                </div>
+              ) : (
+                <div className="space-y-4 pt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                      2. Chọn các kỳ cần thanh toán ({selectedAllocationKeys.size}/{memberUnpaidAllocations.length}):
+                    </span>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => {
-                        void navigator.clipboard.writeText(
-                          payout.accountNumber,
-                        );
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 2000);
-                      }}
+                      className="h-7 text-xs font-medium"
+                      onClick={toggleSelectAll}
                     >
-                      {copied ? "Đã chép" : "Sao chép"}
+                      {selectedAllocationKeys.size === memberUnpaidAllocations.length ? "Bỏ chọn tất cả" : "Chọn tất cả"}
                     </Button>
-                  </p>
-                  <p>
-                    <span className="text-slate-500">Chủ tài khoản:</span>{" "}
-                    <strong>{payout.accountHolder || "—"}</strong>
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    Nội dung chuyển khoản: Tên của bạn + Tên khoản thu
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
+                  </div>
 
+                  <div className="divide-y rounded-lg border bg-slate-50/50">
+                    {memberUnpaidAllocations.map((alloc) => {
+                      const isSelected = selectedAllocationKeys.has(alloc.key);
+                      return (
+                        <div
+                          key={alloc.key}
+                          onClick={() => toggleAllocation(alloc.key)}
+                          className={`flex items-center justify-between p-3 cursor-pointer transition-colors ${
+                            isSelected ? "bg-primary/5" : "hover:bg-white"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            {isSelected ? (
+                              <CheckSquare className="h-5 w-5 text-primary shrink-0" />
+                            ) : (
+                              <Square className="h-5 w-5 text-slate-400 shrink-0" />
+                            )}
+                            <div>
+                              <p className="font-medium text-sm text-slate-900">{alloc.billTitle}</p>
+                              {alloc.billingDate ? (
+                                <p className="text-xs text-slate-500">Kỳ: {alloc.billingDate}</p>
+                              ) : null}
+                            </div>
+                          </div>
+                          <span className="font-mono font-semibold text-sm">
+                            {alloc.amountVnd.toLocaleString("vi-VN")} VND
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Payment Actions & Summary */}
+                  {totalSelected > 0 ? (
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-slate-700">Tổng tiền đã chọn ({selectedAllocations.length} kỳ):</span>
+                        <span className="text-2xl font-black text-primary font-mono">
+                          {totalSelected.toLocaleString("vi-VN")} VND
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                        <Button
+                          size="lg"
+                          onClick={handlePayOS}
+                          disabled={isPayingPayOS}
+                          className="flex-1 font-semibold flex items-center justify-center gap-2 shadow-sm"
+                        >
+                          {isPayingPayOS ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Đang chuyển cổng PayOS…
+                            </>
+                          ) : (
+                            <>
+                              <CreditCard className="h-4 w-4" />
+                              Thanh toán tự động qua PayOS
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      {vietQrUrl && payout?.accountNumber ? (
+                        <div className="pt-3 border-t border-primary/10 space-y-3">
+                          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider text-center">
+                            Hoặc quét VietQR chuyển khoản (Số tiền đã tự động điền {totalSelected.toLocaleString("vi-VN")} VND):
+                          </p>
+                          <div className="flex flex-col sm:flex-row items-center justify-center gap-5">
+                            <div className="rounded-xl border bg-white p-2 shadow-sm shrink-0">
+                              <img
+                                src={vietQrUrl}
+                                alt="VietQR Chuyển khoản"
+                                className="w-48 h-auto rounded-lg"
+                              />
+                            </div>
+                            <div className="space-y-2 text-xs sm:text-left text-center">
+                              <p><span className="text-slate-500">Ngân hàng:</span> <strong>{payout.bankName || payout.bankBin}</strong></p>
+                              <p className="flex items-center justify-center sm:justify-start gap-1.5">
+                                <span className="text-slate-500">Số tài khoản:</span>
+                                <strong className="font-mono text-sm">{payout.accountNumber}</strong>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 px-1.5 text-[11px]"
+                                  onClick={() => {
+                                    void navigator.clipboard.writeText(payout.accountNumber);
+                                    setCopiedAcc(true);
+                                    setTimeout(() => setCopiedAcc(false), 2000);
+                                  }}
+                                >
+                                  {copiedAcc ? "Đã chép" : "Chép STK"}
+                                </Button>
+                              </p>
+                              <p className="flex items-center justify-center sm:justify-start gap-1.5">
+                                <span className="text-slate-500">Số tiền:</span>
+                                <strong className="font-mono text-sm text-primary">{totalSelected.toLocaleString("vi-VN")} VND</strong>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 px-1.5 text-[11px]"
+                                  onClick={() => {
+                                    void navigator.clipboard.writeText(String(totalSelected));
+                                    setCopiedAmount(true);
+                                    setTimeout(() => setCopiedAmount(false), 2000);
+                                  }}
+                                >
+                                  {copiedAmount ? "Đã chép" : "Chép tiền"}
+                                </Button>
+                              </p>
+                              <p><span className="text-slate-500">Chủ tài khoản:</span> <strong>{payout.accountHolder || "—"}</strong></p>
+                              <p className="text-[11px] text-slate-400">Nội dung CK: <strong className="text-slate-600">{memoTransfer}</strong></p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            ) : (
+              <p className="text-xs text-slate-400 italic text-center py-2">
+                👆 Hãy chọn tên của bạn ở trên để hệ thống tự động gom các kỳ nợ và tạo lệnh thanh toán.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Group Open Bills Transparency List */}
         <div className="space-y-4">
-          <h2 className="text-lg font-bold">Khoản thu đang mở</h2>
+          <h2 className="text-lg font-bold flex items-center justify-between">
+            <span>Tất cả khoản thu đang mở ({bills.length})</span>
+          </h2>
           {!bills.length ? (
             <Card className="p-8 text-center text-slate-500 border-dashed">
               Không có khoản thu nào đang chờ thanh toán.
@@ -163,10 +415,9 @@ const SharedBillsPublicPortal = ({
                     <div>
                       <CardTitle className="text-lg">{bill.title}</CardTitle>
                       <CardDescription>
-                        Hạn thanh toán:{" "}
-                        <strong className="text-slate-700">
-                          {bill.dueDate}
-                        </strong>
+                        {bill.dueDate ? (
+                          <>Hạn thanh toán: <strong className="text-slate-700">{bill.dueDate}</strong></>
+                        ) : null}
                       </CardDescription>
                     </div>
                     <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">
@@ -180,7 +431,7 @@ const SharedBillsPublicPortal = ({
                       Danh sách thành viên:
                     </p>
                     <div className="divide-y rounded-lg border bg-white">
-                      {bill.allocations.map((a: any) => (
+                      {(bill.allocations || []).map((a: any) => (
                         <div
                           key={a.id}
                           className="flex items-center justify-between p-3 text-sm"

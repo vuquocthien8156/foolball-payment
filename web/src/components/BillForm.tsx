@@ -16,7 +16,7 @@ export function BillForm({ members, busy, recurring = false, initial, onSave }: 
   const [input, setInput] = useState<SubscriptionInput>({ title: "", amountVnd: 260000, participantIds: [], providerPayerMemberId: "",
     settlementMode: "full_collection",
     reminderMode: "default",
-    billingDate: "", dueDate: "", billingDay: 1, startMonth: "", dueOffsetDays: 3, reminderHour: 9, ...initial });
+    billingDate: "", dueDate: "", billingDay: 1, startMonth: "", dueOffsetDays: 0, reminderHour: 9, ...initial });
   const active = members.filter((member) => !member.inactive || input.participantIds.includes(member.id));
   const count = input.participantIds.length;
   const amount = Number(input.amountVnd);
@@ -123,11 +123,22 @@ export function BillForm({ members, busy, recurring = false, initial, onSave }: 
         </label>
       </div>
     </div>
-    {recurring ? <div className="grid gap-4 sm:grid-cols-2">
-      <div><Label htmlFor="subscription-month">Tháng bắt đầu thu</Label><Input id="subscription-month" type="month" value={input.startMonth} onChange={(event) => setField("startMonth", event.target.value)} required /></div>
-      <div><Label htmlFor="subscription-day">Ngày thu hằng tháng</Label><Input id="subscription-day" type="number" min={1} max={31} value={input.billingDay} onChange={(event) => setField("billingDay", Number(event.target.value))} required /></div>
-      <div><Label htmlFor="subscription-due">Số ngày chờ thanh toán</Label><Input id="subscription-due" type="number" min={0} max={30} value={input.dueOffsetDays} onChange={(event) => setField("dueOffsetDays", Number(event.target.value))} required /></div>
-      <div><Label htmlFor="subscription-hour">Giờ nhắc thanh toán (giờ Việt Nam)</Label><Input id="subscription-hour" type="number" min={0} max={23} value={input.reminderHour} onChange={(event) => setField("reminderHour", Number(event.target.value))} required /></div>
+    {recurring ? <div className="grid gap-4 sm:grid-cols-3">
+      <div>
+        <Label htmlFor="subscription-month">Tháng bắt đầu thu</Label>
+        <Input id="subscription-month" type="month" value={input.startMonth} onChange={(event) => setField("startMonth", event.target.value)} required />
+        <p className="text-[11px] text-muted-foreground mt-1">Hệ thống sẽ tự động tạo bill từ tháng này.</p>
+      </div>
+      <div>
+        <Label htmlFor="subscription-day">Ngày thu hằng tháng</Label>
+        <Input id="subscription-day" type="number" min={1} max={31} value={input.billingDay} onChange={(event) => setField("billingDay", Number(event.target.value))} required />
+        <p className="text-[11px] text-muted-foreground mt-1">Ngày trong tháng phát hành kỳ thu.</p>
+      </div>
+      <div>
+        <Label htmlFor="subscription-hour">Giờ thông báo (giờ VN)</Label>
+        <Input id="subscription-hour" type="number" min={0} max={23} value={input.reminderHour} onChange={(event) => setField("reminderHour", Number(event.target.value))} required />
+        <p className="text-[11px] text-muted-foreground mt-1">Giờ gửi tin Telegram trong ngày thu.</p>
+      </div>
     </div> : <div className="grid gap-4 sm:grid-cols-3">
       <div><Label htmlFor="bill-date">Ngày lập khoản thu</Label><Input id="bill-date" type="date" value={input.billingDate} onChange={(event) => setField("billingDate", event.target.value)} required /></div>
       <div><Label htmlFor="bill-due">Hạn thanh toán</Label><Input id="bill-due" type="date" min={input.billingDate} value={input.dueDate} onChange={(event) => setField("dueDate", event.target.value)} required /></div>
