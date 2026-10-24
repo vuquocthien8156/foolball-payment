@@ -1054,19 +1054,6 @@ const Members = () => {
                 </div>
                 <div className="flex items-center space-x-2">
                   <Switch
-                    id="edit-auto-cover"
-                    checked={editingMember.autoCoverWhenPayer !== false}
-                    onCheckedChange={(checked) =>
-                      setEditingMember({
-                        ...editingMember,
-                        autoCoverWhenPayer: checked,
-                      })
-                    }
-                  />
-                  <Label htmlFor="edit-auto-cover">Tự động ghi nhận đã trả khi là người ứng tiền</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
                     id="edit-auto-attendance"
                     checked={!!editingMember.autoAttendance}
                     onCheckedChange={(checked) =>

@@ -31,21 +31,52 @@ async function ensureBillNotifications({ db, groupId, now }) {
   });
 }
 
+function formatPeriodLabel(str) {
+  if (!str) return "";
+  const match = String(str).match(/^(\d{4})-(\d{2})/);
+  if (match) return `${match[2]}/${match[1]}`;
+  return String(str);
+}
+
+function formatDateLabel(str) {
+  if (!str) return "";
+  const match = String(str).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  return String(str);
+}
+
 function reminderText(bill, allocations, priorDebtByMember = new Map()) {
   const unpaid = allocations.filter((allocation) => allocation.state === "unpaid");
   let grandTotal = 0;
+  const currentPeriod = formatPeriodLabel(bill.periodKey || bill.billingDate?.slice(0, 7));
   const lines = unpaid.map((allocation) => {
     const current = allocation.amountVnd;
-    const prior = priorDebtByMember.get(allocation.memberId) || 0;
+    const debtEntry = priorDebtByMember.get(allocation.memberId);
+    const prior = typeof debtEntry === "number" ? debtEntry : (debtEntry?.total || 0);
+    const items = typeof debtEntry === "object" && Array.isArray(debtEntry?.items) ? debtEntry.items : [];
     const total = current + prior;
     grandTotal += total;
+
     if (prior > 0) {
-      return `${allocation.name.slice(0, 40)}: ${total.toLocaleString("vi-VN")} VND (${current.toLocaleString("vi-VN")} VND kỳ này + ${prior.toLocaleString("vi-VN")} VND nợ cũ)`;
+      const header = `• ${allocation.name.slice(0, 40)}: ${total.toLocaleString("vi-VN")} VND`;
+      const currentLine = `  ↳ Kỳ này (${currentPeriod || "kỳ hiện tại"}): ${current.toLocaleString("vi-VN")} VND`;
+      let priorLines = "";
+      if (items.length > 0) {
+        priorLines = items.map((it) => `  ↳ Nợ cũ tháng ${formatPeriodLabel(it.period)}: ${it.amount.toLocaleString("vi-VN")} VND`).join("\n");
+      } else {
+        priorLines = `  ↳ Nợ cũ các kỳ trước: ${prior.toLocaleString("vi-VN")} VND`;
+      }
+      return `${header}\n${currentLine}\n${priorLines}`;
     }
-    return `${allocation.name.slice(0, 40)}: ${current.toLocaleString("vi-VN")} VND`;
+    return `• ${allocation.name.slice(0, 40)}: ${current.toLocaleString("vi-VN")} VND`;
   });
-  return `${bill.title} — ${bill.billingDate.slice(0, 7)}\nHạn thanh toán: ${bill.dueDate}\n${lines.join("\n")}\nCòn phải thu: ${grandTotal.toLocaleString("vi-VN")} VND`;
+
+  const billingPeriodStr = currentPeriod ? ` — Tháng ${currentPeriod}` : "";
+  const dueDateStr = formatDateLabel(bill.dueDate) || bill.dueDate;
+
+  return `📋 ${bill.title}${billingPeriodStr}\n⏰ Hạn thanh toán: ${dueDateStr}\n─────────────────────────\nChi tiết thanh toán:\n${lines.join("\n")}\n─────────────────────────\n💰 Còn phải thu: ${grandTotal.toLocaleString("vi-VN")} VND`;
 }
+
 
 async function queueCatchupSummary({ db, groupId, now }) {
   const bills = await db.collection(`groups/${groupId}/bills`).where("catchupPending", "==", true).limit(50).get();
@@ -91,11 +122,16 @@ async function notificationContent(db, data) {
       const openBillsSnap = await db.collection(`groups/${data.groupId}/bills`).where("state", "==", "open").get();
       for (const bDoc of openBillsSnap.docs) {
         if (bDoc.id === targetBillId) continue;
+        const b = bDoc.data();
+        const periodKey = b.periodKey || (b.billingDate ? b.billingDate.slice(0, 7) : "");
         const aSnap = await bDoc.ref.collection("allocations").get();
         for (const aDoc of aSnap.docs) {
           const a = aDoc.data();
           if (a.state === "unpaid") {
-            priorDebtByMember.set(a.memberId, (priorDebtByMember.get(a.memberId) || 0) + a.amountVnd);
+            const current = priorDebtByMember.get(a.memberId) || { total: 0, items: [] };
+            current.total += a.amountVnd;
+            current.items.push({ period: periodKey, amount: a.amountVnd });
+            priorDebtByMember.set(a.memberId, current);
           }
         }
       }

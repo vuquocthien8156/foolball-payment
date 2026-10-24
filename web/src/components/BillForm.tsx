@@ -14,6 +14,7 @@ interface BillFormProps {
 
 export function BillForm({ members, busy, recurring = false, initial, onSave }: BillFormProps): JSX.Element {
   const [input, setInput] = useState<SubscriptionInput>({ title: "", amountVnd: 260000, participantIds: [], providerPayerMemberId: "",
+    settlementMode: "full_collection",
     billingDate: "", dueDate: "", billingDay: 1, startMonth: "", dueOffsetDays: 3, reminderHour: 9, ...initial });
   const active = members.filter((member) => !member.inactive || input.participantIds.includes(member.id));
   const count = input.participantIds.length;
@@ -32,7 +33,38 @@ export function BillForm({ members, busy, recurring = false, initial, onSave }: 
     </fieldset>
     <div><Label htmlFor="bill-payer">Ai ứng tiền thanh toán dịch vụ?</Label><select id="bill-payer" className="flex h-10 w-full rounded-md border bg-background px-3 text-sm" value={input.providerPayerMemberId} onChange={(event) => setField("providerPayerMemberId", event.target.value)} required>
       <option value="">Chọn thành viên</option>{active.filter((member) => input.participantIds.includes(member.id)).map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
-    </select><p className="mt-1 text-xs text-muted-foreground">Phần tiền của người ứng được tính riêng. Các thành viên còn lại chuyển lại phần của mình.</p></div>
+    </select></div>
+    <div className="space-y-2">
+      <Label>Hình thức đối soát thanh toán</Label>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${input.settlementMode !== "net_offset" ? "border-primary bg-primary/5" : "bg-card"}`}>
+          <input
+            type="radio"
+            name="settlementMode"
+            className="mt-1"
+            checked={input.settlementMode !== "net_offset"}
+            onChange={() => setField("settlementMode", "full_collection")}
+          />
+          <div>
+            <p className="text-sm font-medium">Thu đủ 100% rồi hoàn trả</p>
+            <p className="text-xs text-muted-foreground">Tất cả thành viên đều đóng tiền phần mình để đối soát tròn tiền.</p>
+          </div>
+        </label>
+        <label className={`flex items-start gap-3 rounded-lg border p-3 cursor-pointer ${input.settlementMode === "net_offset" ? "border-primary bg-primary/5" : "bg-card"}`}>
+          <input
+            type="radio"
+            name="settlementMode"
+            className="mt-1"
+            checked={input.settlementMode === "net_offset"}
+            onChange={() => setField("settlementMode", "net_offset")}
+          />
+          <div>
+            <p className="text-sm font-medium">Khấu trừ phần người ứng</p>
+            <p className="text-xs text-muted-foreground">Người ứng không cần đóng tiền, chỉ thu phần của các thành viên còn lại.</p>
+          </div>
+        </label>
+      </div>
+    </div>
     {recurring ? <div className="grid gap-4 sm:grid-cols-2">
       <div><Label htmlFor="subscription-month">Tháng bắt đầu thu</Label><Input id="subscription-month" type="month" value={input.startMonth} onChange={(event) => setField("startMonth", event.target.value)} required /></div>
       <div><Label htmlFor="subscription-day">Ngày thu hằng tháng</Label><Input id="subscription-day" type="number" min={1} max={31} value={input.billingDay} onChange={(event) => setField("billingDay", Number(event.target.value))} required /></div>

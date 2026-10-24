@@ -218,7 +218,7 @@ const AdminLayout = () => {
                   Ghi chú live
                 </NavLink>
               ) : null}
-              {!sharedBills && (isSuperAdmin || allowedTabs.has("public")) ? (
+              {(isSuperAdmin || allowedTabs.has("public")) ? (
                 <NavLink
                   to={groupPath("public")}
                   onClick={() => setIsSidebarOpen(false)}

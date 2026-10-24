@@ -24,26 +24,21 @@ const SharedBillMembers = () => {
       .catch((cause: unknown) => { if (!cancelled) setError(billError(cause)); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [groupId]);
-  const [autoCover, setAutoCover] = useState(true);
   const save = async (member: BillMember): Promise<void> => {
     setBusy(true); setError("");
-    try { await apiRequest("PUT", `/groups/${groupId}/bills/members/${member.id}`, member); setName(""); setEditing(null); setAutoCover(true); await reload(); }
+    try { await apiRequest("PUT", `/groups/${groupId}/bills/members/${member.id}`, member); setName(""); setEditing(null); await reload(); }
     catch (cause: unknown) { setError(billError(cause)); } finally { setBusy(false); }
   };
   return <div className="mx-auto max-w-4xl space-y-6"><header><h1 className="text-2xl font-bold">Thành viên</h1><p className="text-sm text-muted-foreground">Thêm tất cả người chia tiền, bao gồm cả bạn. Thành viên không cần tài khoản ứng dụng.</p></header>
     {error ? <p role="alert">{error}</p> : null}
-    <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); void save({ id: editing?.id || crypto.randomUUID(), name, inactive: editing?.inactive || false, autoCoverWhenPayer: autoCover }); }}>
+    <form className="space-y-3 rounded-lg border p-4" onSubmit={(event) => { event.preventDefault(); void save({ id: editing?.id || crypto.randomUUID(), name, inactive: editing?.inactive || false }); }}>
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-0 flex-1"><Label htmlFor="member-name">{editing ? "Chỉnh sửa tên" : "Tên thành viên mới"}</Label><Input id="member-name" value={name} maxLength={60} required onChange={(event) => setName(event.target.value)} /></div>
         <Button disabled={busy || !name.trim()}>{busy ? "Đang lưu…" : editing ? "Lưu tên" : "Thêm thành viên"}</Button>
-        {editing ? <Button type="button" variant="ghost" onClick={() => { setEditing(null); setName(""); setAutoCover(true); }}>Hủy</Button> : null}
+        {editing ? <Button type="button" variant="ghost" onClick={() => { setEditing(null); setName(""); }}>Hủy</Button> : null}
       </div>
-      <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-        <input type="checkbox" checked={autoCover} onChange={(event) => setAutoCover(event.target.checked)} disabled={busy} />
-        <span>Tự động ghi nhận đã trả khi là người ứng tiền</span>
-      </label>
     </form>
-    {loading ? <p role="status">Đang tải thành viên…</p> : !members.length ? <p className="rounded-lg border border-dashed p-8 text-center">Chưa có thành viên.</p> : <div className="space-y-3">{members.map((member) => <div key={member.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"><div><div className="flex items-center gap-2 flex-wrap"><p className="font-medium">{member.name}</p>{member.inactive ? <span className="text-xs text-muted-foreground">Đã ngừng tham gia</span> : null}{member.autoCoverWhenPayer !== false ? <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs font-normal text-emerald-600">Tự động trừ khi ứng</span> : null}</div><Link className="text-sm underline" to={groupPath(`admin/bill-history?memberId=${encodeURIComponent(member.id)}`)}>Xem lịch sử chia tiền</Link></div><div className="flex gap-2"><Button variant="outline" disabled={busy} onClick={() => { setEditing(member); setName(member.name); setAutoCover(member.autoCoverWhenPayer !== false); }}>Sửa</Button><Button variant="outline" disabled={busy} onClick={() => void save({ ...member, inactive: !member.inactive })}>{member.inactive ? "Cho tham gia lại" : "Ngừng tham gia"}</Button></div></div>)}</div>}
+    {loading ? <p role="status">Đang tải thành viên…</p> : !members.length ? <p className="rounded-lg border border-dashed p-8 text-center">Chưa có thành viên.</p> : <div className="space-y-3">{members.map((member) => <div key={member.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"><div><div className="flex items-center gap-2 flex-wrap"><p className="font-medium">{member.name}</p>{member.inactive ? <span className="text-xs text-muted-foreground">Đã ngừng tham gia</span> : null}</div><Link className="text-sm underline" to={groupPath(`admin/bill-history?memberId=${encodeURIComponent(member.id)}`)}>Xem lịch sử chia tiền</Link></div><div className="flex gap-2"><Button variant="outline" disabled={busy} onClick={() => { setEditing(member); setName(member.name); }}>Sửa</Button><Button variant="outline" disabled={busy} onClick={() => void save({ ...member, inactive: !member.inactive })}>{member.inactive ? "Cho tham gia lại" : "Ngừng tham gia"}</Button></div></div>)}</div>}
     <p className="text-xs text-muted-foreground">Ngừng tham gia vẫn giữ lịch sử thanh toán. Hãy cập nhật các khoản thu định kỳ để thay đổi danh sách chia tiền từ kỳ sau.</p>
   </div>;
 };

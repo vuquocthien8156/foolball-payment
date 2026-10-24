@@ -179,6 +179,41 @@ function createPublicRouter({ db, FieldValue, Timestamp, onMemberAction }) {
     });
     return { success: true };
   }));
+
+  router.get("/:groupId/shared-bills", route(async (req) => {
+    const gid = req.params.groupId;
+    const group = await db.collection("groups").doc(gid).get();
+    if (!group.exists) reject(404, "GROUP_NOT_FOUND");
+    if (group.data().status !== "active") reject(403, "GROUP_INACTIVE");
+    const billsSnap = await db.collection(`groups/${gid}/bills`).where("state", "==", "open").limit(5).get();
+    const payoutSnap = await db.doc(`groups/${gid}/settings/payout`).get();
+    const payout = payoutSnap.exists ? payoutSnap.data() : null;
+    const bills = await Promise.all(billsSnap.docs.map(async (bDoc) => {
+      const bData = bDoc.data();
+      const aSnap = await bDoc.ref.collection("allocations").get();
+      return {
+        id: bDoc.id,
+        title: bData.title,
+        amountVnd: bData.amountVnd,
+        billingDate: bData.billingDate,
+        dueDate: bData.dueDate,
+        providerPayerMemberId: bData.providerPayerMemberId,
+        allocations: aSnap.docs.map((a) => ({ id: a.id, ...a.data() })),
+      };
+    }));
+    return {
+      group: { name: group.data().name, kind: group.data().kind },
+      bills,
+      payout: payout ? {
+        bankBin: payout.bankBin,
+        bankName: payout.bankName,
+        accountNumber: payout.accountNumber,
+        accountHolder: payout.accountHolder,
+        qrCodeUrl: payout.qrCodeUrl,
+      } : null,
+    };
+  }));
+
   return router;
 }
 

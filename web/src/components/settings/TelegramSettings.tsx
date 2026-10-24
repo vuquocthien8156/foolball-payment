@@ -167,6 +167,12 @@ export function TelegramSettings({ groupId }: { groupId: string }): JSX.Element 
       setMessage("Đã gửi tin nhắn thử nghiệm vào nhóm Telegram!");
     });
 
+  const sendSampleBill = async (): Promise<void> =>
+    perform(async () => {
+      await apiRequest("POST", `${base}/settings/telegram-sample-bill`);
+      setMessage("Đã gửi tin nhắn mẫu bill thử vào nhóm Telegram!");
+    });
+
   const disconnect = async (): Promise<void> =>
     perform(async () => {
       await apiRequest("DELETE", `${base}/telegram/connection`);
@@ -381,13 +387,16 @@ export function TelegramSettings({ groupId }: { groupId: string }): JSX.Element 
 
                 {/* Action Bar */}
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button onClick={() => void save()} disabled={busy || !dirty}>
                       Lưu cài đặt
                     </Button>
                     <Button variant="outline" onClick={() => void test()} disabled={busy || dirty}>
                       <Send className="mr-1.5 h-3.5 w-3.5" />
                       Gửi tin nhắn thử
+                    </Button>
+                    <Button variant="secondary" onClick={() => void sendSampleBill()} disabled={busy || dirty}>
+                      Gửi mẫu bill thử
                     </Button>
                   </div>
 

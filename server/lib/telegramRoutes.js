@@ -15,6 +15,7 @@ function createTelegramRouter({ db, auth, FieldValue, env = process.env, clientF
   router.get("/groups/:groupId/settings/telegram", requireUser, route((req) => service().settings(req.params.groupId, req.uid)));
   router.put("/groups/:groupId/settings/telegram", requireUser, route((req) => service().save(req.params.groupId, req.uid, req.body)));
   router.post("/groups/:groupId/settings/telegram-test", requireUser, route((req) => service().test(req.params.groupId, req.uid)));
+  router.post("/groups/:groupId/settings/telegram-sample-bill", requireUser, route((req) => service().sampleBill(req.params.groupId, req.uid)));
   router.post("/groups/:groupId/telegram/connections", requireUser, route((req) => service().create(req.params.groupId, req.uid)));
   router.get("/groups/:groupId/telegram/connections/:id", requireUser, route((req) => service().status(req.params.groupId, req.params.id, req.uid)));
   router.post("/groups/:groupId/telegram/connections/:id/confirm", requireUser, route((req) => service().confirm(req.params.groupId, req.params.id, req.uid)));

@@ -78,12 +78,57 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
       }
       if (members.some((m) => !m.exists || groupIdOf(m.data()) !== groupId || m.data().inactive)) reject(400, "INVALID_PARTICIPANTS");
       const payerDoc = members.find((m) => m.id === input.providerPayerMemberId);
-      const autoCoverPayer = payerDoc ? (payerDoc.data().autoCoverWhenPayer !== false) : true;
+      const settlementMode = input.settlementMode || "net_offset";
+      const autoCoverPayer = settlementMode === "net_offset";
       const allocations = splitBill({ amountVnd: input.amountVnd, participants: members.map((m) => ({ id: m.id, name: m.data().name })), providerPayerMemberId: input.providerPayerMemberId, autoCoverPayer });
       const [telegram, slack] = await tx.getAll(groupRef(groupId).collection("settings").doc("telegram"), groupRef(groupId).collection("settings").doc("slack"));
       const timestamp = FieldValue.serverTimestamp();
+      const groupData = group.data();
+      const groupOwnerUid = groupData.ownerUid || groupData.createdBy;
+      let isDirectGroup = false;
+      if (groupOwnerUid) {
+        const ownerAcc = await tx.get(db.collection("platformAccounts").doc(groupOwnerUid));
+        if (ownerAcc.exists && ownerAcc.data().role === "owner") {
+          isDirectGroup = true;
+        }
+      }
+      const payerName = payerDoc?.data()?.name || "Người ứng tiền";
+      const payoutAmount = settlementMode === "full_collection"
+        ? input.amountVnd
+        : allocations.filter((a) => a.memberId !== input.providerPayerMemberId).reduce((s, a) => s + a.amountVnd, 0);
+
+      const reconciliation = isDirectGroup
+        ? {
+            tier1Payout: {
+              status: "PENDING_COLLECTION",
+              recipientRole: "DIRECT_MEMBER",
+              recipientMemberId: input.providerPayerMemberId,
+              recipientName: payerName,
+              amountVnd: payoutAmount,
+              bankInfo: payerDoc?.data()?.bankInfo || null,
+            },
+          }
+        : {
+            tier1Payout: {
+              status: "PENDING_COLLECTION",
+              recipientRole: "GROUP_MANAGER",
+              recipientUidOrMemberId: groupOwnerUid,
+              recipientName: groupData.ownerDisplayName || "Quản trị viên nhóm",
+              amountVnd: payoutAmount,
+            },
+            tier2Payout: {
+              status: "PENDING",
+              memberId: input.providerPayerMemberId,
+              memberName: payerName,
+              amountVnd: payoutAmount,
+              bankInfo: payerDoc?.data()?.bankInfo || null,
+            },
+          };
+
       tx.set(ref, { groupId, title, amountVnd: input.amountVnd, currency: "VND", billingDate, dueDate,
         reminderHour: input.reminderHour ?? 9,
+        settlementMode,
+        reconciliation,
         providerPayerMemberId: input.providerPayerMemberId, source: occurrence ? "subscription" : "one_time",
         ...(occurrence ? { subscriptionId: occurrence.subscriptionId, subscriptionRevision: occurrence.revision, periodKey: occurrence.periodKey,
           catchupPending: billingDate < localDate(now()) } : {}),
@@ -188,11 +233,16 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
         const openBillsSnap = await db.collection(`groups/${gid}/bills`).where("state", "==", "open").get();
         for (const bDoc of openBillsSnap.docs) {
           if (bDoc.id === bid) continue;
+          const b = bDoc.data();
+          const periodKey = b.periodKey || (b.billingDate ? b.billingDate.slice(0, 7) : "");
           const aSnap = await bDoc.ref.collection("allocations").get();
           for (const aDoc of aSnap.docs) {
             const a = aDoc.data();
             if (a.state === "unpaid") {
-              priorDebtByMember.set(a.memberId, (priorDebtByMember.get(a.memberId) || 0) + a.amountVnd);
+              const current = priorDebtByMember.get(a.memberId) || { total: 0, items: [] };
+              current.total += a.amountVnd;
+              current.items.push({ period: periodKey, amount: a.amountVnd });
+              priorDebtByMember.set(a.memberId, current);
             }
           }
         }
@@ -232,7 +282,65 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
     });
   }
 
-  return { create, detail, payment, list, members, saveMember, remind, voidBill };
+  async function settleTier1Payout({ groupId, billId, actorUid, reference = "", note = "" }) {
+    const ref = billRef(groupId, billId);
+    return db.runTransaction(async (tx) => {
+      const [group, bill] = await tx.getAll(groupRef(groupId), ref);
+      checkGroup(group);
+      if (!bill.exists) reject(404, "BILL_NOT_FOUND");
+      const data = bill.data();
+      const recon = data.reconciliation || {};
+      if (recon.tier1Payout?.status === "SETTLED") return { ok: true, alreadySettled: true };
+      const timestamp = FieldValue.serverTimestamp();
+      const updatedRecon = {
+        ...recon,
+        tier1Payout: {
+          ...(recon.tier1Payout || {}),
+          status: "SETTLED",
+          settledAt: timestamp,
+          settledByUid: actorUid,
+          transactionReference: reference,
+          note,
+        },
+      };
+      tx.update(ref, { reconciliation: updatedRecon });
+      tx.set(ref.collection("events").doc(`settle_tier1_${Date.now()}`), {
+        type: "tier1_settled", actorUid, note: `${reference ? `Ref: ${reference}. ` : ""}${note}`.trim(), amountVnd: recon.tier1Payout?.amountVnd || 0, createdAt: timestamp,
+      });
+      return { ok: true };
+    });
+  }
+
+  async function settleTier2Payout({ groupId, billId, actorUid, reference = "", note = "" }) {
+    const ref = billRef(groupId, billId);
+    return db.runTransaction(async (tx) => {
+      const [group, bill] = await tx.getAll(groupRef(groupId), ref);
+      checkGroup(group);
+      if (!bill.exists) reject(404, "BILL_NOT_FOUND");
+      const data = bill.data();
+      const recon = data.reconciliation || {};
+      if (recon.tier2Payout?.status === "SETTLED") return { ok: true, alreadySettled: true };
+      const timestamp = FieldValue.serverTimestamp();
+      const updatedRecon = {
+        ...recon,
+        tier2Payout: {
+          ...(recon.tier2Payout || {}),
+          status: "SETTLED",
+          settledAt: timestamp,
+          settledByUid: actorUid,
+          transactionReference: reference,
+          note,
+        },
+      };
+      tx.update(ref, { reconciliation: updatedRecon });
+      tx.set(ref.collection("events").doc(`settle_tier2_${Date.now()}`), {
+        type: "tier2_settled", actorUid, note: `${reference ? `Ref: ${reference}. ` : ""}${note}`.trim(), amountVnd: recon.tier2Payout?.amountVnd || 0, createdAt: timestamp,
+      });
+      return { ok: true };
+    });
+  }
+
+  return { create, detail, payment, list, members, saveMember, remind, voidBill, settleTier1Payout, settleTier2Payout };
 }
 
 module.exports = { splitBill, billSummary, createBillService, requireDate, validId, reject };

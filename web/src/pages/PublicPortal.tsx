@@ -44,9 +44,145 @@ interface TopHighlight {
 
 const MIN_MVP_VOTES = 2;
 
+const SharedBillsPublicPortal = ({ groupId, group }: { groupId: string; group: any }) => {
+  const [data, setData] = useState<{ bills: any[]; payout: any } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/public/${groupId}/shared-bills`)
+      .then((res) => res.json())
+      .then((res) => setData(res))
+      .catch((e) => console.error(e))
+      .finally(() => setLoading(false));
+  }, [groupId]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <p className="text-muted-foreground">Đang tải thông tin nhóm...</p>
+      </div>
+    );
+  }
+
+  const bills = data?.bills || [];
+  const payout = data?.payout;
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-12">
+      <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+        <header className="text-center space-y-2">
+          <h1 className="text-3xl font-extrabold tracking-tight">{group?.name || "Chia sẻ chi phí"}</h1>
+          <p className="text-sm text-slate-500">Trang công khai theo dõi các khoản thu và thanh toán của nhóm.</p>
+        </header>
+
+        {payout?.accountNumber ? (
+          <Card className="border-emerald-200/60 bg-gradient-to-br from-emerald-50/50 to-white shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2 text-emerald-800">
+                <CreditCard className="h-5 w-5 text-emerald-600" />
+                Thông tin chuyển khoản
+              </CardTitle>
+              <CardDescription>
+                Quét mã VietQR hoặc chuyển khoản trực tiếp theo thông tin bên dưới:
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col sm:flex-row items-center gap-6 justify-center">
+                {payout.bankBin && payout.accountNumber ? (
+                  <div className="rounded-xl border bg-white p-2 shadow-sm">
+                    <img
+                      src={`https://img.vietqr.io/image/${payout.bankBin}-${payout.accountNumber}-compact.png?accountName=${encodeURIComponent(payout.accountHolder || "")}`}
+                      alt="VietQR Chuyển khoản"
+                      className="w-48 h-auto rounded-lg"
+                    />
+                  </div>
+                ) : null}
+                <div className="space-y-2 text-sm text-center sm:text-left">
+                  <p><span className="text-slate-500">Ngân hàng:</span> <strong>{payout.bankName || payout.bankBin}</strong></p>
+                  <p className="flex items-center justify-center sm:justify-start gap-2">
+                    <span className="text-slate-500">Số tài khoản:</span>
+                    <strong className="font-mono text-base">{payout.accountNumber}</strong>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(payout.accountNumber);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                    >
+                      {copied ? "Đã chép" : "Sao chép"}
+                    </Button>
+                  </p>
+                  <p><span className="text-slate-500">Chủ tài khoản:</span> <strong>{payout.accountHolder || "—"}</strong></p>
+                  <p className="text-xs text-slate-400">Nội dung chuyển khoản: Tên của bạn + Tên khoản thu</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold">Khoản thu đang mở</h2>
+          {!bills.length ? (
+            <Card className="p-8 text-center text-slate-500 border-dashed">
+              Không có khoản thu nào đang chờ thanh toán.
+            </Card>
+          ) : (
+            bills.map((bill) => (
+              <Card key={bill.id} className="shadow-sm">
+                <CardHeader className="pb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <CardTitle className="text-lg">{bill.title}</CardTitle>
+                      <CardDescription>
+                        Hạn thanh toán: <strong className="text-slate-700">{bill.dueDate}</strong>
+                      </CardDescription>
+                    </div>
+                    <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">
+                      {bill.amountVnd.toLocaleString("vi-VN")} VND
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Danh sách thành viên:</p>
+                    <div className="divide-y rounded-lg border bg-white">
+                      {bill.allocations.map((a: any) => (
+                        <div key={a.id} className="flex items-center justify-between p-3 text-sm">
+                          <span className="font-medium">{a.name}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono">{a.amountVnd.toLocaleString("vi-VN")} VND</span>
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              a.state === "paid" ? "bg-emerald-100 text-emerald-700" :
+                              a.state === "covered_by_payer" ? "bg-blue-100 text-blue-700" :
+                              "bg-amber-100 text-amber-700"
+                            }`}>
+                              {a.state === "paid" ? "Đã trả" : a.state === "covered_by_payer" ? "Đã tính phần ứng" : "Chưa trả"}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const PublicPortal = () => {
   const { groupId, group } = useGroup();
   const groupPath = useGroupPath();
+  if (group?.kind === "shared_bills") {
+    return <SharedBillsPublicPortal groupId={groupId} group={group} />;
+  }
   const [highlight, setHighlight] = useState<TopHighlight | null>(null);
   const [isLoadingHighlight, setIsLoadingHighlight] = useState(false);
   const [scoreboard, setScoreboard] = useState<

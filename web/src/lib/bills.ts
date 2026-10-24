@@ -1,4 +1,4 @@
-export interface BillMember { id: string; name: string; inactive: boolean; autoCoverWhenPayer?: boolean }
+export interface BillMember { id: string; name: string; inactive: boolean; bankInfo?: { bankCode?: string; accountNumber?: string; accountName?: string } | null }
 export interface BillInput {
   title: string;
   amountVnd: number;
@@ -6,6 +6,7 @@ export interface BillInput {
   providerPayerMemberId: string;
   billingDate: string;
   dueDate: string;
+  settlementMode?: "full_collection" | "net_offset";
 }
 export interface SubscriptionInput extends BillInput {
   billingDay: number;
@@ -29,6 +30,32 @@ export interface BillEvent {
   amountVnd: number;
   createdAt: { seconds: number };
 }
+export interface PayoutDetails {
+  status: "NOT_REQUIRED" | "PENDING_COLLECTION" | "READY_FOR_PAYOUT" | "SETTLED";
+  recipientRole?: "DIRECT_MEMBER" | "GROUP_MANAGER";
+  recipientUidOrMemberId?: string;
+  recipientMemberId?: string;
+  recipientName?: string;
+  amountVnd: number;
+  bankInfo?: { bankCode?: string; accountNumber?: string; accountName?: string } | null;
+  settledAt?: { seconds: number } | null;
+  settledByUid?: string | null;
+  transactionReference?: string;
+  note?: string;
+}
+export interface BillReconciliation {
+  tier1Payout?: PayoutDetails;
+  tier2Payout?: {
+    status: "PENDING" | "SETTLED";
+    memberId: string;
+    memberName: string;
+    amountVnd: number;
+    bankInfo?: { bankCode?: string; accountNumber?: string; accountName?: string } | null;
+    settledAt?: { seconds: number } | null;
+    transactionReference?: string;
+    note?: string;
+  };
+}
 export interface Bill {
   id: string;
   title: string;
@@ -37,6 +64,9 @@ export interface Bill {
   dueDate: string;
   state: "open" | "closed" | "voided";
   source: "one_time" | "subscription";
+  settlementMode?: "full_collection" | "net_offset";
+  providerPayerMemberId?: string;
+  reconciliation?: BillReconciliation;
   allocations: BillAllocation[];
   events: BillEvent[];
   summary: { payerContribution: number; expectedReimbursements: number; confirmedReimbursements: number; outstanding: number };

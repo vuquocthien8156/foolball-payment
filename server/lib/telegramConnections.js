@@ -154,7 +154,19 @@ function createTelegramConnections({ db, FieldValue, client, now = () => new Dat
     if (!result.ok) reject(result.retryable ? 503 : 400, result.error);
     return { ok: true };
   }
-  return { settings, create, status, receive, confirm, disconnect, save, test };
+  async function sampleBill(gid, uid) {
+    await authorize(gid, uid);
+    const data = await db.runTransaction(async (tx) => {
+      const saved = (await tx.get(settingsRef(gid))).data();
+      if (!saved?.chatId) reject(409, "CONNECT_GROUP_FIRST");
+      return saved;
+    });
+    const sampleText = `📋 [Mẫu Thử] Netflix Premium — Tháng 11/2026\n⏰ Hạn thanh toán: 05/11/2026\n─────────────────────────\nChi tiết thanh toán:\n• Nguyễn Văn A: 104.000 VND\n  ↳ Kỳ này (11/2026): 52.000 VND\n  ↳ Nợ cũ tháng 10/2026: 52.000 VND\n• Trần Thị B: 52.000 VND\n• Lê Văn C: 52.000 VND\n─────────────────────────\n💰 Còn phải thu: 208.000 VND\n\n📌 Đây là tin nhắn mẫu thử định dạng bill từ hệ thống.`;
+    const result = await client.send({ chatId: data.chatId, topicId: data.topicId, text: sampleText });
+    if (!result.ok) reject(result.retryable ? 503 : 400, result.error);
+    return { ok: true };
+  }
+  return { settings, create, status, receive, confirm, disconnect, save, test, sampleBill };
 }
 
 module.exports = { createTelegramConnections };

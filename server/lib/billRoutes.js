@@ -32,6 +32,14 @@ function createBillRouter({ db, auth, FieldValue }) {
   router.get("/:groupId/bills/:billId/reminder-preview", route(async (req, res) => res.json(await service.remind(req.params.groupId, req.params.billId, req.uid, null, true))));
   router.post("/:groupId/bills/:billId/reminders", route(async (req, res) => res.json(await service.remind(req.params.groupId, req.params.billId, req.uid, req.body?.requestId))));
   router.post("/:groupId/bills/:billId/void", route(async (req, res) => res.json(await service.voidBill(req.params.groupId, req.params.billId, req.uid, req.body?.reason))));
+  router.post("/:groupId/bills/:billId/settle-tier1", route(async (req, res) => res.json(await service.settleTier1Payout({
+    groupId: req.params.groupId, billId: req.params.billId, actorUid: req.uid,
+    reference: req.body?.reference, note: req.body?.note,
+  }))));
+  router.post("/:groupId/bills/:billId/settle-tier2", route(async (req, res) => res.json(await service.settleTier2Payout({
+    groupId: req.params.groupId, billId: req.params.billId, actorUid: req.uid,
+    reference: req.body?.reference, note: req.body?.note,
+  }))));
   router.post("/:groupId/bills/:billId/payments", route(async (req, res) => res.json(await service.payment({
     groupId: req.params.groupId, billId: req.params.billId, actorUid: req.uid,
     memberId: req.body?.memberId, requestId: req.body?.requestId, action: req.body?.action,
