@@ -349,10 +349,101 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     res.json({ ok: true });
   }));
 
-  // Super Admin Global Settlement Overview
-  router.get("/settlement/overview", requireOwner, wrap(async (req, res) => {
+  // Get all members across all groups and check which ones are linked to :uid
+  router.get("/accounts/:uid/members", requireOwner, wrap(async (req, res) => {
+    const targetUid = req.params.uid;
     const groupsSnap = await db.collection("groups").where("status", "==", "active").get();
+    const result = [];
+
+    for (const gDoc of groupsSnap.docs) {
+      const gid = gDoc.id;
+      const gData = gDoc.data();
+      const memSnap = await db.collection("members").where("groupId", "==", gid).get();
+      const members = memSnap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: data.name,
+          nickname: data.nickname || "",
+          accountUid: data.accountUid || null,
+          isLinked: data.accountUid === targetUid,
+        };
+      });
+
+      if (members.length > 0) {
+        result.push({
+          groupId: gid,
+          groupName: gData.name,
+          sport: gData.sport,
+          members,
+        });
+      }
+    }
+
+    res.json({ groups: result });
+  }));
+
+  // Batch link or unlink members across groups to a platform account
+  router.post("/accounts/:uid/members", requireOwner, wrap(async (req, res) => {
+    const targetUid = req.params.uid;
+    const { memberKeys } = req.body || {}; // array of { groupId, memberId }
+    if (!Array.isArray(memberKeys)) {
+      return res.status(400).json({ error: "INVALID_INPUT" });
+    }
+
+    const targetAccSnap = await db.collection("platformAccounts").doc(targetUid).get();
+    if (!targetAccSnap.exists) {
+      return res.status(404).json({ error: "ACCOUNT_NOT_FOUND" });
+    }
+    const targetAcc = targetAccSnap.data();
+    const isTargetOwner = targetAcc.role === "owner";
+
+    const selectedMemberIds = new Set(memberKeys.map((k) => k.memberId));
+    const existingLinkedSnap = await db.collection("members").where("accountUid", "==", targetUid).get();
+
+    const batch = db.batch();
+
+    // 1. Unlink unselected members
+    existingLinkedSnap.docs.forEach((d) => {
+      if (!selectedMemberIds.has(d.id)) {
+        batch.update(d.ref, {
+          accountUid: FieldValue.delete(),
+          ...(isTargetOwner ? { isPlatformOwner: false } : {}),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy: req.uid,
+        });
+      }
+    });
+
+    // 2. Link newly selected members
+    for (const item of memberKeys) {
+      if (item.memberId) {
+        const ref = db.collection("members").doc(item.memberId);
+        batch.update(ref, {
+          accountUid: targetUid,
+          ...(isTargetOwner ? { isPlatformOwner: true } : {}),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy: req.uid,
+        });
+      }
+    }
+
+    await batch.commit();
+    res.json({ success: true, linkedCount: selectedMemberIds.size });
+  }));
+
+  // Settlement Overview (Super Admin sees all, Managers see managed groups + their fronted matches waiting for Super Admin)
+  router.get("/settlement/overview", requirePlatform, wrap(async (req, res) => {
+    const isSuperAdmin = req.platform?.role === "owner";
+    const groupsSnap = await db.collection("groups").where("status", "==", "active").get();
+
+    // Pre-fetch all owners to identify owner payers across all groups
+    const ownerAccountsSnap = await db.collection("platformAccounts").where("role", "==", "owner").get();
+    const ownerUidsSet = new Set(ownerAccountsSnap.docs.map((d) => d.id));
+    if (isSuperAdmin) ownerUidsSet.add(req.uid);
+
     const groupsData = [];
+    const waitingForSuperAdmin = [];
     let totalPendingAmount = 0;
     let pendingGroupsCount = 0;
     let pendingMatchesCount = 0;
@@ -360,6 +451,16 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     for (const gDoc of groupsSnap.docs) {
       const gData = gDoc.data();
       const gid = gDoc.id;
+
+      const isDirectOwner = gData.ownerUid === req.uid;
+      let isCoManager = false;
+      if (!isSuperAdmin && !isDirectOwner) {
+        const coMemDoc = await db.collection("groupMembers").doc(`${gid}_${req.uid}`).get();
+        if (coMemDoc.exists && ["manager", "admin"].includes(coMemDoc.data()?.role)) {
+          isCoManager = true;
+        }
+      }
+      const managesThisGroup = isSuperAdmin || isDirectOwner || isCoManager;
 
       // Payout settings (recipient bank & QR)
       const payoutSnap = await db.collection("groups").doc(gid).collection("settings").doc("payout").get();
@@ -377,7 +478,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         }
       }
 
-      // Query members for this group to resolve payer names
+      // Query members for this group to resolve payer names & account links
       const membersSnap = await db.collection("members").where("groupId", "==", gid).get();
       const membersMap = new Map();
       membersSnap.docs.forEach((mDoc) => {
@@ -387,6 +488,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           name: mData.name,
           nickname: mData.nickname || "",
           isPlatformOwner: !!mData.isPlatformOwner,
+          accountUid: mData.accountUid || null,
         });
       });
 
@@ -432,21 +534,20 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         let paidByName = "";
         let isManagerPayer = false;
         let isOwnerPayer = false;
+        let isCurrentCallerPayer = false;
 
         if (m.paidByMemberId && membersMap.has(m.paidByMemberId)) {
           const memberObj = membersMap.get(m.paidByMemberId);
           paidByName = memberObj.name;
-          isOwnerPayer = !!memberObj.isPlatformOwner;
+          isOwnerPayer = !!memberObj.isPlatformOwner || (memberObj.accountUid && ownerUidsSet.has(memberObj.accountUid));
+          isCurrentCallerPayer = memberObj.accountUid === req.uid;
         } else if (m.paidByMemberId) {
           paidByName = "Thành viên #" + m.paidByMemberId.slice(0, 6);
         } else {
           paidByName = managerName || "Quản lý nhóm";
           isManagerPayer = true;
-        }
-
-        // Only count towards group pending reimbursement if payer is NOT the Super Admin
-        if (!isOwnerPayer) {
-          groupPendingAmount += amount;
+          isOwnerPayer = ownerUidsSet.has(ownerUid);
+          isCurrentCallerPayer = ownerUid === req.uid;
         }
 
         let dateIso = null;
@@ -456,8 +557,10 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           dateIso = new Date(m.date).toISOString();
         }
 
-        pendingMatches.push({
+        const matchRecord = {
           id: mDoc.id,
+          groupId: gid,
+          groupName: gData.name,
           date: dateIso,
           totalAmount: amount,
           venueName: m.venueName || null,
@@ -471,8 +574,28 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           pendingSharesCount,
           paidSharesCount,
           isFullyCollected,
-        });
+        };
+
+        // If current caller fronted this match (as manager or linked member), track for reimbursement from Super Admin
+        if (isCurrentCallerPayer && !isSuperAdmin) {
+          waitingForSuperAdmin.push(matchRecord);
+        }
+
+        // For group settlement list:
+        // Super Admin sees all matches; Manager only sees matches in groups they manage (excluding matches they themselves fronted)
+        if (managesThisGroup) {
+          if (isSuperAdmin) {
+            if (!isOwnerPayer) groupPendingAmount += amount;
+            pendingMatches.push(matchRecord);
+          } else if (!isCurrentCallerPayer) {
+            groupPendingAmount += amount;
+            pendingMatches.push(matchRecord);
+          }
+        }
       });
+
+      // If manager does not manage this group, skip adding to groupsData
+      if (!managesThisGroup) continue;
 
       // Sort pending matches by date descending
       pendingMatches.sort((a, b) => {
@@ -531,11 +654,15 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     groupsData.sort((a, b) => b.pendingAmount - a.pendingAmount);
 
     res.json({
+      isSuperAdmin,
       summary: {
         totalPendingAmount,
         pendingGroupsCount,
         pendingMatchesCount,
+        waitingForSuperAdminAmount: waitingForSuperAdmin.reduce((sum, m) => sum + m.totalAmount, 0),
+        waitingForSuperAdminCount: waitingForSuperAdmin.length,
       },
+      waitingForSuperAdmin,
       groups: groupsData,
     });
   }));
@@ -559,12 +686,32 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     res.json({ success: true, memberId, isPlatformOwner });
   }));
 
-  // Batch Settle Matches (Super Admin marks matches as paid out)
-  router.post("/settlement/batch-settle", requireOwner, wrap(async (req, res) => {
+  // Batch Settle Matches (Super Admin marks matches as paid out, or Managers mark matches in groups they manage)
+  router.post("/settlement/batch-settle", requirePlatform, wrap(async (req, res) => {
+    const isSuperAdmin = req.platform?.role === "owner";
     const { groupId, matchIds, allPast, note } = req.body;
     let targetMatchIds = Array.isArray(matchIds) ? matchIds : [];
 
+    // If manager, verify they manage this group
+    if (!isSuperAdmin) {
+      if (!groupId) return res.status(400).json({ error: "GROUP_ID_REQUIRED" });
+      const gSnap = await db.collection("groups").doc(groupId).get();
+      if (!gSnap.exists) return res.status(404).json({ error: "GROUP_NOT_FOUND" });
+      const isDirectOwner = gSnap.data().ownerUid === req.uid;
+      let isCoManager = false;
+      if (!isDirectOwner) {
+        const coMemDoc = await db.collection("groupMembers").doc(`${groupId}_${req.uid}`).get();
+        if (coMemDoc.exists && ["manager", "admin"].includes(coMemDoc.data()?.role)) {
+          isCoManager = true;
+        }
+      }
+      if (!isDirectOwner && !isCoManager) {
+        return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
+      }
+    }
+
     if (allPast) {
+      if (!isSuperAdmin) return res.status(403).json({ error: "SUPER_ADMIN_ONLY" });
       let q = db.collection("matches");
       if (groupId) q = q.where("groupId", "==", groupId);
       const snap = await q.get();
@@ -590,7 +737,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         payoutStatus: "PAID_OUT",
         paidOutAt: FieldValue.serverTimestamp(),
         paidOutBy: req.uid,
-        payoutNote: note || "Batch settled by Super Admin",
+        payoutNote: note || (isSuperAdmin ? "Batch settled by Super Admin" : "Settled by Manager"),
         updatedAt: FieldValue.serverTimestamp(),
       });
     });

@@ -361,6 +361,43 @@ const Groups = () => {
     }
   };
 
+  const [settlingPayerKey, setSettlingPayerKey] = useState<string | null>(null);
+
+  const handleSettlePayerMatches = async (groupId: string, payerName: string, matches: any[]) => {
+    if (!matches?.length) return;
+    const uncollectedCount = matches.filter((m: any) => !m.isFullyCollected).length;
+    if (uncollectedCount > 0) {
+      const confirmed = window.confirm(
+        `Cảnh báo: Có ${uncollectedCount} / ${matches.length} trận chưa thu đủ tiền từ thành viên.\n\nBạn có chắc chắn muốn hoàn tiền cho tất cả ${matches.length} trận của ${payerName} không?`
+      );
+      if (!confirmed) return;
+    }
+
+    const payerKey = `${groupId}_${payerName}`;
+    setSettlingPayerKey(payerKey);
+    try {
+      const matchIds = matches.map((m: any) => m.id);
+      await apiRequest("POST", "/platform/settlement/batch-settle", {
+        groupId,
+        matchIds,
+        note: `Settled all matches for payer ${payerName}`,
+      });
+      toast({
+        title: "Hoàn tất đối soát người ứng",
+        description: `Đã hoàn tất đối soát ${matches.length} trận cho ${payerName}.`,
+      });
+      await fetchSettlementOverview();
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi hoàn tiền",
+        description: err.message || "Không thể cập nhật trạng thái trận đấu",
+      });
+    } finally {
+      setSettlingPayerKey(null);
+    }
+  };
+
   const handleSettleAllPast = async () => {
     if (!window.confirm("Bạn có chắc muốn đánh dấu tất cả các trận đấu cũ (trước hôm nay) ở mọi nhóm là ĐÃ HOÀN TIỀN?")) return;
     setSettlingAllPast(true);
@@ -386,19 +423,19 @@ const Groups = () => {
         </div>
         <nav className="flex flex-wrap gap-2" aria-label="Nền tảng">
           {account?.role === "owner" && (
-            <>
-              <Button asChild variant="outline">
-                <Link to="/platform/accounts">Tài khoản</Link>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={openSettlementOverview}
-                className="gap-1.5 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-              >
-                <CreditCard className="h-4 w-4" />
-                Đối soát hoàn tiền nền tảng
-              </Button>
-            </>
+            <Button asChild variant="outline">
+              <Link to="/platform/accounts">Tài khoản</Link>
+            </Button>
+          )}
+          {account && (
+            <Button
+              variant="outline"
+              onClick={openSettlementOverview}
+              className="gap-1.5 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+            >
+              <CreditCard className="h-4 w-4" />
+              {account?.role === "owner" ? "Đối soát hoàn tiền nền tảng" : "Đối soát & Theo dõi hoàn tiền"}
+            </Button>
           )}
           <Button onClick={() => {
             setName("");
@@ -757,10 +794,16 @@ const Groups = () => {
           <DialogHeader>
             <div className="flex items-center gap-2">
               <CreditCard className="h-5 w-5 text-emerald-600" />
-              <DialogTitle>Đối soát Hoàn tiền Nền tảng (Super Admin)</DialogTitle>
+              <DialogTitle>
+                {settlementData?.isSuperAdmin
+                  ? "Đối soát Hoàn tiền Nền tảng (Super Admin)"
+                  : "Đối soát & Theo dõi Hoàn tiền (Quản lý nhóm)"}
+              </DialogTitle>
             </div>
             <DialogDescription>
-              Quản lý tổng tiền sân PayOS đã thu từ các nhóm và hoàn trả lại tiền cho người quản lý từng nhóm.
+              {settlementData?.isSuperAdmin
+                ? "Quản lý tổng tiền sân PayOS đã thu từ các nhóm và hoàn trả lại tiền cho người quản lý từng nhóm."
+                : "Theo dõi tiền bạn đã ứng đang đợi Super Admin hoàn lại, và các khoản cần hoàn tiền cho thành viên trong các nhóm bạn quản lý."}
             </DialogDescription>
           </DialogHeader>
 
@@ -772,52 +815,143 @@ const Groups = () => {
             <div className="space-y-6 py-2">
               {/* Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Card className="p-3 bg-emerald-500/10 border-emerald-500/20 shadow-xs">
-                  <p className="text-xs text-muted-foreground">Tổng tiền cần hoàn:</p>
-                  <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
-                    {settlementData.summary?.totalPendingAmount?.toLocaleString() || 0} VND
-                  </p>
-                </Card>
-                <Card className="p-3 bg-muted/40 shadow-xs">
-                  <p className="text-xs text-muted-foreground">Nhóm chờ hoàn tiền:</p>
-                  <p className="text-xl font-bold text-foreground">
-                    {settlementData.summary?.pendingGroupsCount || 0} nhóm
-                  </p>
-                </Card>
-                <Card className="p-3 bg-muted/40 shadow-xs">
-                  <p className="text-xs text-muted-foreground">Tổng số trận chờ hoàn:</p>
-                  <p className="text-xl font-bold text-foreground">
-                    {settlementData.summary?.pendingMatchesCount || 0} trận
-                  </p>
-                </Card>
+                {settlementData.isSuperAdmin ? (
+                  <>
+                    <Card className="p-3 bg-emerald-500/10 border-emerald-500/20 shadow-xs">
+                      <p className="text-xs text-muted-foreground">Tổng tiền cần hoàn:</p>
+                      <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
+                        {settlementData.summary?.totalPendingAmount?.toLocaleString() || 0} VND
+                      </p>
+                    </Card>
+                    <Card className="p-3 bg-muted/40 shadow-xs">
+                      <p className="text-xs text-muted-foreground">Nhóm chờ hoàn tiền:</p>
+                      <p className="text-xl font-bold text-foreground">
+                        {settlementData.summary?.pendingGroupsCount || 0} nhóm
+                      </p>
+                    </Card>
+                    <Card className="p-3 bg-muted/40 shadow-xs">
+                      <p className="text-xs text-muted-foreground">Tổng số trận chờ hoàn:</p>
+                      <p className="text-xl font-bold text-foreground">
+                        {settlementData.summary?.pendingMatchesCount || 0} trận
+                      </p>
+                    </Card>
+                  </>
+                ) : (
+                  <>
+                    <Card className="p-3 bg-amber-500/10 border-amber-500/20 shadow-xs">
+                      <p className="text-xs text-muted-foreground">Tiền đợi Super Admin hoàn lại:</p>
+                      <p className="text-xl font-bold text-amber-700 dark:text-amber-400">
+                        {settlementData.summary?.waitingForSuperAdminAmount?.toLocaleString() || 0} VND
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {settlementData.summary?.waitingForSuperAdminCount || 0} trận bạn tự ứng
+                      </p>
+                    </Card>
+                    <Card className="p-3 bg-emerald-500/10 border-emerald-500/20 shadow-xs">
+                      <p className="text-xs text-muted-foreground">Tiền cần hoàn cho thành viên:</p>
+                      <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
+                        {settlementData.summary?.totalPendingAmount?.toLocaleString() || 0} VND
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {settlementData.summary?.pendingMatchesCount || 0} trận trong nhóm bạn quản lý
+                      </p>
+                    </Card>
+                    <Card className="p-3 bg-muted/40 shadow-xs">
+                      <p className="text-xs text-muted-foreground">Nhóm bạn quản lý:</p>
+                      <p className="text-xl font-bold text-foreground">
+                        {settlementData.groups?.length || 0} nhóm
+                      </p>
+                    </Card>
+                  </>
+                )}
               </div>
 
-              {/* Action: Clear Historical Backlog */}
-              <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/20">
-                <div className="space-y-0.5">
-                  <p className="text-xs font-semibold text-foreground">Dọn dẹp các trận đấu cũ</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Đánh dấu tất cả các trận đấu trước hôm nay ở mọi nhóm là đã hoàn tất đối soát.
-                  </p>
+              {/* Action: Clear Historical Backlog (Super Admin only) */}
+              {settlementData.isSuperAdmin && (
+                <div className="flex items-center justify-between p-3 border rounded-lg bg-muted/20">
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-semibold text-foreground">Dọn dẹp các trận đấu cũ</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Đánh dấu tất cả các trận đấu trước hôm nay ở mọi nhóm là đã hoàn tất đối soát.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleSettleAllPast}
+                    disabled={settlingAllPast}
+                    className="shrink-0 text-xs gap-1.5"
+                  >
+                    {settlingAllPast ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
+                    Hoàn tiền nhanh các trận cũ
+                  </Button>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleSettleAllPast}
-                  disabled={settlingAllPast}
-                  className="shrink-0 text-xs gap-1.5"
-                >
-                  {settlingAllPast ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
-                  Hoàn tiền nhanh các trận cũ
-                </Button>
-              </div>
+              )}
+
+              {/* Waiting for Super Admin List (For Managers) */}
+              {!settlementData.isSuperAdmin && (settlementData.waitingForSuperAdmin?.length > 0 ? (
+                <div className="border border-amber-300 dark:border-amber-800 rounded-lg p-4 bg-amber-50/20 dark:bg-amber-950/20 space-y-3">
+                  <div className="flex items-center justify-between border-b border-amber-200 dark:border-amber-900 pb-2">
+                    <div>
+                      <h4 className="font-bold text-sm text-foreground flex items-center gap-1.5">
+                        ⏳ Tiền bạn đã ứng đang đợi Super Admin hoàn lại
+                      </h4>
+                      <p className="text-xs text-muted-foreground">
+                        Các trận bạn đứng ra ứng tiền sân ở các nhóm, tiền thu qua PayOS đang chờ Super Admin chuyển hoàn cho bạn.
+                      </p>
+                    </div>
+                    <span className="text-sm font-bold text-amber-700 dark:text-amber-400">
+                      {settlementData.summary?.waitingForSuperAdminAmount?.toLocaleString()} VND
+                    </span>
+                  </div>
+
+                  <div className="divide-y divide-amber-200/50 dark:divide-amber-900/50">
+                    {settlementData.waitingForSuperAdmin.map((m: any) => (
+                      <div key={m.id} className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Badge variant="outline" className="text-[10px] bg-background">{m.groupName}</Badge>
+                          <span className="font-semibold text-foreground">
+                            📅 {m.date ? new Date(m.date).toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "Trận đấu"}
+                          </span>
+                          {m.venueName && <span className="text-muted-foreground">• {m.venueName}</span>}
+                          {m.isFullyCollected ? (
+                            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                              Đã thu đủ qua PayOS ({m.collectedAmount?.toLocaleString()}đ)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                              Mới thu {m.collectedAmount?.toLocaleString()} / {m.totalAmount?.toLocaleString()}đ
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <strong className="text-amber-600 dark:text-amber-400 font-bold">{m.totalAmount?.toLocaleString()} VND</strong>
+                          <span className="text-[10px] text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded font-medium">
+                            Chờ Super Admin chuyển khoản
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : !settlementData.isSuperAdmin ? (
+                <div className="p-3 text-xs text-muted-foreground text-center rounded-lg border border-dashed bg-muted/10">
+                  🎉 Bạn hiện không có trận nào tự ứng tiền đang chờ Super Admin hoàn lại.
+                </div>
+              ) : null)}
 
               {/* Groups List */}
               <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-foreground">Danh sách nhóm cần đối soát:</h3>
+                <h3 className="text-sm font-semibold text-foreground">
+                  {settlementData.isSuperAdmin
+                    ? "Danh sách nhóm cần đối soát:"
+                    : "Các khoản cần hoàn tiền cho thành viên trong nhóm bạn quản lý:"}
+                </h3>
                 {settlementData.groups?.filter((g: any) => g.pendingCount > 0).length === 0 ? (
                   <p className="text-center p-6 text-xs text-muted-foreground border border-dashed rounded-lg">
-                    🎉 Tuyệt vời! Hiện không có nhóm nào có trận chờ hoàn tiền sân.
+                    🎉 Tuyệt vời! Hiện không có trận nào của thành viên cần hoàn tiền sân.
                   </p>
                 ) : (
                   settlementData.groups
@@ -853,13 +987,31 @@ const Groups = () => {
                                 Quản lý nhóm: <strong>{item.managerName}</strong> {item.managerEmail ? `(${item.managerEmail})` : ""}
                               </p>
                             </div>
-                            <div className="text-right">
-                              <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 block">
-                                {item.pendingAmount?.toLocaleString()} VND
-                              </span>
-                              <span className="text-xs text-muted-foreground">
-                                {item.pendingCount} trận chờ hoàn
-                              </span>
+                            <div className="text-right flex items-center gap-2.5">
+                              <div>
+                                <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 block">
+                                  {item.pendingAmount?.toLocaleString()} VND
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {item.pendingCount} trận chờ hoàn
+                                </span>
+                              </div>
+                              {payerGroups.filter((pg: any) => !pg.isOwner).length > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1"
+                                  disabled={batchSettlingGid === item.groupId}
+                                  onClick={() => handleBatchSettleGroup(item)}
+                                >
+                                  {batchSettlingGid === item.groupId ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                                  ) : (
+                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                                  )}
+                                  Hoàn tất cả nhóm
+                                </Button>
+                              )}
                             </div>
                           </div>
 
@@ -897,23 +1049,6 @@ const Groups = () => {
                                           👤 Người ứng: {payerGroup.payerName}
                                           {payerGroup.isManager ? " (Quản lý nhóm)" : " (Thành viên)"}
                                         </Badge>
-
-                                        {payerGroup.payerId ? (
-                                          <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            disabled={linkingMemberId === payerGroup.payerId}
-                                            className="h-5 text-[10px] px-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
-                                            onClick={() => handleToggleOwnerMember(item.groupId, payerGroup.payerId, true)}
-                                          >
-                                            {linkingMemberId === payerGroup.payerId ? (
-                                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                            ) : (
-                                              "⭐ "
-                                            )}
-                                            Đây là tôi (Super Admin)
-                                          </Button>
-                                        ) : null}
                                       </div>
 
                                       <div className="flex items-center gap-2 text-xs">
@@ -923,6 +1058,20 @@ const Groups = () => {
                                         <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
                                           {payerGroup.totalAmount?.toLocaleString()} VND
                                         </strong>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-6 text-[11px] px-2 text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1 font-medium"
+                                          disabled={settlingPayerKey === `${item.groupId}_${payerGroup.payerName}`}
+                                          onClick={() => handleSettlePayerMatches(item.groupId, payerGroup.payerName, payerGroup.matches)}
+                                        >
+                                          {settlingPayerKey === `${item.groupId}_${payerGroup.payerName}` ? (
+                                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                          ) : (
+                                            <Check className="h-3 w-3 mr-1" />
+                                          )}
+                                          Đã hoàn tất cả ({payerGroup.matches?.length || 0} trận)
+                                        </Button>
                                       </div>
                                     </div>
 
