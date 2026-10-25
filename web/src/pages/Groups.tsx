@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
@@ -26,7 +26,39 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Users, Trash2, Shield, Loader2, UserPlus, X, Pencil, CreditCard, Copy, ExternalLink, QrCode, CheckCircle2, ArrowRight, Check, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Users,
+  Trash2,
+  Shield,
+  Loader2,
+  UserPlus,
+  X,
+  Pencil,
+  CreditCard,
+  Copy,
+  ExternalLink,
+  QrCode,
+  CheckCircle2,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  LogOut,
+  Trophy,
+  Receipt,
+  Layers,
+  Search,
+} from "lucide-react";
 
 type Group = {
   id: string;
@@ -106,6 +138,30 @@ const Groups = () => {
   const [newManagerEmail, setNewManagerEmail] = useState("");
   const [newManagerRole, setNewManagerRole] = useState<"manager" | "admin">("manager");
   const [addingManager, setAddingManager] = useState(false);
+
+  // Category & Filter State
+  const [activeCategory, setActiveCategory] = useState<"all" | "sports" | "shared_bills">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const sportGroups = useMemo(() => {
+    return groups.filter((g) => {
+      const isSport = groupKindOf(g) !== "shared_bills";
+      if (!isSport) return false;
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+      return g.name.toLowerCase().includes(q) || g.id.toLowerCase().includes(q);
+    });
+  }, [groups, searchQuery]);
+
+  const sharedBillGroups = useMemo(() => {
+    return groups.filter((g) => {
+      const isShared = groupKindOf(g) === "shared_bills";
+      if (!isShared) return false;
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+      return g.name.toLowerCase().includes(q) || g.id.toLowerCase().includes(q);
+    });
+  }, [groups, searchQuery]);
 
   const fetchGroups = () => {
     setLoading(true);
@@ -435,50 +491,232 @@ const Groups = () => {
     }
   };
 
+  const renderGroupCard = (group: Group) => {
+    const isOwnerOrSuper = account?.role === "owner" || group.role === "owner";
+    return (
+      <Card key={group.id} className="flex flex-col justify-between shadow-xs hover:border-primary/40 transition-colors">
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-2">
+            <CardTitle className="break-words text-lg font-bold">{group.name}</CardTitle>
+            <span className="shrink-0 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
+              {groupKindOf(group) === "shared_bills" ? "Chia tiền" : SPORT_LABELS[group.sport || "other"]}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground font-mono">/g/{group.id}</p>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-0">
+          <div className="space-y-1 text-sm border-t pt-3">
+            <div className="flex items-center justify-between text-muted-foreground text-xs">
+              <span>Vai trò của bạn:</span>
+              <span className="font-semibold text-foreground">
+                {group.role === "super_admin"
+                  ? "Super Admin (Nền tảng)"
+                  : group.role === "owner"
+                    ? "Chủ nhóm (Owner)"
+                    : group.role === "manager"
+                      ? "Quản lý"
+                      : "Quản trị viên"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-muted-foreground text-xs">
+              <span>Chủ nhóm:</span>
+              <span className="font-medium text-foreground truncate max-w-[150px]" title={group.ownerDisplayName || group.ownerEmail || ""}>
+                {group.ownerDisplayName || group.ownerEmail || (group.ownerUid ? "Chủ nhóm" : "Hệ thống")}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <Button asChild variant="default" size="sm" className="flex-1">
+              <Link to={groupPath(group.id, "admin")}>Mở nhóm</Link>
+            </Button>
+
+            {isOwnerOrSuper && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openEditGroup(group)}
+                  title="Chỉnh sửa thông tin nhóm"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openCoManagers(group)}
+                  title="Phân quyền đồng quản lý"
+                >
+                  <Users className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:bg-destructive/10"
+                  onClick={() => setGroupToDelete(group)}
+                  title="Xóa nhóm"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <main className="container max-w-5xl py-8 space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b pb-6">
         <div>
-          <h1 className="text-2xl font-bold">Quản lý Nhóm</h1>
-          <p className="text-muted-foreground">{account?.displayName || account?.email}</p>
+          <h1 className="text-2xl font-bold tracking-tight">Quản lý Nhóm</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-sm font-medium text-foreground">
+              {account?.displayName || user?.displayName || "Tài khoản"}
+            </span>
+            <span className="text-xs text-muted-foreground">({account?.email || user?.email})</span>
+            <Badge variant="outline" className="text-[11px] font-normal">
+              {account?.role === "owner" ? "Chủ nền tảng (Owner)" : "Quản lý"}
+            </Badge>
+          </div>
         </div>
-        <nav className="flex flex-wrap gap-2" aria-label="Nền tảng">
-          {account?.role === "owner" && (
-            <Button asChild variant="outline">
-              <Link to="/platform/accounts">Tài khoản</Link>
-            </Button>
-          )}
+
+        <nav className="flex items-center gap-2.5" aria-label="Thao tác nhanh">
           {account && (
             <Button
               variant="outline"
               onClick={openSettlementOverview}
-              className="gap-1.5 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+              className="gap-2 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
             >
               <CreditCard className="h-4 w-4" />
-              {account?.role === "owner" ? "Đối soát hoàn tiền nền tảng" : "Đối soát & Theo dõi hoàn tiền"}
+              <span className="hidden sm:inline">
+                {account?.role === "owner" ? "Đối soát hoàn tiền nền tảng" : "Đối soát & Theo dõi hoàn tiền"}
+              </span>
+              <span className="sm:hidden">Đối soát</span>
             </Button>
           )}
-          <Button onClick={() => {
-            setName("");
-            setSlug("");
-            setSlugManuallyEdited(false);
-            setSport("");
-            setKind("sports");
-            setOpen(true);
-          }}>
-            Tạo nhóm mới
-          </Button>
+
           <Button
-            variant="ghost"
-            onClick={async () => {
-              await signOut(auth);
-              navigate("/platform/login");
+            onClick={() => {
+              setName("");
+              setSlug("");
+              setSlugManuallyEdited(false);
+              setSport("");
+              setKind("sports");
+              setOpen(true);
             }}
+            className="gap-1.5 shadow-xs"
           >
-            Đăng xuất
+            <Plus className="h-4 w-4" />
+            <span>Tạo nhóm mới</span>
           </Button>
+
+          {/* User Profile & Account Dropdown Menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0 hover:bg-muted focus-visible:ring-2">
+                <Avatar className="h-9 w-9 border border-border">
+                  <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                    {(account?.displayName || user?.displayName || account?.email || "U")
+                      .charAt(0)
+                      .toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium leading-none">
+                    {account?.displayName || user?.displayName || "Tài khoản"}
+                  </p>
+                  <p className="text-xs leading-none text-muted-foreground truncate">
+                    {account?.email || user?.email}
+                  </p>
+                  <span className="text-[11px] text-primary font-medium mt-1">
+                    {account?.role === "owner" ? "👑 Chủ nền tảng (Owner)" : "Quản lý"}
+                  </span>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {account?.role === "owner" && (
+                <DropdownMenuItem asChild>
+                  <Link to="/platform/accounts" className="cursor-pointer gap-2 flex items-center">
+                    <Users className="h-4 w-4" />
+                    <span>Quản lý Tài khoản</span>
+                  </Link>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive cursor-pointer gap-2 flex items-center"
+                onClick={async () => {
+                  await signOut(auth);
+                  navigate("/platform/login");
+                }}
+              >
+                <LogOut className="h-4 w-4" />
+                <span>Đăng xuất</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </nav>
       </header>
+
+      {/* Filter / Search Bar */}
+      {!loading && !error && groups.length > 0 && (
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 p-1 bg-muted/60 rounded-lg w-fit">
+            <Button
+              variant={activeCategory === "all" ? "secondary" : "ghost"}
+              size="sm"
+              className="text-xs h-8 gap-1.5 font-medium"
+              onClick={() => setActiveCategory("all")}
+            >
+              <Layers className="h-3.5 w-3.5" />
+              Tất cả
+              <span className="ml-1 rounded-full bg-background px-1.5 py-0.2 text-[11px] font-semibold">
+                {groups.length}
+              </span>
+            </Button>
+            <Button
+              variant={activeCategory === "sports" ? "secondary" : "ghost"}
+              size="sm"
+              className="text-xs h-8 gap-1.5 font-medium"
+              onClick={() => setActiveCategory("sports")}
+            >
+              <Trophy className="h-3.5 w-3.5 text-amber-500" />
+              Thể thao
+              <span className="ml-1 rounded-full bg-background px-1.5 py-0.2 text-[11px] font-semibold">
+                {groups.filter((g) => groupKindOf(g) !== "shared_bills").length}
+              </span>
+            </Button>
+            <Button
+              variant={activeCategory === "shared_bills" ? "secondary" : "ghost"}
+              size="sm"
+              className="text-xs h-8 gap-1.5 font-medium"
+              onClick={() => setActiveCategory("shared_bills")}
+            >
+              <Receipt className="h-3.5 w-3.5 text-blue-500" />
+              Chia tiền định kỳ
+              <span className="ml-1 rounded-full bg-background px-1.5 py-0.2 text-[11px] font-semibold">
+                {groups.filter((g) => groupKindOf(g) === "shared_bills").length}
+              </span>
+            </Button>
+          </div>
+
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Tìm kiếm nhóm..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 h-9 text-sm"
+            />
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center p-12">
@@ -491,81 +729,108 @@ const Groups = () => {
           Bạn chưa có nhóm nào. Bấm &quot;Tạo nhóm mới&quot; để bắt đầu.
         </p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {groups.map((group) => {
-            const isOwnerOrSuper = account?.role === "owner" || group.role === "owner";
-            return (
-              <Card key={group.id} className="flex flex-col justify-between shadow-xs">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <CardTitle className="break-words text-lg font-bold">{group.name}</CardTitle>
-                    <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-xs font-medium">
-                      {groupKindOf(group) === "shared_bills" ? "Chia tiền" : SPORT_LABELS[group.sport || "other"]}
-                    </span>
+        <div className="space-y-8">
+          {/* SECTION 1: Nhóm Thể thao */}
+          {(activeCategory === "all" || activeCategory === "sports") && (
+            <section className="space-y-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                    <Trophy className="h-5 w-5" />
                   </div>
-                  <p className="text-xs text-muted-foreground font-mono">/g/{group.id}</p>
-                </CardHeader>
-                <CardContent className="space-y-4 pt-0">
-                  <div className="space-y-1 text-sm border-t pt-3">
-                    <div className="flex items-center justify-between text-muted-foreground text-xs">
-                      <span>Vai trò của bạn:</span>
-                      <span className="font-semibold text-foreground">
-                        {group.role === "super_admin"
-                          ? "Super Admin (Nền tảng)"
-                          : group.role === "owner"
-                            ? "Chủ nhóm (Owner)"
-                            : group.role === "manager"
-                              ? "Quản lý"
-                              : "Quản trị viên"}
-                      </span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold tracking-tight">Nhóm Thể thao</h2>
+                      <Badge variant="secondary" className="text-xs font-medium">
+                        {sportGroups.length} nhóm
+                      </Badge>
                     </div>
-                    <div className="flex items-center justify-between text-muted-foreground text-xs">
-                      <span>Chủ nhóm:</span>
-                      <span className="font-medium text-foreground truncate max-w-[150px]" title={group.ownerDisplayName || group.ownerEmail || ""}>
-                        {group.ownerDisplayName || group.ownerEmail || (group.ownerUid ? "Chủ nhóm" : "Hệ thống")}
-                      </span>
+                    <p className="text-xs text-muted-foreground">
+                      Bóng đá, Cầu lông và các hoạt động thể thao chia tiền theo trận
+                    </p>
+                  </div>
+                </div>
+                {activeCategory === "sports" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-8 gap-1.5"
+                    onClick={() => {
+                      setName("");
+                      setSlug("");
+                      setSlugManuallyEdited(false);
+                      setSport("");
+                      setKind("sports");
+                      setOpen(true);
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Tạo nhóm thể thao
+                  </Button>
+                )}
+              </div>
+
+              {sportGroups.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  {searchQuery ? "Không tìm thấy nhóm thể thao nào phù hợp." : "Chưa có nhóm thể thao nào."}
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {sportGroups.map((group) => renderGroupCard(group))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* SECTION 2: Nhóm Chia tiền định kỳ (Shared Bills) */}
+          {(activeCategory === "all" || activeCategory === "shared_bills") && (
+            <section className={`space-y-3.5 ${activeCategory === "all" ? "pt-6 border-t" : ""}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                    <Receipt className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold tracking-tight">Nhóm Chia tiền định kỳ (Shared Bills)</h2>
+                      <Badge variant="secondary" className="text-xs font-medium">
+                        {sharedBillGroups.length} nhóm
+                      </Badge>
                     </div>
+                    <p className="text-xs text-muted-foreground">
+                      Netflix, Spotify, sinh hoạt dùng chung và thu chi định kỳ
+                    </p>
                   </div>
+                </div>
+                {activeCategory === "shared_bills" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs h-8 gap-1.5"
+                    onClick={() => {
+                      setName("");
+                      setSlug("");
+                      setSlugManuallyEdited(false);
+                      setSport("");
+                      setKind("shared_bills");
+                      setOpen(true);
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Tạo nhóm chia tiền
+                  </Button>
+                )}
+              </div>
 
-                  <div className="flex flex-wrap items-center gap-2 pt-2">
-                    <Button asChild variant="default" size="sm" className="flex-1">
-                      <Link to={groupPath(group.id, "admin")}>Mở nhóm</Link>
-                    </Button>
-
-                    {isOwnerOrSuper && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openEditGroup(group)}
-                          title="Chỉnh sửa thông tin nhóm"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openCoManagers(group)}
-                          title="Phân quyền đồng quản lý"
-                        >
-                          <Users className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:bg-destructive/10"
-                          onClick={() => setGroupToDelete(group)}
-                          title="Xóa nhóm"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+              {sharedBillGroups.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                  {searchQuery ? "Không tìm thấy nhóm chia tiền nào phù hợp." : "Chưa có nhóm chia tiền định kỳ nào."}
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {sharedBillGroups.map((group) => renderGroupCard(group))}
+                </div>
+              )}
+            </section>
+          )}
         </div>
       )}
 
