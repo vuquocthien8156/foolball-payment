@@ -34,6 +34,7 @@ acceptance, and an Evidence line.
 ## UI refinements
 
 - [Matches UI refinement v1](matches-ui-v1.md): independent panel scrolling and grouped actions.
+- [Groups page sections & action hierarchy v1](groups-page-sections-and-actions-v1.md): sport vs shared bills sections, filter bar, and user avatar dropdown.
 
 ## Historical plans
 
