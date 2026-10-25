@@ -58,6 +58,7 @@ import {
   Receipt,
   Layers,
   Search,
+  MoreVertical,
 } from "lucide-react";
 
 type Group = {
@@ -494,18 +495,85 @@ const Groups = () => {
   const renderGroupCard = (group: Group) => {
     const isOwnerOrSuper = account?.role === "owner" || group.role === "owner";
     return (
-      <Card key={group.id} className="flex flex-col justify-between shadow-xs hover:border-primary/40 transition-colors">
+      <Card
+        key={group.id}
+        onClick={() => navigate(groupPath(group.id, "admin"))}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            navigate(groupPath(group.id, "admin"));
+          }
+        }}
+        className="group relative flex flex-col justify-between shadow-xs hover:shadow-md hover:border-primary/60 transition-all cursor-pointer active:scale-[0.99] bg-card"
+      >
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">
-            <CardTitle className="break-words text-lg font-bold">{group.name}</CardTitle>
-            <span className="shrink-0 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
-              {groupKindOf(group) === "shared_bills" ? "Chia tiền" : SPORT_LABELS[group.sport || "other"]}
-            </span>
+            <div className="space-y-1 pr-2">
+              <CardTitle className="break-words text-lg font-bold group-hover:text-primary transition-colors">
+                {group.name}
+              </CardTitle>
+              <p className="text-xs text-muted-foreground font-mono">/g/{group.id}</p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
+                {groupKindOf(group) === "shared_bills" ? "Chia tiền" : SPORT_LABELS[group.sport || "other"]}
+              </span>
+              {isOwnerOrSuper && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground rounded-full"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Tùy chọn nhóm"
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                      <span className="sr-only">Tùy chọn nhóm</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52" onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditGroup(group);
+                      }}
+                      className="cursor-pointer gap-2"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      <span>Chỉnh sửa thông tin</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openCoManagers(group);
+                      }}
+                      className="cursor-pointer gap-2"
+                    >
+                      <Users className="h-4 w-4" />
+                      <span>Phân quyền đồng quản lý</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setGroupToDelete(group);
+                      }}
+                      className="text-destructive focus:text-destructive cursor-pointer gap-2"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span>Xóa nhóm</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground font-mono">/g/{group.id}</p>
         </CardHeader>
-        <CardContent className="space-y-4 pt-0">
-          <div className="space-y-1 text-sm border-t pt-3">
+        <CardContent className="space-y-3 pt-0">
+          <div className="space-y-1 text-sm border-t pt-2.5">
             <div className="flex items-center justify-between text-muted-foreground text-xs">
               <span>Vai trò của bạn:</span>
               <span className="font-semibold text-foreground">
@@ -526,40 +594,11 @@ const Groups = () => {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 pt-2">
-            <Button asChild variant="default" size="sm" className="flex-1">
-              <Link to={groupPath(group.id, "admin")}>Mở nhóm</Link>
-            </Button>
-
-            {isOwnerOrSuper && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openEditGroup(group)}
-                  title="Chỉnh sửa thông tin nhóm"
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openCoManagers(group)}
-                  title="Phân quyền đồng quản lý"
-                >
-                  <Users className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:bg-destructive/10"
-                  onClick={() => setGroupToDelete(group)}
-                  title="Xóa nhóm"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </>
-            )}
+          <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">
+            <span className="text-[11px]">Nhấn để vào quản lý</span>
+            <span className="inline-flex items-center font-medium text-primary group-hover:translate-x-0.5 transition-transform">
+              Mở nhóm <ArrowRight className="h-3 w-3 ml-1" />
+            </span>
           </div>
         </CardContent>
       </Card>

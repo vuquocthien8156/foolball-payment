@@ -11,7 +11,28 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Users, Check, Search, Pencil, X } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Loader2,
+  Users,
+  Check,
+  Search,
+  Pencil,
+  X,
+  MoreVertical,
+  MoreHorizontal,
+  KeyRound,
+  Crown,
+  Ban,
+  CheckCircle2,
+} from "lucide-react";
 
 const PlatformAccounts = () => {
   const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
@@ -232,44 +253,89 @@ const PlatformAccounts = () => {
               </TableCell>
               <TableCell>{account.status === "active" ? "Hoạt động" : "Đã khóa"}</TableCell>
               <TableCell>{account.createdAt ? new Date((account.createdAt._seconds ?? account.createdAt.seconds ?? 0) * 1000).toLocaleDateString("vi-VN") : "—"}</TableCell>
-              <TableCell>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 border-indigo-200 dark:border-indigo-800"
-                    onClick={() => openLinkModal(account)}
-                    title="Liên kết hồ sơ thành viên ở các nhóm với tài khoản này"
-                  >
-                    <Users className="h-3.5 w-3.5" />
-                    Liên kết thành viên
-                  </Button>
+              <TableCell className="text-right">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0 hover:bg-muted" title="Thao tác tài khoản">
+                      <MoreHorizontal className="h-4 w-4" />
+                      <span className="sr-only">Thao tác tài khoản</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-72">
+                    <DropdownMenuLabel className="font-normal text-xs text-muted-foreground pb-1">
+                      Thao tác cho <strong className="text-foreground">{account.displayName || account.email}</strong>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
 
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1 text-xs"
-                    onClick={() => openEditModal(account)}
-                    title="Chỉnh sửa thông tin tài khoản"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                    Sửa
-                  </Button>
+                    <DropdownMenuItem
+                      onClick={() => openLinkModal(account)}
+                      className="cursor-pointer gap-2 py-2 flex flex-col items-start"
+                    >
+                      <div className="flex items-center gap-2 font-medium text-foreground">
+                        <Users className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                        <span>Liên kết hồ sơ thành viên</span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground pl-6 font-normal leading-normal">
+                        Gom các hồ sơ người chơi ở các nhóm vào tài khoản này để tự xem nợ & nhận tiền hoàn
+                      </span>
+                    </DropdownMenuItem>
 
-                  {account.role !== "owner" ? (
-                    <>
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => handleRoleChange(account, "owner")}>
-                        Nâng làm Admin
-                      </Button>
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => handleStatus(account)}>
-                        {account.status === "active" ? "Khóa" : "Mở khóa"}
-                      </Button>
-                      <Button size="sm" variant="outline" disabled={busy} onClick={() => { setPassword(""); setResetUid(account.uid); }}>
-                        Đổi mật khẩu
-                      </Button>
-                    </>
-                  ) : null}
-                </div>
+                    <DropdownMenuItem
+                      onClick={() => openEditModal(account)}
+                      className="cursor-pointer gap-2 py-2 flex flex-col items-start"
+                    >
+                      <div className="flex items-center gap-2 font-medium text-foreground">
+                        <Pencil className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <span>Chỉnh sửa thông tin</span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground pl-6 font-normal leading-normal">
+                        Cập nhật tên hiển thị và vai trò (Người dùng / Quản trị viên)
+                      </span>
+                    </DropdownMenuItem>
+
+                    <DropdownMenuSeparator />
+
+                    {account.role !== "owner" && (
+                      <>
+                        <DropdownMenuItem
+                          disabled={busy}
+                          onClick={() => handleRoleChange(account, "owner")}
+                          className="cursor-pointer gap-2 py-2"
+                        >
+                          <Crown className="h-4 w-4 text-amber-500" />
+                          <span>Nâng làm Admin nền tảng</span>
+                        </DropdownMenuItem>
+
+                        <DropdownMenuItem
+                          disabled={busy}
+                          onClick={() => handleStatus(account)}
+                          className="cursor-pointer gap-2 py-2"
+                        >
+                          {account.status === "active" ? (
+                            <>
+                              <Ban className="h-4 w-4 text-amber-600" />
+                              <span>Khóa tài khoản</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                              <span>Mở khóa tài khoản</span>
+                            </>
+                          )}
+                        </DropdownMenuItem>
+
+                        <DropdownMenuItem
+                          disabled={busy}
+                          onClick={() => { setPassword(""); setResetUid(account.uid); }}
+                          className="cursor-pointer gap-2 py-2"
+                        >
+                          <KeyRound className="h-4 w-4 text-muted-foreground" />
+                          <span>Đổi mật khẩu</span>
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </TableCell>
             </TableRow>
           ))}
@@ -399,8 +465,13 @@ const PlatformAccounts = () => {
             <Users className="h-5 w-5 text-indigo-600" />
             Liên kết thành viên với tài khoản: {linkingAccount?.displayName || linkingAccount?.email}
           </DialogTitle>
-          <DialogDescription>
-            Chọn các hồ sơ thành viên ở các nhóm thuộc về người này. Khi họ đứng ra ứng tiền sân ở bất kỳ nhóm nào, hệ thống sẽ tự động nhận diện và tính tiền cần hoàn cho họ.
+          <DialogDescription className="space-y-1.5 pt-1 text-xs text-muted-foreground leading-relaxed">
+            <span className="block">
+              <strong>💡 Chức năng này làm gì?</strong> Giúp kết nối tài khoản đăng nhập này với các hồ sơ thành viên/người chơi cụ thể tại các nhóm thể thao hoặc chia tiền.
+            </span>
+            <span className="block">
+              <strong>🎯 Lợi ích cho người dùng:</strong> Khi đăng nhập, họ sẽ thấy danh sách khoản nợ và lịch sử thanh toán của chính mình tại các nhóm. Ngoài ra khi họ đứng ra ứng tiền chi phí (tiền sân, hóa đơn), hệ thống sẽ tự động nhận diện và tính khoản tiền nền tảng cần hoàn lại cho họ.
+            </span>
           </DialogDescription>
         </DialogHeader>
 
