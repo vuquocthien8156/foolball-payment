@@ -43,14 +43,14 @@ const Index = () => {
       <div className="relative overflow-hidden">
         <div className="absolute inset-0 bg-primary opacity-5" />
         <div className="container mx-auto px-4 py-20 text-center relative">
-          <div className="inline-flex items-center justify-center p-4 bg-primary rounded-2xl shadow-card mb-6">
-            <Trophy className="h-12 w-12 text-white" />
+          <div className="inline-flex items-center justify-center p-3 bg-white/10 backdrop-blur rounded-3xl shadow-card mb-6 border border-white/20">
+            <img src="/pwa-192x192.png" alt="Bún Pay" className="h-20 w-20 rounded-2xl shadow-card object-cover" />
           </div>
           <h1 className="text-5xl md:text-6xl font-bold text-foreground mb-6">
-            Thiên Bún Payment
+            Bún Pay
           </h1>
           <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-            Quản lý điểm danh và chia tiền sân thể thao, hoạt động nhóm dễ dàng và minh bạch với PayOS
+            Quản lý chi tiêu, chia tiền nhóm, hoá đơn dùng chung (Shared Bills) và hoạt động thể thao dễ dàng, minh bạch với PayOS & VietQR
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button asChild size="lg" className="text-lg h-14 px-8">
@@ -81,7 +81,7 @@ const Index = () => {
             Tính năng nổi bật
           </h2>
           <p className="text-muted-foreground text-lg">
-            Giải pháp hoàn hảo cho việc quản lý chi phí và điểm danh nhóm thể thao
+            Giải pháp hoàn hảo cho việc quản lý chi phí nhóm, hoá đơn dùng chung và thể thao
           </p>
         </div>
 

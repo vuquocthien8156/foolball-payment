@@ -226,10 +226,10 @@ const AdminLayout = () => {
           <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
             <NavLink
               to={groupPath("admin")}
-              className="flex items-center gap-2 font-semibold"
+              className="flex items-center gap-2.5 font-semibold"
             >
-              <BarChart className="h-6 w-6" />
-              <span className="hidden md:inline">{group?.name || "Nhóm"}</span>
+              <img src="/pwa-192x192.png" alt="Bún Pay" className="h-6 w-6 rounded-md object-cover shadow-sm shrink-0" />
+              <span className="hidden md:inline truncate">{group?.name || "Bún Pay"}</span>
             </NavLink>
             <div className="md:hidden ml-auto">
               <Button

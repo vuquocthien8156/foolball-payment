@@ -28,8 +28,17 @@ const PlatformLogin = () => {
       } else toast({ variant: "destructive", title: "Không thể đăng nhập", description: "Kiểm tra email, mật khẩu và thử lại." });
     } finally { setPassword(""); setBusy(false); }
   };
-  return <main className="min-h-screen flex items-center justify-center p-4 bg-background"><Card className="w-full max-w-md">
-    <CardHeader><CardTitle>Đăng nhập nền tảng</CardTitle><CardDescription>Dùng tài khoản do quản trị viên nền tảng cấp.</CardDescription></CardHeader>
+  return <main className="min-h-screen flex items-center justify-center p-4 bg-background"><Card className="w-full max-w-md shadow-card">
+    <CardHeader>
+      <div className="flex items-center gap-3 mb-2">
+        <img src="/pwa-192x192.png" alt="Bún Pay" className="h-12 w-12 rounded-2xl object-cover shadow-sm" />
+        <div>
+          <CardTitle className="text-xl">Bún Pay</CardTitle>
+          <p className="text-xs text-muted-foreground">Đăng nhập nền tảng</p>
+        </div>
+      </div>
+      <CardDescription>Dùng tài khoản do quản trị viên nền tảng cấp.</CardDescription>
+    </CardHeader>
     <CardContent><form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2"><Label htmlFor="platform-email">Email</Label><Input id="platform-email" type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></div>
       <div className="space-y-2"><Label htmlFor="platform-password">Mật khẩu</Label><Input id="platform-password" type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></div>

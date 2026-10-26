@@ -700,16 +700,19 @@ const Groups = () => {
   return (
     <main className="container max-w-5xl py-8 space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b pb-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Quản lý Nhóm</h1>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-sm font-medium text-foreground">
-              {account?.displayName || user?.displayName || "Tài khoản"}
-            </span>
-            <span className="text-xs text-muted-foreground">({account?.email || user?.email})</span>
-            <Badge variant="outline" className="text-[11px] font-normal">
-              {account?.role === "owner" ? "Chủ nền tảng (Owner)" : "Quản lý"}
-            </Badge>
+        <div className="flex items-center gap-3">
+          <img src="/pwa-192x192.png" alt="Bún Pay" className="h-11 w-11 rounded-2xl object-cover shadow-sm shrink-0" />
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Quản lý Nhóm</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-sm font-medium text-foreground">
+                {account?.displayName || user?.displayName || "Tài khoản"}
+              </span>
+              <span className="text-xs text-muted-foreground">({account?.email || user?.email})</span>
+              <Badge variant="outline" className="text-[11px] font-normal">
+                {account?.role === "owner" ? "Chủ nền tảng (Owner)" : "Quản lý"}
+              </Badge>
+            </div>
           </div>
         </div>
 

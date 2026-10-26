@@ -43,9 +43,9 @@ export default defineConfig(({ mode }) => ({
         "pwa-512x512.png",
       ],
       manifest: {
-        name: "Thiên Bún Payment",
-        short_name: "Thiên Bún",
-        description: "Ứng dụng quản lý điểm danh và chia tiền sân thể thao",
+        name: "Bún Pay",
+        short_name: "Bún Pay",
+        description: "Nền tảng quản lý chi tiêu, chia tiền nhóm và hoá đơn dùng chung thông minh",
         theme_color: "#18181b",
         background_color: "#18181b",
         display: "standalone",

@@ -790,7 +790,7 @@ const PublicPortal = () => {
             <Trophy className="h-10 w-10 text-white" />
           </div>
           <h1 className="text-4xl font-bold text-foreground">
-            {group?.sport === "badminton" ? group.name : "Football Tools"}
+            {group?.name || "Bún Pay"}
           </h1>
           <p className="text-muted-foreground mt-2">
             Vui lòng chọn hành động bạn muốn thực hiện.
