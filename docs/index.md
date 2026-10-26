@@ -12,3 +12,4 @@ Welcome to the documentation for the Football Payment and Shared Billing Platfor
   - [Groups Page Sections & Action Hierarchy](plans/groups-page-sections-and-actions-v1.md)
   - [Group Platform v3 Master Specs](plans/group-platform-v3.md)
   - [Group Production Rollout](plans/group-production-rollout-v1.md)
+  - [PayOS In-App Embedded Checkout & Status Verification](plans/payos-in-app-checkout-and-verification-v1.md)

@@ -32,3 +32,11 @@ export const apiRequest = async (method: string, path: string, payload?: unknown
 };
 
 export const postApiJson = (path: string, payload: unknown) => apiRequest("POST", path, payload ?? {});
+
+export const verifyPayment = async (orderCode: number | string) => {
+  return apiRequest("GET", `/payment/verify/${orderCode}`);
+};
+
+export const cancelPayment = async (orderCode: number | string, reason?: string) => {
+  return apiRequest("POST", `/payment/cancel/${orderCode}`, { reason });
+};

@@ -414,7 +414,7 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
     }
 
     // Return the entire payment link object for the embedded checkout
-    res.json(paymentLink);
+    res.json({ ...paymentLink, orderCode });
   } catch (error) {
     console.error("Error creating payment link:", error);
     res
@@ -628,6 +628,230 @@ apiRoutes.get("/payos-webhook", (req, res) => {
 });
 apiRoutes.post("/payos-webhook", payosWebhookHandler);
 apiRoutes.put("/payos-webhook", payosWebhookHandler);
+
+const verifyPaymentHandler = async (req, res) => {
+  try {
+    const rawOrderCode = req.params?.orderCode || req.body?.orderCode || req.query?.orderCode;
+    const orderCode = Number(rawOrderCode);
+    if (!orderCode || isNaN(orderCode)) {
+      return res.status(400).json({ error: "INVALID_ORDER_CODE", message: "Mã đơn hàng không hợp lệ" });
+    }
+
+    const db = admin.firestore();
+    const paymentRequestRef = db.collection("paymentRequests").doc(String(orderCode));
+    const paymentRequestSnap = await paymentRequestRef.get();
+
+    if (!paymentRequestSnap.exists) {
+      return res.status(404).json({ error: "PAYMENT_NOT_FOUND", message: "Không tìm thấy yêu cầu thanh toán" });
+    }
+
+    const paymentRequestData = paymentRequestSnap.data();
+    if (paymentRequestData.status === "PAID") {
+      return res.json({ success: true, status: "PAID", orderCode, alreadyPaid: true });
+    }
+
+    // Proactively query PayOS for the latest transaction status
+    const paymentInfo = await payos.paymentRequests.get(orderCode);
+    if (paymentInfo && paymentInfo.status === "PAID") {
+      let paidContext = null;
+      await db.runTransaction(async (transaction) => {
+        paidContext = null;
+        const currentReqSnap = await transaction.get(paymentRequestRef);
+        if (!currentReqSnap.exists) return;
+        const currentReqData = currentReqSnap.data();
+        if (currentReqData.status === "PAID") return;
+
+        // Shared bills processing
+        if (currentReqData.kind === "shared_bills" || Array.isArray(currentReqData.billAllocations)) {
+          const allocItems = currentReqData.billAllocations || [];
+          const timestamp = FieldValue.serverTimestamp();
+          for (const item of allocItems) {
+            const allocRef = db.doc(`groups/${currentReqData.groupId}/bills/${item.billId}/allocations/${item.allocationId}`);
+            const allocSnap = await transaction.get(allocRef);
+            if (allocSnap.exists && allocSnap.data().state !== "paid") {
+              transaction.update(allocRef, {
+                state: "paid",
+                paidAt: timestamp,
+                channel: "PAYOS",
+                payosOrderCode: orderCode,
+              });
+              const billRef = db.doc(`groups/${currentReqData.groupId}/bills/${item.billId}`);
+              const allAllocSnap = await transaction.get(billRef.collection("allocations"));
+              const stillUnpaid = allAllocSnap.docs.some((d) => d.id === item.allocationId ? false : d.data().state === "unpaid");
+              transaction.update(billRef, { state: stillUnpaid ? "open" : "closed", updatedAt: timestamp });
+              const eventRef = billRef.collection("paymentEvents").doc(String(orderCode));
+              transaction.set(eventRef, {
+                type: "confirm",
+                memberId: currentReqData.memberId,
+                actorUid: "payos_verify",
+                amountVnd: allocSnap.data().amountVnd,
+                method: "payos",
+                transferReference: String(orderCode),
+                createdAt: timestamp,
+              });
+            }
+          }
+          transaction.update(paymentRequestRef, {
+            status: "PAID",
+            paidAt: timestamp,
+            meta: { source: "verify", paymentInfo },
+          });
+          return;
+        }
+
+        // Match payment processing
+        let shareDocs;
+        if (currentReqData.sharePaths?.length) {
+          shareDocs = await transaction.getAll(
+            ...currentReqData.sharePaths.map((path) => db.doc(path))
+          );
+        } else {
+          const sharesSnapshot = await transaction.get(
+            db.collectionGroup("shares").where("payosOrderCode", "==", orderCode)
+          );
+          shareDocs = sharesSnapshot.docs;
+        }
+
+        if (!shareDocs || shareDocs.length === 0) {
+          console.error(`Verify: No shares found for orderCode ${orderCode}`);
+          return;
+        }
+
+        const groupId = currentReqData.groupId || groupIdOf(shareDocs[0].data());
+        const alreadyPaidShareCount = shareDocs.filter((doc) => doc.data().status === "PAID").length;
+        const ownerIds = [...new Set(shareDocs.map((doc) => doc.data().memberId))];
+        const ownerDocs = await transaction.getAll(...ownerIds.map((id) => db.collection("members").doc(id)));
+        const ownerNames = new Map(ownerDocs.map((doc) => [doc.id, doc.exists ? doc.data().name : "A member"]));
+
+        // Process ratings if they exist
+        if (currentReqData.ratings && Array.isArray(currentReqData.ratings)) {
+          for (const rating of currentReqData.ratings) {
+            const { matchId, ratedByMemberId, playerRatings, mvpPlayerId } = rating;
+            if (matchId && ratedByMemberId && playerRatings && mvpPlayerId) {
+              const ratingRef = db.collection("matches").doc(matchId).collection("ratings").doc();
+              transaction.set(ratingRef, {
+                groupId,
+                ratedByMemberId,
+                playerRatings,
+                mvpPlayerId,
+                createdAt: FieldValue.serverTimestamp(),
+                orderCode,
+              });
+            }
+          }
+        }
+
+        let totalPaid = 0;
+        const affectedMatchIds = new Set();
+
+        shareDocs.forEach((doc) => {
+          const shareData = doc.data();
+          if (shareData.status !== "PAID") {
+            transaction.update(doc.ref, {
+              status: "PAID",
+              paidAt: new Date().toISOString(),
+              channel: "PAYOS",
+              meta: { source: "verify", paymentInfo },
+            });
+
+            const notificationRef = db.collection("notifications").doc();
+            const matchId = shareData.matchId || doc.ref.parent?.parent?.id;
+            if (matchId) {
+              transaction.set(notificationRef, {
+                groupId,
+                message: `${ownerNames.get(shareData.memberId) || "Thành viên"} đã thanh toán ${(shareData.amount || 0).toLocaleString()} VND`,
+                matchId: matchId,
+                shareId: doc.id,
+                isRead: false,
+                createdAt: FieldValue.serverTimestamp(),
+              });
+            }
+
+            totalPaid += shareData.amount || 0;
+            if (matchId) affectedMatchIds.add(matchId);
+          }
+        });
+
+        transaction.update(paymentRequestRef, {
+          alreadyPaidShareCount,
+          status: "PAID",
+          paidAt: FieldValue.serverTimestamp(),
+          meta: { source: "verify", paymentInfo },
+        });
+
+        paidContext = {
+          groupId,
+          memberName: ownerIds.map((id) => ownerNames.get(id)).join(", "),
+          totalPaid,
+          affectedMatchIds,
+        };
+      });
+
+      if (paidContext && paidContext.totalPaid > 0) {
+        await db
+          .collection("paymentQueue")
+          .add({
+            groupId: paidContext.groupId,
+            memberName: paidContext.memberName,
+            totalPaid: paidContext.totalPaid,
+            affectedMatchIds: Array.from(paidContext.affectedMatchIds),
+            enqueuedAt: FieldValue.serverTimestamp(),
+          })
+          .catch((e) => console.error("[slack] Queueing payment failed", e));
+      }
+
+      return res.json({
+        success: true,
+        status: "PAID",
+        orderCode,
+        amount: paymentInfo.amount,
+        amountPaid: paymentInfo.amountPaid,
+      });
+    }
+
+    return res.json({
+      success: true,
+      status: paymentInfo?.status || "PENDING",
+      orderCode,
+    });
+  } catch (error) {
+    console.error("Error verifying payment:", error);
+    res.status(500).json({ error: "PAYMENT_VERIFY_FAILED", details: error.message });
+  }
+};
+
+const cancelPaymentHandler = async (req, res) => {
+  try {
+    const rawOrderCode = req.params?.orderCode || req.body?.orderCode;
+    const orderCode = Number(rawOrderCode);
+    if (!orderCode || isNaN(orderCode)) {
+      return res.status(400).json({ error: "INVALID_ORDER_CODE", message: "Mã đơn hàng không hợp lệ" });
+    }
+
+    const reason = req.body?.reason || "Canceled by user or manager";
+    const cancelResult = await payos.paymentRequests.cancel(orderCode, reason);
+
+    const db = admin.firestore();
+    const paymentRequestRef = db.collection("paymentRequests").doc(String(orderCode));
+    const snap = await paymentRequestRef.get();
+    if (snap.exists) {
+      await paymentRequestRef.update({
+        status: "CANCELLED",
+        cancelledAt: FieldValue.serverTimestamp(),
+        cancellationReason: reason,
+      });
+    }
+
+    res.json({ success: true, status: "CANCELLED", orderCode, result: cancelResult });
+  } catch (error) {
+    console.error("Error cancelling payment link:", error);
+    res.status(500).json({ error: "PAYMENT_CANCEL_FAILED", details: error.message });
+  }
+};
+
+apiRoutes.get("/payment/verify/:orderCode", verifyPaymentHandler);
+apiRoutes.post("/payment/verify/:orderCode", verifyPaymentHandler);
+apiRoutes.post("/payment/cancel/:orderCode", cancelPaymentHandler);
 
 apiRoutes.post("/send-match-notification", triggerAuth.requireUser, requireTriggerStaff, async (req, res) => {
   const { matchId } = req.body;

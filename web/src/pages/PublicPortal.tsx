@@ -2,6 +2,7 @@ import { groupIdOf, scopedKey, groupKindOf } from "@/lib/groups";
 import { hasFeature } from "@/lib/features";
 import { useGroup, useGroupPath } from "@/contexts/GroupContext";
 import { getApiBaseUrl } from "@/lib/api";
+import { openPayOSCheckout } from "@/lib/payosCheckout";
 import {
   Card,
   CardContent,
@@ -177,7 +178,19 @@ const SharedBillsPublicPortal = ({
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error || "Không thể tạo liên kết thanh toán PayOS");
       if (resData.checkoutUrl) {
-        window.location.href = resData.checkoutUrl;
+        await openPayOSCheckout({
+          checkoutUrl: resData.checkoutUrl,
+          orderCode: resData.orderCode,
+          returnUrl: window.location.href,
+          onSuccess: async (event) => {
+            alert("Thanh toán thành công! Hệ thống đang cập nhật hóa đơn...");
+            const targetCode = event?.orderCode || resData.orderCode;
+            if (targetCode) {
+              await fetch(`${getApiBaseUrl()}/payment/verify/${targetCode}`).catch(() => {});
+            }
+            window.location.reload();
+          },
+        });
       }
     } catch (err: any) {
       alert(err.message || "Lỗi tạo thanh toán");

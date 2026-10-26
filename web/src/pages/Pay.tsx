@@ -39,7 +39,10 @@ import {
   UsersRound,
   BarChart,
   Star,
+  RefreshCw,
 } from "lucide-react";
+import { openPayOSCheckout } from "@/lib/payosCheckout";
+import { verifyPayment } from "@/lib/api";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
@@ -202,6 +205,47 @@ const Pay = () => {
   const [isRating, setIsRating] = useState(false);
   const [ratingTargets, setRatingTargets] = useState<Share[]>([]);
   const [ratedMatchIds, setRatedMatchIds] = useState<Set<string>>(new Set());
+  const [pendingOrderCode, setPendingOrderCode] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem("last_payos_order_code");
+    } catch {
+      return null;
+    }
+  });
+  const [isVerifyingStatus, setIsVerifyingStatus] = useState<boolean>(false);
+
+  const handleManualVerify = async (codeToVerify?: string | number) => {
+    const targetCode = codeToVerify || pendingOrderCode;
+    if (!targetCode) return;
+    setIsVerifyingStatus(true);
+    try {
+      const res = await verifyPayment(targetCode);
+      if (res?.status === "PAID") {
+        toast({
+          title: "Xác nhận thành công!",
+          description: "Khoản thanh toán đã được ghi nhận vào hệ thống.",
+        });
+        try {
+          sessionStorage.removeItem("last_payos_order_code");
+        } catch {}
+        setPendingOrderCode(null);
+        void fetchUnpaidShares();
+      } else {
+        toast({
+          title: "Chưa nhận được giao dịch",
+          description: `Trạng thái: ${res?.status || "PENDING"}. Nếu bạn vừa chuyển khoản, vui lòng đợi vài giây và bấm lại.`,
+        });
+      }
+    } catch (err: any) {
+      toast({
+        title: "Lỗi kiểm tra",
+        description: err.message || "Không thể kiểm tra giao dịch lúc này",
+        variant: "destructive",
+      });
+    } finally {
+      setIsVerifyingStatus(false);
+    }
+  };
 
   const apiBaseUrl = useMemo(() => {
     const envUrl = import.meta.env.VITE_API_URL || "";
@@ -897,7 +941,38 @@ const Pay = () => {
       }
 
       if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
+        if (data.orderCode) {
+          try {
+            sessionStorage.setItem("last_payos_order_code", String(data.orderCode));
+          } catch {}
+          setPendingOrderCode(String(data.orderCode));
+        }
+        await openPayOSCheckout({
+          checkoutUrl: data.checkoutUrl,
+          orderCode: data.orderCode,
+          returnUrl: window.location.href,
+          onSuccess: async (event) => {
+            toast({
+              title: "Thanh toán thành công!",
+              description: "Hệ thống đang đồng bộ dữ liệu...",
+            });
+            const targetCode = event?.orderCode || data.orderCode;
+            if (targetCode) {
+              await verifyPayment(targetCode).catch(() => {});
+            }
+            try {
+              sessionStorage.removeItem("last_payos_order_code");
+            } catch {}
+            setPendingOrderCode(null);
+            void fetchUnpaidShares();
+          },
+          onExit: () => {
+            toast({
+              title: "Đã đóng cửa sổ thanh toán",
+              description: "Nếu bạn đã chuyển khoản trên App ngân hàng, bấm 'Kiểm tra thanh toán' bên dưới.",
+            });
+          },
+        });
       } else {
         throw new Error("Không tìm thấy URL thanh toán.");
       }
@@ -998,7 +1073,38 @@ const Pay = () => {
         });
 
         if (paymentLinkData.checkoutUrl) {
-          window.location.href = paymentLinkData.checkoutUrl;
+          if (paymentLinkData.orderCode) {
+            try {
+              sessionStorage.setItem("last_payos_order_code", String(paymentLinkData.orderCode));
+            } catch {}
+            setPendingOrderCode(String(paymentLinkData.orderCode));
+          }
+          await openPayOSCheckout({
+            checkoutUrl: paymentLinkData.checkoutUrl,
+            orderCode: paymentLinkData.orderCode,
+            returnUrl: window.location.href,
+            onSuccess: async (event) => {
+              toast({
+                title: "Thanh toán thành công!",
+                description: "Hệ thống đang đồng bộ dữ liệu...",
+              });
+              const targetCode = event?.orderCode || paymentLinkData.orderCode;
+              if (targetCode) {
+                await verifyPayment(targetCode).catch(() => {});
+              }
+              try {
+                sessionStorage.removeItem("last_payos_order_code");
+              } catch {}
+              setPendingOrderCode(null);
+              void fetchUnpaidShares();
+            },
+            onExit: () => {
+              toast({
+                title: "Đã đóng cửa sổ thanh toán",
+                description: "Nếu bạn đã chuyển khoản trên App ngân hàng, bấm 'Kiểm tra thanh toán' bên dưới.",
+              });
+            },
+          });
         } else {
           throw new Error("Không tìm thấy URL thanh toán.");
         }
@@ -1593,6 +1699,29 @@ const Pay = () => {
                             </div>
                           </div>
                         </div>
+                        {pendingOrderCode && (
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-200">
+                            <div className="flex items-center space-x-2 text-xs sm:text-sm">
+                              <Info className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                              <span>Đã chuyển khoản xong cho đơn #{pendingOrderCode}?</span>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="w-full sm:w-auto border-amber-500/30 hover:bg-amber-500/20 text-xs sm:text-sm"
+                              onClick={() => handleManualVerify()}
+                              disabled={isVerifyingStatus}
+                            >
+                              {isVerifyingStatus ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                              ) : (
+                                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                              )}
+                              Kiểm tra thanh toán
+                            </Button>
+                          </div>
+                        )}
                         <Button
                           size="lg"
                           className="w-full h-12 text-base sm:h-14 sm:text-lg"

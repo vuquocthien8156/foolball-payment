@@ -30,7 +30,22 @@ export function loadSource(relativePath, mocks = {}, context = {}, transformers)
         return { useAuth: () => ({ user: { uid: "test-uid", displayName: "Test User" }, loading: false }) };
       }
       if (id === "@/lib/api") {
-        return { apiRequest: async () => [], postApiJson: async () => ({}) };
+        return {
+          apiRequest: async () => [],
+          postApiJson: async () => ({}),
+          verifyPayment: async () => ({ status: "PAID" }),
+          cancelPayment: async () => ({ status: "CANCELLED" }),
+        };
+      }
+      if (id === "@/lib/payosCheckout") {
+        return {
+          openPayOSCheckout: async (options) => {
+            if (options?.checkoutUrl && sandbox?.window) {
+              sandbox.window.location.href = options.checkoutUrl;
+            }
+          },
+          loadPayOSScript: async () => true,
+        };
       }
       if (id === "firebase/firestore") {
         return {
