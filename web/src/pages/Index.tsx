@@ -50,7 +50,7 @@ const Index = () => {
             Bún Pay
           </h1>
           <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-            Quản lý chi tiêu, chia tiền nhóm, hoá đơn dùng chung (Shared Bills) và hoạt động thể thao dễ dàng, minh bạch với PayOS & VietQR
+            Nền tảng quản lý chi tiêu, chia tiền nhóm và hoá đơn dùng chung minh bạch.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Button asChild size="lg" className="text-lg h-14 px-8">
