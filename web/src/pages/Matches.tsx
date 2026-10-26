@@ -237,6 +237,10 @@ const MatchListItem = ({
   });
 
   useEffect(() => {
+    if (match.status === "PENDING") {
+      setStats({ paidAmount: 0, paidCount: 0, totalShares: 0, isLoading: false });
+      return;
+    }
     const sharesQuery = query(collection(db, "matches", match.id, "shares"));
     const unsubscribe = onSnapshot(sharesQuery, (snapshot) => {
       let paidAmount = 0;
@@ -255,7 +259,7 @@ const MatchListItem = ({
     });
 
     return () => unsubscribe();
-  }, [match.id]);
+  }, [match.id, match.status]);
 
   const date = formatMatchDateTime(match.date);
 
@@ -311,12 +315,20 @@ const MatchListItem = ({
         </p>
         {!stats.isLoading && (
           <>
-            <p className="text-sm opacity-80">
-              Đã thu: {stats.paidAmount.toLocaleString()} VND
-            </p>
-            <p className="text-sm opacity-80">
-              Hoàn thành: {stats.paidCount}/{stats.totalShares}
-            </p>
+            {match.status === "PENDING" ? (
+              <p className="text-xs opacity-75 italic">
+                Đang điểm danh (chưa chốt bill)
+              </p>
+            ) : (
+              <>
+                <p className="text-sm opacity-80">
+                  Đã thu: {stats.paidAmount.toLocaleString()} VND
+                </p>
+                <p className="text-sm opacity-80">
+                  Hoàn thành: {stats.paidCount}/{stats.totalShares}
+                </p>
+              </>
+            )}
           </>
         )}
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -339,6 +351,16 @@ const MatchListItem = ({
               )}
             >
               ⚡ Chờ hoàn tiền
+            </Badge>
+          ) : match.status === "PENDING" ? (
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-[10px] px-1.5 py-0 h-4 border-blue-500/40 text-blue-600 dark:text-blue-400 bg-blue-500/10",
+                isSelected && "border-white/50 text-white bg-white/20",
+              )}
+            >
+              Đang điểm danh
             </Badge>
           ) : (
             <Badge
@@ -2736,7 +2758,9 @@ const Matches = () => {
                         {paidAmount.toLocaleString()} VND
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {paidCount}/{totalShares} đã thanh toán
+                        {selectedMatch?.status === "PENDING"
+                          ? "Chưa chốt tính tiền chia bill"
+                          : `${paidCount}/${totalShares} đã thanh toán`}
                       </p>
                     </CardContent>
                   </Card>
@@ -2749,8 +2773,15 @@ const Matches = () => {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold text-orange-500">
-                        {pendingAmount.toLocaleString()} VND
+                        {selectedMatch?.status === "PENDING"
+                          ? "Chưa chốt bill"
+                          : `${pendingAmount.toLocaleString()} VND`}
                       </div>
+                      {selectedMatch?.status === "PENDING" && (
+                        <p className="text-xs text-muted-foreground">
+                          Dự kiến: {(selectedMatch?.totalAmount || 0).toLocaleString()} VND
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                   <Card className="shadow-card">
@@ -2762,9 +2793,11 @@ const Matches = () => {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">
-                        {totalAmount > 0
-                          ? Math.round((paidAmount / totalAmount) * 100)
-                          : 0}
+                        {selectedMatch?.status === "PENDING"
+                          ? 0
+                          : totalAmount > 0
+                            ? Math.round((paidAmount / totalAmount) * 100)
+                            : 0}
                         %
                       </div>
                     </CardContent>
@@ -3061,7 +3094,26 @@ const Matches = () => {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {filteredShares.map((share) => (
+                          {selectedMatch?.status === "PENDING" ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={5}
+                                className="text-center py-8 text-muted-foreground text-sm"
+                              >
+                                Trận đấu đang ở trạng thái điểm danh, chưa được chốt tính tiền chia bill.
+                              </TableCell>
+                            </TableRow>
+                          ) : filteredShares.length === 0 ? (
+                            <TableRow>
+                              <TableCell
+                                colSpan={5}
+                                className="text-center py-8 text-muted-foreground text-sm"
+                              >
+                                Không tìm thấy dữ liệu chia tiền phù hợp.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            filteredShares.map((share) => (
                             <TableRow
                               key={share.id}
                               className={cn(
@@ -3136,7 +3188,8 @@ const Matches = () => {
                                 )}
                               </TableCell>
                             </TableRow>
-                          ))}
+                          ))
+                        )}
                         </TableBody>
                       </Table>
                     )}

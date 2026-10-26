@@ -365,6 +365,7 @@ const SetupMatch = () => {
   const [templateMatchDay, setTemplateMatchDay] = useState(4);
   const [templateMatchTime, setTemplateMatchTime] = useState("19:00");
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const [isUpdatingTemplate, setIsUpdatingTemplate] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
 
   const applyTemplate = useCallback((tpl: any) => {
@@ -458,6 +459,62 @@ const SetupMatch = () => {
       toast({ variant: "destructive", title: "Không thể lưu mẫu trận đấu" });
     } finally {
       setIsSavingTemplate(false);
+    }
+  };
+
+  const handleUpdateCurrentTemplate = async () => {
+    if (!selectedTemplateId || !groupId) return;
+    const curTemplate = templates.find((t) => t.id === selectedTemplateId);
+    if (!curTemplate) return;
+
+    setIsUpdatingTemplate(true);
+    try {
+      const numericTotal = expenseItems
+        .filter((e) => e.type !== "SUBSIDY")
+        .reduce((sum, e) => sum + e.amount, 0);
+
+      const payload = {
+        id: selectedTemplateId,
+        name: curTemplate.name,
+        isDefault: Boolean(curTemplate.isDefault),
+        venueName: venueName || "",
+        totalAmount: numericTotal,
+        mapIframe: mapIframe || "",
+        attendanceCloseHours,
+        sufficientPlayerCount:
+          sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
+        paidByMemberId: paidByMemberId || null,
+        kickoffTime: time,
+        teamCount: usesTeams ? teamCount : 1,
+        expenseItems: sanitizeExpenseItems(expenseItems),
+        teamsConfig: activeTeams.map((t) => ({
+          id: t.id,
+          name: t.name,
+          percent: getTeamEffectivePercent(t.id),
+          members: t.members.map((m) => ({
+            id: m.id,
+            percent: m.percent === undefined ? null : m.percent,
+            reason: m.reason || null,
+          })),
+        })),
+        schedule: curTemplate.schedule || null,
+      };
+
+      await apiRequest("POST", `/groups/${groupId}/templates`, payload);
+      toast({
+        title: "Đã cập nhật mẫu!",
+        description: `Đã lưu các thiết lập hiện tại vào mẫu "${curTemplate.name}".`,
+      });
+      await loadTemplates();
+    } catch (err: any) {
+      console.error("Failed to update template:", err);
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: err?.message || "Không thể cập nhật mẫu trận đấu.",
+      });
+    } finally {
+      setIsUpdatingTemplate(false);
     }
   };
 
@@ -1220,64 +1277,76 @@ const SetupMatch = () => {
       const batch = writeBatch(db);
       batch.update(matchRef, matchData);
 
-      // Sync subsidy shares so sponsor members appear in the debt list even when match has paid shares
+      // Only sync subsidy shares for already calculated/active matches (not PENDING)
       const existingSharesSnap = await getDocs(
         collection(db, "matches", matchId, "shares"),
       );
 
-      const subsidyExpenses = expenseItems.filter(
-        (e) => e.type === "SUBSIDY" && e.targetMemberId && e.amount > 0,
-      );
+      const isPendingMatch = !existingStatus || existingStatus === "PENDING";
 
-      subsidyExpenses.forEach((exp) => {
-        const existingShare = existingSharesSnap.docs.find(
-          (d) =>
-            d.data().memberId === exp.targetMemberId &&
-            (d.data().teamId === "pool" || d.data().calculationDetails?.isIndividual),
-        );
-        const customDesc = exp.description?.trim() || "Trợ giá";
-        const noteDesc = exp.note?.trim() ? ` (${exp.note.trim()})` : "";
-        const breakdownItem = {
-          expenseId: exp.id,
-          description: `[Trợ giá] ${customDesc}${noteDesc}`,
-          amount: exp.amount,
-        };
-
-        if (existingShare) {
-          batch.update(existingShare.ref, {
-            amount: exp.amount,
-            expenseBreakdown: [breakdownItem],
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          const newShareRef = doc(collection(matchRef, "shares"));
-          batch.set(newShareRef, {
-            matchId: matchRef.id,
-            memberId: exp.targetMemberId,
-            teamId: "pool",
-            amount: exp.amount,
-            status: "PENDING",
-            orderCode: "",
-            expenseBreakdown: [breakdownItem],
-            calculationDetails: {
-              isIndividual: true,
-            },
-            groupId,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
+      if (isPendingMatch) {
+        // If match is still in attendance (PENDING) and has not been calculated yet:
+        // Do NOT create or keep orphaned debt shares in Firestore.
+        // All bills should only be generated when admin clicks "Tính tiền".
+        if (!existingSharesSnap.docs.some((d) => d.data().status === "PAID")) {
+          existingSharesSnap.docs.forEach((docSnap) => {
+            batch.delete(docSnap.ref);
           });
         }
-      });
+      } else {
+        const subsidyExpenses = expenseItems.filter(
+          (e) => e.type === "SUBSIDY" && e.targetMemberId && e.amount > 0,
+        );
+
+        subsidyExpenses.forEach((exp) => {
+          const existingShare = existingSharesSnap.docs.find(
+            (d) =>
+              d.data().memberId === exp.targetMemberId &&
+              (d.data().teamId === "pool" || d.data().calculationDetails?.isIndividual),
+          );
+          const customDesc = exp.description?.trim() || "Trợ giá";
+          const noteDesc = exp.note?.trim() ? ` (${exp.note.trim()})` : "";
+          const breakdownItem = {
+            expenseId: exp.id,
+            description: `[Trợ giá] ${customDesc}${noteDesc}`,
+            amount: exp.amount,
+          };
+
+          if (existingShare) {
+            batch.update(existingShare.ref, {
+              amount: exp.amount,
+              expenseBreakdown: [breakdownItem],
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            const newShareRef = doc(collection(matchRef, "shares"));
+            batch.set(newShareRef, {
+              matchId: matchRef.id,
+              memberId: exp.targetMemberId,
+              teamId: "pool",
+              amount: exp.amount,
+              status: "PENDING",
+              orderCode: "",
+              expenseBreakdown: [breakdownItem],
+              calculationDetails: {
+                isIndividual: true,
+              },
+              groupId,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        });
+      }
 
       await batch.commit();
       toast({
         title: "Đã lưu!",
-        description:
-          subsidyExpenses.length > 0
-            ? "Đã lưu thay đổi và đồng bộ khoản trợ giá vào danh sách thanh toán."
-            : usesTeams
-              ? "Chỉ cập nhật cấu hình/đội hình, chưa tính tiền."
-              : "Đã cập nhật thông tin và người tham gia, chưa tính tiền.",
+        description: isPendingMatch
+          ? usesTeams
+            ? "Chỉ cập nhật cấu hình/đội hình, chưa tính tiền."
+            : "Đã cập nhật thông tin và người tham gia, chưa tính tiền."
+          : "Đã lưu thay đổi cấu hình trận đấu.",
       });
     } catch (error: any) {
       console.error("Failed to update match config:", error);
@@ -1998,55 +2067,130 @@ const SetupMatch = () => {
               }
               return null;
             })()}
+
+            {/* Cập nhật mẫu đang chọn */}
+            {selectedTemplateId && (() => {
+              const cur = templates.find((t) => t.id === selectedTemplateId);
+              if (!cur) return null;
+              return (
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={handleUpdateCurrentTemplate}
+                        disabled={isUpdatingTemplate || isBusy}
+                        className="text-xs h-9 gap-1.5 bg-amber-600 hover:bg-amber-700 text-white font-medium"
+                      >
+                        {isUpdatingTemplate ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Save className="h-3.5 w-3.5" />
+                        )}
+                        Cập nhật mẫu: "{cur.name}"
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[280px]">
+                      <p>
+                        Lưu các thông số vừa sửa (tiền sân, giờ, đội...) <b>đè vào mẫu "{cur.name}"</b> để các trận tạo mới sau này tự động áp dụng
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              );
+            })()}
+
             {selectedTemplateId && (() => {
               const cur = templates.find((t) => t.id === selectedTemplateId);
               if (cur && !cur.isDefault) {
                 return (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleSetTemplateAsDefault(cur)}
-                    className="text-xs h-9 gap-1"
-                    title="Đặt mẫu đang chọn làm mặc định"
-                  >
-                    ⭐ Đặt làm mặc định
-                  </Button>
+                  <TooltipProvider delayDuration={150}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleSetTemplateAsDefault(cur)}
+                          className="text-xs h-9 gap-1"
+                        >
+                          ⭐ Đặt làm mặc định
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[240px]">
+                        <p>Đặt mẫu "{cur.name}" làm mẫu mặc định tự động điền khi tạo trận mới</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 );
               }
               return null;
             })()}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsScheduleModalOpen(true)}
-              className="text-xs h-9 gap-1.5"
-            >
-              <Calendar className="h-3.5 w-3.5" />
-              Lịch tự động & Mẫu
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setIsDefaultTemplate(false);
-                setIsSaveTemplateOpen(true);
-              }}
-              className="gap-1.5"
-            >
-              <Save className="h-3.5 w-3.5" />
-              Lưu cấu hình thành mẫu
-            </Button>
-            {selectedTemplateId && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleDeleteTemplate(selectedTemplateId)}
-                className="text-destructive hover:text-destructive hover:bg-destructive/10 h-9 px-2"
-                title="Xóa mẫu đang chọn"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
+
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsScheduleModalOpen(true)}
+                    className="text-xs h-9 gap-1.5"
+                  >
+                    <Calendar className="h-3.5 w-3.5" />
+                    Lịch tự động & Mẫu
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[260px]">
+                  <p>Xem danh sách tất cả mẫu và cài đặt tự động tạo trận hàng tuần</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setIsDefaultTemplate(false);
+                      setNewTemplateName(venueName ? `Sân ${venueName}` : "");
+                      setIsSaveTemplateOpen(true);
+                    }}
+                    className="gap-1.5 text-xs h-9"
+                  >
+                    <BookmarkPlus className="h-3.5 w-3.5" />
+                    Lưu thành mẫu mới
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-[260px]">
+                  <p>Tạo một mẫu cấu hình riêng mới từ các thông số hiện tại</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            {selectedTemplateId && (() => {
+              const cur = templates.find((t) => t.id === selectedTemplateId);
+              return (
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteTemplate(selectedTemplateId)}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10 h-9 px-2"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Xóa mẫu "{cur?.name || "này"}"</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              );
+            })()}
           </div>
         </div>
 
@@ -3809,32 +3953,6 @@ const SetupMatch = () => {
               </TooltipProvider>
             )}
 
-            <TooltipProvider delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => {
-                      setIsDefaultTemplate(true);
-                      setNewTemplateName(venueName ? `Sân ${venueName}` : "Mẫu mặc định");
-                      setIsSaveTemplateOpen(true);
-                    }}
-                    disabled={isBusy}
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <BookmarkPlus className="h-4 w-4 mr-1.5" />
-                    Lưu làm mẫu mặc định
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-[260px]">
-                  <p>
-                    Lưu thiết lập hiện tại (tiền sân, giờ chơi, địa điểm...) làm{" "}
-                    <b>mẫu mặc định</b> cho các buổi chơi tạo mới lần sau
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
           </div>
 
           {/* Nhóm 2: Thao tác buổi chơi & Tính tiền */}
@@ -3889,8 +4007,8 @@ const SetupMatch = () => {
                     </TooltipTrigger>
                     <TooltipContent className="max-w-[260px]">
                       <p>
-                        Tạo buổi chơi mới ở trạng thái chờ điểm danh (PENDING) và
-                        tự động copy link điểm danh để gửi cho nhóm
+                        Tạo buổi chơi mới ở trạng thái chờ điểm danh (PENDING),
+                        tự động copy link điểm danh và gửi thông báo cho nhóm
                       </p>
                     </TooltipContent>
                   </Tooltip>
@@ -3913,13 +4031,12 @@ const SetupMatch = () => {
                         ) : (
                           <Save className="h-4 w-4 mr-2" />
                         )}
-                        Lưu thay đổi
+                        Lưu thay đổi trận đấu
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent className="max-w-[260px]">
+                    <TooltipContent className="max-w-[280px]">
                       <p>
-                        Lưu lại các thông tin sân, giờ, người tham gia, chi phí
-                        vừa sửa nhưng <b>CHƯA tính tiền</b>
+                        Lưu lại thông tin sân, giờ, người tham gia, chi phí cho <b>riêng trận đấu này</b> (Snapshot độc lập, không thay đổi mẫu gốc và CHƯA tính tiền)
                       </p>
                     </TooltipContent>
                   </Tooltip>
@@ -3938,11 +4055,11 @@ const SetupMatch = () => {
                         </Button>
                       </span>
                     </TooltipTrigger>
-                    <TooltipContent className="max-w-[260px]">
+                    <TooltipContent className="max-w-[280px]">
                       <p>
                         {hasPaidShares
                           ? "Trận đấu đã có thành viên thanh toán tiền. Không thể tính lại hóa đơn."
-                          : "Tính tiền chia cho từng người và lưu bản nháp (COMPLETED) để kiểm tra, chưa công khai cho thành viên thấy bill"}
+                          : "Chốt chia tiền cho từng người trong trận này và lưu bản nháp (COMPLETED) để kiểm tra nội bộ, chưa gửi link đòi tiền"}
                       </p>
                     </TooltipContent>
                   </Tooltip>
@@ -3968,11 +4085,11 @@ const SetupMatch = () => {
                         </Button>
                       </span>
                     </TooltipTrigger>
-                    <TooltipContent className="max-w-[260px]">
+                    <TooltipContent className="max-w-[280px]">
                       <p>
                         {hasPaidShares
                           ? "Trận đấu đã có thành viên thanh toán tiền. Không thể tính lại hóa đơn."
-                          : "Chốt tính tiền và công khai hóa đơn (PUBLISHED) để tất cả thành viên có thể vào xem bill và thanh toán ngay"}
+                          : "Chốt chia tiền cho từng người trong trận này và công khai hóa đơn (PUBLISHED) để thành viên có thể bấm link thanh toán"}
                       </p>
                     </TooltipContent>
                   </Tooltip>
