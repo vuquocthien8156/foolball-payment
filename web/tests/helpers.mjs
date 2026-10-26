@@ -37,16 +37,6 @@ export function loadSource(relativePath, mocks = {}, context = {}, transformers)
           cancelPayment: async () => ({ status: "CANCELLED" }),
         };
       }
-      if (id === "@/lib/payosCheckout") {
-        return {
-          openPayOSCheckout: async (options) => {
-            if (options?.checkoutUrl && sandbox?.window) {
-              sandbox.window.location.href = options.checkoutUrl;
-            }
-          },
-          loadPayOSScript: async () => true,
-        };
-      }
       if (id === "firebase/firestore") {
         return {
           collection: () => ({}),
