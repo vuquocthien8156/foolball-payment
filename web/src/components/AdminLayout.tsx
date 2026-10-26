@@ -207,25 +207,19 @@ const AdminLayout = () => {
   }, [rolesLoading, isSuperAdmin, allowedTabs, navigate, groupPath, groupLoading, groupId, group, sharedBills]);
 
   return (
-    <div
-      className={cn(
-        "grid h-screen w-full overflow-hidden",
-        isSidebarOpen
-          ? "md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]"
-          : "md:grid-cols-[0px_1fr]",
-      )}
-    >
+    <div className="grid h-screen w-full overflow-hidden md:grid-cols-[240px_1fr] lg:grid-cols-[280px_1fr]">
       {isSidebarOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/40"
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
       <div
         className={cn(
-          "border-r bg-background z-40 transform transition-transform duration-200",
-          isSidebarOpen ? "translate-x-0" : "-translate-x-full",
-          "fixed inset-y-0 left-0 w-64 md:static md:w-64 lg:w-72 shadow-lg md:shadow-none",
+          "border-r bg-background z-40 transition-transform duration-200",
+          "fixed inset-y-0 left-0 w-64 shadow-lg",
+          "md:static md:w-full md:shadow-none md:translate-x-0 md:z-auto",
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         )}
       >
         <div className="flex h-full flex-col gap-2">
@@ -474,7 +468,8 @@ const AdminLayout = () => {
                 variant="ghost"
                 size="icon"
                 onClick={() => setIsSidebarOpen((prev) => !prev)}
-                className="shrink-0"
+                className="shrink-0 md:hidden"
+                aria-label="Mở menu"
               >
                 <Menu className="h-5 w-5" />
               </Button>

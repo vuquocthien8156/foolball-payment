@@ -101,4 +101,6 @@ test("AdminLayout renders quick group switcher with separate main and test group
   assert.ok(rendered.includes("Badminton Club"));
   assert.ok(rendered.includes("[Test] Badminton Club"));
   assert.ok(rendered.includes("Tìm kiếm nhóm..."));
+  assert.ok(rendered.includes("md:grid-cols-[240px_1fr]"));
+  assert.ok(rendered.includes("md:translate-x-0"));
 });
