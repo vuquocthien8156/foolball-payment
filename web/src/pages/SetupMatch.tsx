@@ -243,6 +243,22 @@ export const distributeAmountByWeights = <
   return result;
 };
 
+const sanitizeExpenseItems = (items: ExpenseItem[]) => {
+  return items.map((exp) => {
+    const item: Record<string, any> = {
+      id: exp.id,
+      description: exp.description || "",
+      amount: exp.amount || 0,
+      exemptMemberIds: exp.exemptMemberIds || [],
+      type: exp.type || "SHARED",
+    };
+    if (exp.teamPercents) item.teamPercents = exp.teamPercents;
+    if (exp.targetMemberId) item.targetMemberId = exp.targetMemberId;
+    if (exp.note) item.note = exp.note;
+    return item;
+  });
+};
+
 const SetupMatch = () => {
   const { groupId, group, loading: groupLoading } = useGroup();
   const usesTeams = group?.sport !== "badminton";
@@ -1096,7 +1112,7 @@ const SetupMatch = () => {
       const kickoff = createMatchDate(date, time);
       const configToSave = {
         kickoffTime: time,
-        expenseItems: expenseItems,
+        expenseItems: sanitizeExpenseItems(expenseItems),
         teamCount: usesTeams ? teamCount : 1,
         venueName: venueName || null,
         mapIframe: mapIframe || null,
@@ -1133,11 +1149,12 @@ const SetupMatch = () => {
         description: "Cấu hình trận đấu đã được lưu.",
       });
       return true;
-    } catch (e) {
+    } catch (e: any) {
+      console.error("Failed to save match config to DB:", e);
       toast({
         variant: "destructive",
         title: "Lỗi",
-        description: "Không thể lưu cấu hình.",
+        description: e?.message ? `Không thể lưu cấu hình: ${e.message}` : "Không thể lưu cấu hình.",
       });
       return false;
     } finally {
@@ -1245,11 +1262,12 @@ const SetupMatch = () => {
               ? "Chỉ cập nhật cấu hình/đội hình, chưa tính tiền."
               : "Đã cập nhật thông tin và người tham gia, chưa tính tiền.",
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Failed to update match config:", error);
       toast({
         variant: "destructive",
         title: "Lỗi",
-        description: "Không thể lưu cấu hình.",
+        description: error?.message ? `Không thể lưu cấu hình: ${error.message}` : "Không thể lưu cấu hình.",
       });
     } finally {
       setIsUpdatingConfig(false);
@@ -1267,7 +1285,7 @@ const SetupMatch = () => {
         groupId,
         date: createMatchDate(date, time),
         totalAmount: totalAmount,
-        expenseItems: expenseItems,
+        expenseItems: sanitizeExpenseItems(expenseItems),
         teamCount: usesTeams ? teamCount : 1,
         status: "PENDING",
         isTest: isTestMatch,
@@ -1306,11 +1324,12 @@ const SetupMatch = () => {
         console.error("Failed to send attendance created notification", error),
       );
       navigate(groupPath(`admin/setup/${matchRef.id}`));
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Failed to create match for attendance:", error);
       toast({
         variant: "destructive",
         title: "Lỗi",
-        description: "Không thể tạo trận đấu.",
+        description: error?.message ? `Không thể tạo trận đấu: ${error.message}` : "Không thể tạo trận đấu.",
       });
     } finally {
       setIsCreating(false);
@@ -1557,11 +1576,10 @@ const SetupMatch = () => {
                   expenseBreakdown: [],
                   calculationDetails: {
                     isEqual: true,
-                    memberPercent:
-                      member.percent && member.percent < 100
-                        ? member.percent
-                        : undefined,
-                    reason: member.reason,
+                    ...(member.percent && member.percent < 100
+                      ? { memberPercent: member.percent }
+                      : {}),
+                    ...(member.reason ? { reason: member.reason } : {}),
                   },
                 });
               }
@@ -1613,11 +1631,10 @@ const SetupMatch = () => {
                 totalAmount: 0,
                 expenseBreakdown: [],
                 calculationDetails: {
-                  memberPercent:
-                    member.percent && member.percent < 100
-                      ? member.percent
-                      : undefined,
-                  reason: member.reason,
+                  ...(member.percent && member.percent < 100
+                    ? { memberPercent: member.percent }
+                    : {}),
+                  ...(member.reason ? { reason: member.reason } : {}),
                   teamName: team.name,
                   teamTotal: teamTotal,
                 },
@@ -1643,6 +1660,13 @@ const SetupMatch = () => {
       // Convert map to shares array
       memberSharesMap.forEach((memberShare) => {
         const memberObj = allMembers.find((m) => m.id === memberShare.memberId);
+        const calcDetails = memberShare.calculationDetails
+          ? Object.fromEntries(
+              Object.entries(memberShare.calculationDetails).filter(
+                ([_, v]) => v !== undefined,
+              ),
+            )
+          : undefined;
         shares.push({
           matchId: matchRef.id,
           memberId: memberShare.memberId,
@@ -1651,7 +1675,9 @@ const SetupMatch = () => {
           status: "PENDING",
           orderCode: "",
           expenseBreakdown: memberShare.expenseBreakdown,
-          calculationDetails: memberShare.calculationDetails,
+          ...(calcDetails && Object.keys(calcDetails).length > 0
+            ? { calculationDetails: calcDetails }
+            : {}),
         });
       });
 
@@ -1675,7 +1701,7 @@ const SetupMatch = () => {
         groupId,
         date: createMatchDate(date, time),
         totalAmount: numericTotalAmount,
-        expenseItems: expenseItems,
+        expenseItems: sanitizeExpenseItems(expenseItems),
         teamCount: usesTeams ? teamCount : 1,
         isTest: isTestMatch,
         venueName: venueName || null,
@@ -1747,20 +1773,24 @@ const SetupMatch = () => {
         const finalChannel = existing?.data?.channel || undefined;
         const finalOrderCode = existing?.data?.orderCode || share.orderCode;
 
-        batch.set(
-          shareRef,
-          {
-            ...share,
-            status: finalStatus,
-            ...(finalPaidAt ? { paidAt: finalPaidAt } : {}),
-            ...(finalChannel ? { channel: finalChannel } : {}),
-            ...(finalOrderCode ? { orderCode: finalOrderCode } : {}),
-            groupId,
-            updatedAt: serverTimestamp(),
-            ...(existing ? {} : { createdAt: serverTimestamp() }),
-          },
-          { merge: true },
-        );
+        const shareData: Record<string, any> = {
+          ...share,
+          status: finalStatus,
+          ...(finalPaidAt ? { paidAt: finalPaidAt } : {}),
+          ...(finalChannel ? { channel: finalChannel } : {}),
+          ...(finalOrderCode ? { orderCode: finalOrderCode } : {}),
+          groupId,
+          updatedAt: serverTimestamp(),
+          ...(existing ? {} : { createdAt: serverTimestamp() }),
+        };
+
+        Object.keys(shareData).forEach((key) => {
+          if (shareData[key] === undefined) {
+            delete shareData[key];
+          }
+        });
+
+        batch.set(shareRef, shareData, { merge: true });
       });
 
       await batch.commit();
@@ -1783,10 +1813,13 @@ const SetupMatch = () => {
           : "Match calculated. Publish it when you are ready to collect payment.",
       });
       if (!matchId) navigate(groupPath(`admin/setup/${matchRef.id}`));
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Failed to calculate and save match:", error);
       toast({
         title: "Lỗi!",
-        description: "Không thể lưu trận đấu.",
+        description: error?.message
+          ? `Không thể lưu trận đấu: ${error.message}`
+          : "Không thể lưu trận đấu.",
         variant: "destructive",
       });
     } finally {
