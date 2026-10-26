@@ -45,7 +45,14 @@ function createSubscriptionService({ db, FieldValue }) {
         ...input.participantIds.map((id) => db.doc(`members/${id}`)));
       checkGroup(group);
       if (members.some((m) => !m.exists || groupIdOf(m.data()) !== gid || m.data().inactive)) reject(400, "INVALID_PARTICIPANTS");
-      splitBill({ amountVnd: input.amountVnd, participants: members.map((m) => ({ id: m.id, name: m.data().name })), providerPayerMemberId: input.providerPayerMemberId });
+      splitBill({
+        amountVnd: input.amountVnd,
+        participants: members.map((m) => ({ id: m.id, name: m.data().name })),
+        providerPayerMemberId: input.providerPayerMemberId,
+        splitMode: input.splitMode,
+        customPercentages: input.customPercentages,
+        subsidy: input.subsidy,
+      });
       const prior = existing.data();
       const reminderMode = ["default", "bill_only", "full", "none"].includes(input.reminderMode)
         ? input.reminderMode
@@ -57,6 +64,9 @@ function createSubscriptionService({ db, FieldValue }) {
         providerPayerMemberId: input.providerPayerMemberId, billingDay: input.billingDay, startMonth: input.startMonth,
         dueOffsetDays, reminderHour: input.reminderHour, timeZone: "Asia/Ho_Chi_Minh",
         reminderMode, settlementMode,
+        ...(input.splitMode ? { splitMode: input.splitMode } : {}),
+        ...(input.customPercentages ? { customPercentages: input.customPercentages } : {}),
+        ...(input.subsidy ? { subsidy: input.subsidy } : {}),
         revision: (prior?.revision || 0) + 1, enabled: prior ? prior.enabled : true,
         nextPeriod: prior?.nextPeriod || input.startMonth, createdBy: prior?.createdBy || actorUid,
         createdAt: prior?.createdAt || FieldValue.serverTimestamp(), updatedBy: actorUid, updatedAt: FieldValue.serverTimestamp(), lastError: null });

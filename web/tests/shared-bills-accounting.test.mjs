@@ -75,3 +75,97 @@ test("voiding preserves history and requires received transfers to be corrected 
   assert.equal(bill.state, "voided");
   assert.equal(bill.events.length, 4);
 });
+
+test("percentage split calculates proportional allocations and distributes remainder strictly", () => {
+  const threeParticipants = ["a", "b", "c"].map((id) => ({ id, name: id.toUpperCase() }));
+  const customPercentages = { a: 40, b: 30, c: 30 };
+  const result = splitBill({
+    amountVnd: 100000,
+    participants: threeParticipants,
+    providerPayerMemberId: "a",
+    splitMode: "percentage",
+    customPercentages,
+  });
+  assert.equal(result.find((p) => p.memberId === "a").amountVnd, 40000);
+  assert.equal(result.find((p) => p.memberId === "b").amountVnd, 30000);
+  assert.equal(result.find((p) => p.memberId === "c").amountVnd, 30000);
+  assert.equal(result.reduce((sum, p) => sum + p.amountVnd, 0), 100000);
+
+  // Remainder test: 100,001 VND with 40%, 30%, 30%
+  const remResult = splitBill({
+    amountVnd: 100001,
+    participants: threeParticipants,
+    providerPayerMemberId: "a",
+    splitMode: "percentage",
+    customPercentages,
+  });
+  assert.equal(remResult.find((p) => p.memberId === "a").amountVnd, 40001);
+  assert.equal(remResult.find((p) => p.memberId === "b").amountVnd, 30000);
+  assert.equal(remResult.find((p) => p.memberId === "c").amountVnd, 30000);
+  assert.equal(remResult.reduce((sum, p) => sum + p.amountVnd, 0), 100001);
+
+  // Invalid percentages reject
+  assert.throws(() => splitBill({
+    amountVnd: 100000,
+    participants: threeParticipants,
+    providerPayerMemberId: "a",
+    splitMode: "percentage",
+    customPercentages: { a: 50, b: 20, c: 20 },
+  }), /INVALID_PERCENTAGES/);
+});
+
+test("general and targeted subsidies discount bill shared pool and individual shares", () => {
+  const threeParticipants = ["a", "b", "c"].map((id) => ({ id, name: id.toUpperCase() }));
+  // General subsidy: 100k bill with 40k subsidy from company fund
+  const generalSubsidy = splitBill({
+    amountVnd: 100000,
+    participants: threeParticipants,
+    providerPayerMemberId: "a",
+    subsidy: { amountVnd: 40000, sponsorName: "Company Fund" },
+  });
+  // Net shared = 60,000 -> 20,000 each
+  assert.deepEqual(generalSubsidy.map((p) => p.amountVnd), [20000, 20000, 20000]);
+
+  // Targeted subsidy: 90k bill (equal 30k each), c receives 10k targeted subsidy
+  const targetedSubsidy = splitBill({
+    amountVnd: 90000,
+    participants: threeParticipants,
+    providerPayerMemberId: "a",
+    subsidy: { amountVnd: 10000, targetMemberId: "c", sponsorName: "Mentor" },
+  });
+  const cShare = targetedSubsidy.find((p) => p.memberId === "c");
+  assert.equal(cShare.amountVnd, 20000); // 30k - 10k
+  assert.equal(cShare.subsidyDiscountVnd, 10000);
+
+  // Invalid subsidy > amountVnd throws
+  assert.throws(() => splitBill({
+    amountVnd: 10000,
+    participants: threeParticipants,
+    providerPayerMemberId: "a",
+    subsidy: { amountVnd: 20000 },
+  }), /INVALID_SUBSIDY/);
+});
+
+test("bill creation with custom percentage and subsidy stores metadata correctly", async () => {
+  const { service } = setup();
+  const threeIds = ["a", "b", "c"];
+  const customInput = {
+    title: "AWS Shared Bill",
+    amountVnd: 100000,
+    participantIds: threeIds,
+    providerPayerMemberId: "a",
+    billingDate: "2026-11-01",
+    dueDate: "2026-11-05",
+    splitMode: "percentage",
+    customPercentages: { a: 50, b: 30, c: 20 },
+    subsidy: { amountVnd: 20000, sponsorName: "Startup Credit" },
+  };
+  await service.create({ groupId: "netflix", billId: "aws-nov", input: customInput, actorUid: "owner" });
+  const detail = await service.detail("netflix", "aws-nov");
+  assert.equal(detail.splitMode, "percentage");
+  assert.equal(detail.subsidy.amountVnd, 20000);
+  // Net bill = 80,000. a: 50% = 40,000. b: 30% = 24,000. c: 20% = 16,000.
+  assert.equal(detail.allocations.find((a) => a.memberId === "a").amountVnd, 40000);
+  assert.equal(detail.allocations.find((a) => a.memberId === "b").amountVnd, 24000);
+  assert.equal(detail.allocations.find((a) => a.memberId === "c").amountVnd, 16000);
+});

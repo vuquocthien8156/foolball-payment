@@ -411,8 +411,13 @@ const Bills = () => {
                           {formatVnd(sub.amountVnd)}
                         </span>
                         <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-                          {formatVnd(perPerson)} / người
+                          {sub.splitMode === "percentage" ? "Chia theo %" : `${formatVnd(perPerson)} / người`}
                         </span>
+                        {sub.subsidy?.amountVnd ? (
+                          <span className="rounded bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                            Trợ giá {formatVnd(sub.subsidy.amountVnd)}
+                          </span>
+                        ) : null}
                         <span className="text-xs text-muted-foreground">
                           ({sub.participantIds.length} người · ngày {sub.billingDay})
                         </span>
@@ -596,8 +601,13 @@ const Bills = () => {
                           {formatVnd(bill.amountVnd)}
                         </span>
                         <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-                          {formatVnd(perPerson)} / người
+                          {bill.splitMode === "percentage" ? "Chia theo %" : `${formatVnd(perPerson)} / người`}
                         </span>
+                        {bill.subsidy?.amountVnd ? (
+                          <span className="rounded bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                            Trợ giá {formatVnd(bill.subsidy.amountVnd)}
+                          </span>
+                        ) : null}
                       </div>
 
                       <p className="text-xs text-muted-foreground">

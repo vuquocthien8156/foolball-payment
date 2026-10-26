@@ -9,18 +9,109 @@ function requireDate(value) {
   return value;
 }
 
-function splitBill({ amountVnd, participants, providerPayerMemberId, autoCoverPayer = true }) {
+function splitBill({
+  amountVnd,
+  participants,
+  providerPayerMemberId,
+  autoCoverPayer = true,
+  splitMode = "equal",
+  customPercentages = null,
+  subsidy = null,
+}) {
   if (!Number.isSafeInteger(amountVnd) || amountVnd <= 0 || !Array.isArray(participants) ||
-      participants.length === 0 || participants.length > 50 || amountVnd < participants.length) reject(400, "INVALID_SPLIT");
+      participants.length === 0 || participants.length > 50) reject(400, "INVALID_SPLIT");
   if (participants.some((p) => !validId(p.id) || typeof p.name !== "string") ||
       new Set(participants.map((p) => p.id)).size !== participants.length ||
       !participants.some((p) => p.id === providerPayerMemberId)) reject(400, "INVALID_PARTICIPANTS");
-  const base = Math.floor(amountVnd / participants.length);
-  const remainder = amountVnd % participants.length;
-  return [...participants].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0).map((member, index) => ({
-    memberId: member.id, name: member.name, amountVnd: base + (index < remainder ? 1 : 0),
-    state: (member.id === providerPayerMemberId && autoCoverPayer) ? "covered_by_payer" : "unpaid",
-  }));
+
+  let subsidyAmount = 0;
+  if (subsidy) {
+    if (typeof subsidy !== "object") reject(400, "INVALID_SUBSIDY");
+    if (!Number.isSafeInteger(subsidy.amountVnd) || subsidy.amountVnd < 0 || subsidy.amountVnd > amountVnd) reject(400, "INVALID_SUBSIDY");
+    subsidyAmount = subsidy.amountVnd;
+    if (subsidy.targetMemberId && !participants.some((p) => p.id === subsidy.targetMemberId)) reject(400, "INVALID_SUBSIDY_TARGET");
+  }
+
+  const netBillAmount = subsidy?.targetMemberId ? amountVnd : Math.max(0, amountVnd - subsidyAmount);
+
+  if (splitMode === "equal" && subsidyAmount === 0 && amountVnd < participants.length) reject(400, "INVALID_SPLIT");
+
+  const sortedParticipants = [...participants].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  let allocations;
+
+  if (splitMode === "percentage") {
+    if (!customPercentages || typeof customPercentages !== "object") reject(400, "INVALID_PERCENTAGES");
+    let totalPct = 0;
+    for (const p of sortedParticipants) {
+      const pct = Number(customPercentages[p.id]);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) reject(400, "INVALID_PERCENTAGES");
+      totalPct += pct;
+    }
+    if (Math.abs(totalPct - 100) > 0.05) reject(400, "INVALID_PERCENTAGES");
+
+    if (netBillAmount === 0) {
+      allocations = sortedParticipants.map((member) => ({
+        memberId: member.id,
+        name: member.name,
+        amountVnd: 0,
+        percentage: Number(customPercentages[member.id]),
+        state: (member.id === providerPayerMemberId && autoCoverPayer) ? "covered_by_payer" : "unpaid",
+      }));
+    } else {
+      const rawShares = sortedParticipants.map((member) => ({
+        member,
+        pct: Number(customPercentages[member.id]),
+        exact: (netBillAmount * Number(customPercentages[member.id])) / 100,
+        floor: Math.floor((netBillAmount * Number(customPercentages[member.id])) / 100),
+      }));
+      const allocatedTotal = rawShares.reduce((s, r) => s + r.floor, 0);
+      const remainder = netBillAmount - allocatedTotal;
+
+      const withFrac = rawShares.map((r) => ({ ...r, frac: r.exact - r.floor }));
+      withFrac.sort((a, b) => b.frac - a.frac || (a.member.id < b.member.id ? -1 : 1));
+      for (let i = 0; i < remainder; i++) {
+        withFrac[i % withFrac.length].floor += 1;
+      }
+      withFrac.sort((a, b) => (a.member.id < b.member.id ? -1 : 1));
+
+      allocations = withFrac.map((item) => ({
+        memberId: item.member.id,
+        name: item.member.name,
+        amountVnd: item.floor,
+        percentage: item.pct,
+        state: (item.member.id === providerPayerMemberId && autoCoverPayer) ? "covered_by_payer" : "unpaid",
+      }));
+    }
+  } else {
+    if (netBillAmount === 0) {
+      allocations = sortedParticipants.map((member) => ({
+        memberId: member.id,
+        name: member.name,
+        amountVnd: 0,
+        state: (member.id === providerPayerMemberId && autoCoverPayer) ? "covered_by_payer" : "unpaid",
+      }));
+    } else {
+      const base = Math.floor(netBillAmount / sortedParticipants.length);
+      const remainder = netBillAmount % sortedParticipants.length;
+      allocations = sortedParticipants.map((member, index) => ({
+        memberId: member.id,
+        name: member.name,
+        amountVnd: base + (index < remainder ? 1 : 0),
+        state: (member.id === providerPayerMemberId && autoCoverPayer) ? "covered_by_payer" : "unpaid",
+      }));
+    }
+  }
+
+  if (subsidy?.targetMemberId && subsidyAmount > 0) {
+    const target = allocations.find((a) => a.memberId === subsidy.targetMemberId);
+    if (target) {
+      const discount = Math.min(target.amountVnd, subsidyAmount);
+      target.amountVnd -= discount;
+      target.subsidyDiscountVnd = discount;
+    }
+  }
+
+  return allocations;
 }
 
 function billSummary(allocations) {
@@ -82,7 +173,15 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
       const payerDoc = members.find((m) => m.id === input.providerPayerMemberId);
       const settlementMode = input.settlementMode || "net_offset";
       const autoCoverPayer = settlementMode === "net_offset";
-      const allocations = splitBill({ amountVnd: input.amountVnd, participants: members.map((m) => ({ id: m.id, name: m.data().name })), providerPayerMemberId: input.providerPayerMemberId, autoCoverPayer });
+      const allocations = splitBill({
+        amountVnd: input.amountVnd,
+        participants: members.map((m) => ({ id: m.id, name: m.data().name })),
+        providerPayerMemberId: input.providerPayerMemberId,
+        autoCoverPayer,
+        splitMode: input.splitMode,
+        customPercentages: input.customPercentages,
+        subsidy: input.subsidy,
+      });
       const [telegram, slack] = await tx.getAll(groupRef(groupId).collection("settings").doc("telegram"), groupRef(groupId).collection("settings").doc("slack"));
       const timestamp = FieldValue.serverTimestamp();
       const groupData = group.data();
@@ -96,7 +195,7 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
       }
       const payerName = payerDoc?.data()?.name || "Người ứng tiền";
       const payoutAmount = settlementMode === "full_collection"
-        ? input.amountVnd
+        ? (input.subsidy ? Math.max(0, input.amountVnd - (input.subsidy.amountVnd || 0)) : input.amountVnd)
         : allocations.filter((a) => a.memberId !== input.providerPayerMemberId).reduce((s, a) => s + a.amountVnd, 0);
 
       const reconciliation = isDirectGroup
@@ -133,6 +232,9 @@ function createBillService({ db, FieldValue, now = () => new Date() }) {
         settlementMode,
         reconciliation,
         providerPayerMemberId: input.providerPayerMemberId, source: occurrence ? "subscription" : "one_time",
+        ...(input.splitMode ? { splitMode: input.splitMode } : {}),
+        ...(input.customPercentages ? { customPercentages: input.customPercentages } : {}),
+        ...(input.subsidy ? { subsidy: input.subsidy } : {}),
         ...(occurrence ? { subscriptionId: occurrence.subscriptionId, subscriptionRevision: occurrence.revision, periodKey: occurrence.periodKey,
           catchupPending: billingDate < localDate(now()) } : {}),
         state: allocations.some((a) => a.state === "unpaid") ? "open" : "closed",

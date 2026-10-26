@@ -1,4 +1,11 @@
 export interface BillMember { id: string; name: string; inactive: boolean; accountUid?: string | null; bankInfo?: { bankCode?: string; accountNumber?: string; accountName?: string } | null }
+export interface BillSubsidy {
+  amountVnd: number;
+  sponsorName?: string;
+  sponsorMemberId?: string;
+  note?: string;
+  targetMemberId?: string;
+}
 export interface BillInput {
   title: string;
   amountVnd: number;
@@ -9,6 +16,9 @@ export interface BillInput {
   settlementMode?: "full_collection" | "net_offset";
   reminderMode?: "default" | "bill_only" | "full" | "none";
   reminderHour?: number;
+  splitMode?: "equal" | "percentage";
+  customPercentages?: Record<string, number>;
+  subsidy?: BillSubsidy;
 }
 export interface SubscriptionInput extends BillInput {
   billingDay: number;
@@ -20,6 +30,8 @@ export interface BillAllocation {
   memberId: string;
   name: string;
   amountVnd: number;
+  percentage?: number;
+  subsidyDiscountVnd?: number;
   state: "unpaid" | "paid" | "covered_by_payer";
   paidAt?: { seconds: number } | null;
 }
@@ -69,6 +81,9 @@ export interface Bill {
   settlementMode?: "full_collection" | "net_offset";
   providerPayerMemberId?: string;
   reconciliation?: BillReconciliation;
+  splitMode?: "equal" | "percentage";
+  customPercentages?: Record<string, number>;
+  subsidy?: BillSubsidy;
   allocations: BillAllocation[];
   events: BillEvent[];
   summary: { payerContribution: number; expectedReimbursements: number; confirmedReimbursements: number; outstanding: number };

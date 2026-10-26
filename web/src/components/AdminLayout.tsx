@@ -547,7 +547,10 @@ const AdminLayout = () => {
                                       navigate(`/g/${g.id}/admin`);
                                     }
                                   }}
-                                  className="flex items-center justify-between py-2 px-2.5 cursor-pointer"
+                                  className={cn(
+                                    "flex items-center justify-between py-2 px-2.5 cursor-pointer rounded-md transition-colors",
+                                    isCurrent && "bg-primary/5",
+                                  )}
                                 >
                                   <div className="flex items-center gap-2 min-w-0">
                                     <Check
@@ -608,7 +611,10 @@ const AdminLayout = () => {
                                         navigate(`/g/${g.id}/admin`);
                                       }
                                     }}
-                                    className="flex items-center justify-between py-2 px-2.5 cursor-pointer"
+                                    className={cn(
+                                      "flex items-center justify-between py-2 px-2.5 cursor-pointer rounded-md transition-colors",
+                                      isCurrent && "bg-primary/5",
+                                    )}
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
                                       <Check

@@ -79,8 +79,11 @@ function reminderText(bill, allocations, priorDebtByMember = new Map()) {
 
   const billingPeriodStr = currentPeriod ? ` — Tháng ${currentPeriod}` : "";
   const dueDateStr = formatDateLabel(bill.dueDate) || bill.dueDate;
+  const subsidyStr = bill.subsidy?.amountVnd
+    ? `\n🎁 Trợ giá: ${bill.subsidy.amountVnd.toLocaleString("vi-VN")} VND${bill.subsidy.sponsorName ? ` (${bill.subsidy.sponsorName})` : ""}`
+    : "";
 
-  return `📋 ${bill.title}${billingPeriodStr}\n⏰ Hạn thanh toán: ${dueDateStr}\n─────────────────────────\nChi tiết thanh toán:\n${lines.join("\n")}\n─────────────────────────\n💰 Còn phải thu: ${grandTotal.toLocaleString("vi-VN")} VND`;
+  return `📋 ${bill.title}${billingPeriodStr}\n⏰ Hạn thanh toán: ${dueDateStr}${subsidyStr}\n─────────────────────────\nChi tiết thanh toán:\n${lines.join("\n")}\n─────────────────────────\n💰 Còn phải thu: ${grandTotal.toLocaleString("vi-VN")} VND`;
 }
 
 
