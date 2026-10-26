@@ -3893,37 +3893,36 @@ const SetupMatch = () => {
         })()}
 
         <div className="sticky bottom-0 z-10 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 rounded-xl border bg-background/95 backdrop-blur p-4 shadow-lg">
-          {/* Nhóm 1: Tiện ích & Cấu hình mẫu mặc định */}
+          {/* Nhóm 1: Tiện ích sao chép Link theo ngữ cảnh */}
           <div className="flex flex-wrap items-center gap-2">
-            <TooltipProvider delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      copyLink(
-                        `${window.location.origin}${groupPath("public/pay")}`,
-                        "Link thanh toán chung đã được sao chép.",
-                      )
-                    }
-                    disabled={isSaving}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <Copy className="h-4 w-4 mr-1.5" />
-                    Link thanh toán
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>
-                    Sao chép đường link thanh toán chung (/public/pay) để gửi
-                    cho thành viên
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
-            {matchId && (
+            {existingStatus === "PUBLISHED" || existingStatus === "COMPLETED" ? (
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        copyLink(
+                          `${window.location.origin}${groupPath("public/pay")}`,
+                          "Link thanh toán chung đã được sao chép.",
+                        )
+                      }
+                      disabled={isSaving}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <Copy className="h-4 w-4 mr-1.5" />
+                      Link thanh toán
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      Sao chép đường link thanh toán chung (/public/pay) để gửi cho thành viên
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : (
               <TooltipProvider delayDuration={150}>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -3945,8 +3944,7 @@ const SetupMatch = () => {
                   </TooltipTrigger>
                   <TooltipContent>
                     <p>
-                      Sao chép đường link điểm danh (/public/attendance) của
-                      buổi chơi này
+                      Sao chép đường link điểm danh (/public/attendance) của buổi chơi này
                     </p>
                   </TooltipContent>
                 </Tooltip>

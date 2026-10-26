@@ -1891,36 +1891,39 @@ const Matches = () => {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Quick Copy Link Buttons */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        copyLink(
-                          `${window.location.origin}${groupPath("public/pay")}`,
-                          "Link thanh toán chung đã được sao chép.",
-                        )
-                      }
-                      title="Sao chép link thanh toán chung gửi thành viên"
-                    >
-                      <Copy className="mr-1.5 h-4 w-4" />
-                      Link thanh toán
-                    </Button>
-
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        copyLink(
-                          `${window.location.origin}${groupPath("public/attendance")}`,
-                          "Link điểm danh đã được sao chép.",
-                        )
-                      }
-                      title="Sao chép link điểm danh gửi thành viên"
-                    >
-                      <LinkIcon className="mr-1.5 h-4 w-4" />
-                      Link điểm danh
-                    </Button>
+                    {/* Quick Copy Link Button (Contextual based on match status) */}
+                    {selectedMatch?.status === "PENDING" ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          copyLink(
+                            `${window.location.origin}${groupPath("public/attendance")}`,
+                            "Link điểm danh đã được sao chép.",
+                          )
+                        }
+                        title="Sao chép link điểm danh gửi thành viên"
+                        className="text-blue-600 border-blue-200 hover:bg-blue-50 dark:hover:bg-blue-950/40"
+                      >
+                        <LinkIcon className="mr-1.5 h-4 w-4" />
+                        Link điểm danh
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          copyLink(
+                            `${window.location.origin}${groupPath("public/pay")}`,
+                            "Link thanh toán chung đã được sao chép.",
+                          )
+                        }
+                        title="Sao chép link thanh toán chung gửi thành viên"
+                      >
+                        <Copy className="mr-1.5 h-4 w-4" />
+                        Link thanh toán
+                      </Button>
+                    )}
 
                     {/* Dropdown Menu */}
                     <DropdownMenu>
