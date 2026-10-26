@@ -102,6 +102,7 @@ import { Badge } from "@/components/ui/badge";
 interface Member {
   id: string;
   name: string;
+  nickname?: string;
   isExemptFromPayment?: boolean;
 }
 
@@ -1179,9 +1180,11 @@ const Pay = () => {
                         {isGroupPayment
                           ? `${groupMemberIds.length} ${groupMemberIds.length === 1 ? "person" : "people"} selected`
                           : selectedMemberId
-                          ? members.find(
-                              (member) => member.id === selectedMemberId
-                            )?.name
+                          ? (() => {
+                              const m = members.find((member) => member.id === selectedMemberId);
+                              if (!m) return "Chọn tên của bạn...";
+                              return m.nickname ? `${m.name} (${m.nickname})` : m.name;
+                            })()
                           : "Chọn tên của bạn..."}
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
@@ -1209,21 +1212,33 @@ const Pay = () => {
                             {members.map((member) => (
                               <CommandItem
                                 key={member.id}
-                                value={member.name}
-                                aria-label={isGroupPayment ? `${member.name}, ${groupMemberIds.includes(member.id) ? "selected" : "not selected"}` : member.name}
+                                value={`${member.name} ${member.nickname || ""}`}
+                                aria-label={
+                                  isGroupPayment
+                                    ? `${member.name}${member.nickname ? ` (${member.nickname})` : ""}, ${groupMemberIds.includes(member.id) ? "selected" : "not selected"}`
+                                    : `${member.name}${member.nickname ? ` (${member.nickname})` : ""}`
+                                }
                                 onSelect={() => {
                                   handleMemberChange(member.id);
                                   if (!isGroupPayment) setIsComboboxOpen(false);
                                 }}
+                                className="flex items-center py-2"
                               >
                                 <Check
-                                  className={`mr-2 h-4 w-4 ${
+                                  className={`mr-2 h-4 w-4 shrink-0 ${
                                     (isGroupPayment ? groupMemberIds.includes(member.id) : selectedMemberId === member.id)
                                       ? "opacity-100"
                                       : "opacity-0"
                                   }`}
                                 />
-                                {member.name}
+                                <div className="flex flex-col min-w-0 text-left">
+                                  <span className="font-medium truncate">{member.name}</span>
+                                  {member.nickname && (
+                                    <span className="text-xs text-muted-foreground truncate">
+                                      {member.nickname}
+                                    </span>
+                                  )}
+                                </div>
                               </CommandItem>
                             ))}
                           </CommandGroup>
@@ -1233,7 +1248,7 @@ const Pay = () => {
                   </Popover>
                   {isGroupPayment && groupMemberIds.length > 0 && (
                     <p className="text-sm text-muted-foreground">
-                      {members.filter((member) => groupMemberIds.includes(member.id)).map((member) => member.name).join(", ")}
+                      {members.filter((member) => groupMemberIds.includes(member.id)).map((member) => member.nickname ? `${member.name} (${member.nickname})` : member.name).join(", ")}
                     </p>
                   )}
                 </div>

@@ -20,7 +20,11 @@ export const GroupProvider = ({ children }: { children: ReactNode }) => {
       if (cancelled) return;
       const group = snapshot.exists() ? snapshot.data() as Group : groupId === DEFAULT_GROUP_ID
         ? { name: DEFAULT_GROUP_NAME, sport: "football" } : null;
-      setState({ groupId, group, loading: false, notFound: !group || group.status === "archived" });
+      const isNotFound = !group || group.status === "archived";
+      if (!isNotFound && typeof localStorage !== "undefined") {
+        try { localStorage.setItem("lastActiveGroupId", groupId); } catch {}
+      }
+      setState({ groupId, group, loading: false, notFound: isNotFound });
     }).catch((error) => {
       if (cancelled) return;
       console.error("Unable to load group", error);

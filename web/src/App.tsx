@@ -11,7 +11,7 @@ import { usePlatformAccount } from "./hooks/usePlatformAccount";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { GroupProvider, useGroup, useGroupPath } from "./contexts/GroupContext";
-import { DEFAULT_GROUP_ID, groupPath, resolveLegacyRedirect, groupKindOf } from "./lib/groups";
+import { DEFAULT_GROUP_ID, groupPath, resolveLegacyRedirect, groupKindOf, isValidGroupId } from "./lib/groups";
 import { FeatureKey, hasFeature } from "./lib/features";
 
 // Lazy load components
@@ -118,6 +118,14 @@ export const LegacyRedirect = () => {
   return <Navigate to={resolveLegacyRedirect(location.pathname, location.search) ?? groupPath(DEFAULT_GROUP_ID, "public")} replace />;
 };
 
+export const LegacyPaymentRedirect = ({ type }: { type: "cancel" | "success" | "pay" }) => {
+  const location = useLocation();
+  const lastGroupId = typeof localStorage !== "undefined" ? localStorage.getItem("lastActiveGroupId") : null;
+  const targetGroupId = lastGroupId && isValidGroupId(lastGroupId) ? lastGroupId : DEFAULT_GROUP_ID;
+  const subPath = type === "pay" ? "public/pay" : `public/payment-${type}`;
+  return <Navigate to={groupPath(targetGroupId, subPath) + location.search} replace />;
+};
+
 export const RequireFeature = ({ feature, children }: { feature: FeatureKey; children: JSX.Element }) => {
   const { groupId, group, loading } = useGroup();
   if (loading) return <LoadingSplash />;
@@ -175,6 +183,9 @@ const App = () => {
                 <Route path="/platform" element={<PlatformRoute><Groups /></PlatformRoute>} />
                 <Route path="/platform/accounts" element={<PlatformRoute ownerOnly><PlatformAccounts /></PlatformRoute>} />
                 <Route path="/login" element={<LegacyRedirect />} />
+                <Route path="/payment-cancel" element={<LegacyPaymentRedirect type="cancel" />} />
+                <Route path="/payment-success" element={<LegacyPaymentRedirect type="success" />} />
+                <Route path="/pay" element={<LegacyPaymentRedirect type="pay" />} />
                 <Route path="/public/*" element={<LegacyRedirect />} />
                 <Route path="/admin/*" element={<LegacyRedirect />} />
                 <Route path="/g/:groupId" element={<GroupProvider><Outlet /></GroupProvider>}>
