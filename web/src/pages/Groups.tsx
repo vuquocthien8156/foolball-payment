@@ -59,6 +59,7 @@ import {
   Layers,
   Search,
   MoreVertical,
+  FlaskConical,
 } from "lucide-react";
 
 type Group = {
@@ -71,6 +72,7 @@ type Group = {
   ownerUid?: string | null;
   ownerDisplayName?: string | null;
   ownerEmail?: string | null;
+  isTest?: boolean;
 };
 
 type CoManager = {
@@ -80,6 +82,19 @@ type CoManager = {
   role: string;
   isOwner?: boolean;
 };
+
+export function isTestGroup(g: { isTest?: boolean; name?: string; id?: string }): boolean {
+  if (typeof g.isTest === "boolean") return g.isTest;
+  const name = (g.name || "").toLowerCase();
+  const id = (g.id || "").toLowerCase();
+  return (
+    name.startsWith("[test]") ||
+    name.includes("(test)") ||
+    id.startsWith("test-") ||
+    id.includes("-test") ||
+    id === "test"
+  );
+}
 
 function slugifyName(text: string) {
   return text
@@ -108,6 +123,7 @@ const Groups = () => {
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
   const [sport, setSport] = useState<GroupSport | "">("");
   const [kind, setKind] = useState<GroupKind>("sports");
+  const [isTest, setIsTest] = useState(false);
   const [busy, setBusy] = useState(false);
   const [autoAddMeMember, setAutoAddMeMember] = useState(true);
 
@@ -115,6 +131,7 @@ const Groups = () => {
   const [editGroup, setEditGroup] = useState<Group | null>(null);
   const [editName, setEditName] = useState("");
   const [editSport, setEditSport] = useState<GroupSport | "">("");
+  const [editIsTest, setEditIsTest] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // Super Admin Settlement Overview State
@@ -143,11 +160,13 @@ const Groups = () => {
   // Category & Filter State
   const [activeCategory, setActiveCategory] = useState<"all" | "sports" | "shared_bills">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [isTestSectionOpen, setIsTestSectionOpen] = useState(false);
 
   const sportGroups = useMemo(() => {
     return groups.filter((g) => {
       const isSport = groupKindOf(g) !== "shared_bills";
       if (!isSport) return false;
+      if (isTestGroup(g)) return false;
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase().trim();
       return g.name.toLowerCase().includes(q) || g.id.toLowerCase().includes(q);
@@ -158,11 +177,31 @@ const Groups = () => {
     return groups.filter((g) => {
       const isShared = groupKindOf(g) === "shared_bills";
       if (!isShared) return false;
+      if (isTestGroup(g)) return false;
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase().trim();
       return g.name.toLowerCase().includes(q) || g.id.toLowerCase().includes(q);
     });
   }, [groups, searchQuery]);
+
+  const testGroups = useMemo(() => {
+    return groups.filter((g) => {
+      if (!isTestGroup(g)) return false;
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+      return g.name.toLowerCase().includes(q) || g.id.toLowerCase().includes(q);
+    });
+  }, [groups, searchQuery]);
+
+  const displayedTestGroups = useMemo(() => {
+    return testGroups.filter((g) => {
+      if (activeCategory === "sports") return groupKindOf(g) !== "shared_bills";
+      if (activeCategory === "shared_bills") return groupKindOf(g) === "shared_bills";
+      return true;
+    });
+  }, [testGroups, activeCategory]);
+
+  const isTestSectionVisible = isTestSectionOpen || (Boolean(searchQuery.trim()) && displayedTestGroups.length > 0);
 
   const fetchGroups = () => {
     setLoading(true);
@@ -191,7 +230,12 @@ const Groups = () => {
     }
     setBusy(true);
     try {
-      const payload: Record<string, unknown> = { name: name.trim(), kind, ...(kind === "sports" ? { sport } : {}) };
+      const payload: Record<string, unknown> = {
+        name: name.trim(),
+        kind,
+        isTest,
+        ...(kind === "sports" ? { sport } : {}),
+      };
       if (slug.trim()) {
         payload.id = slug.trim().toLowerCase();
       }
@@ -286,10 +330,39 @@ const Groups = () => {
     }
   };
 
+  const handleToggleTestGroup = async (group: Group) => {
+    const nextIsTest = !isTestGroup(group);
+    try {
+      await apiRequest("PATCH", `/platform/groups/${group.id}`, {
+        isTest: nextIsTest,
+      });
+      setGroups((prev) =>
+        prev.map((g) =>
+          g.id === group.id ? { ...g, isTest: nextIsTest } : g,
+        ),
+      );
+      toast({
+        title: nextIsTest
+          ? "Đã đánh dấu là nhóm thử nghiệm"
+          : "Đã chuyển thành nhóm chính thức",
+        description: nextIsTest
+          ? `Nhóm "${group.name}" đã được chuyển vào mục nhóm thử nghiệm ở cuối trang.`
+          : `Nhóm "${group.name}" đã được đưa lên danh sách nhóm chính.`,
+      });
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi",
+        description: err?.message || "Không thể cập nhật trạng thái thử nghiệm.",
+      });
+    }
+  };
+
   const openEditGroup = (group: Group) => {
     setEditGroup(group);
     setEditName(group.name);
     setEditSport(group.sport || "");
+    setEditIsTest(isTestGroup(group));
   };
 
   const handleSaveEditGroup = async () => {
@@ -298,12 +371,13 @@ const Groups = () => {
     try {
       await apiRequest("PATCH", `/platform/groups/${editGroup.id}`, {
         name: editName.trim(),
+        isTest: editIsTest,
         ...(groupKindOf(editGroup) === "sports" ? { sport: editSport } : {}),
       });
       setGroups((prev) =>
         prev.map((g) =>
           g.id === editGroup.id
-            ? { ...g, name: editName.trim(), sport: editSport as GroupSport }
+            ? { ...g, name: editName.trim(), sport: editSport as GroupSport, isTest: editIsTest }
             : g,
         ),
       );
@@ -517,6 +591,14 @@ const Groups = () => {
               <p className="text-xs text-muted-foreground font-mono">/g/{group.id}</p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+              {isTestGroup(group) && (
+                <Badge
+                  variant="outline"
+                  className="text-[11px] font-normal border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10"
+                >
+                  Thử nghiệm
+                </Badge>
+              )}
               <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
                 {groupKindOf(group) === "shared_bills" ? "Chia tiền" : SPORT_LABELS[group.sport || "other"]}
               </span>
@@ -544,6 +626,16 @@ const Groups = () => {
                     >
                       <Pencil className="h-4 w-4" />
                       <span>Chỉnh sửa thông tin</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleTestGroup(group);
+                      }}
+                      className="cursor-pointer gap-2"
+                    >
+                      <FlaskConical className="h-4 w-4 text-amber-500" />
+                      <span>{isTestGroup(group) ? "Bỏ đánh dấu thử nghiệm" : "Đánh dấu là nhóm test"}</span>
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={(e) => {
@@ -643,6 +735,7 @@ const Groups = () => {
               setSlugManuallyEdited(false);
               setSport("");
               setKind("sports");
+              setIsTest(false);
               setOpen(true);
             }}
             className="gap-1.5 shadow-xs"
@@ -800,6 +893,7 @@ const Groups = () => {
                       setSlugManuallyEdited(false);
                       setSport("");
                       setKind("sports");
+                      setIsTest(false);
                       setOpen(true);
                     }}
                   >
@@ -851,6 +945,7 @@ const Groups = () => {
                       setSlugManuallyEdited(false);
                       setSport("");
                       setKind("shared_bills");
+                      setIsTest(false);
                       setOpen(true);
                     }}
                   >
@@ -866,6 +961,54 @@ const Groups = () => {
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {sharedBillGroups.map((group) => renderGroupCard(group))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* SECTION 3: Nhóm Thử Nghiệm (Test Groups) - Collapsible */}
+          {displayedTestGroups.length > 0 && (
+            <section className="pt-6 border-t space-y-3.5">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setIsTestSectionOpen((prev) => !prev)}
+                  className="flex items-center gap-2.5 text-left group/btn hover:opacity-80 transition-opacity"
+                >
+                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                    <FlaskConical className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold tracking-tight">Nhóm Thử Nghiệm (Test)</h2>
+                      <Badge variant="outline" className="text-xs border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10 font-medium">
+                        {displayedTestGroups.length} nhóm
+                      </Badge>
+                      {isTestSectionVisible ? (
+                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Các nhóm thử nghiệm được gom lại ở đây để giảm sự ưu tiên và không làm phân tâm các nhóm chính
+                    </p>
+                  </div>
+                </button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs text-muted-foreground hover:text-foreground gap-1"
+                  onClick={() => setIsTestSectionOpen((prev) => !prev)}
+                >
+                  {isTestSectionVisible ? "Thu gọn" : "Mở rộng danh sách"}
+                </Button>
+              </div>
+
+              {isTestSectionVisible && (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 pt-2">
+                  {displayedTestGroups.map((group) => renderGroupCard(group))}
                 </div>
               )}
             </section>
@@ -940,6 +1083,23 @@ const Groups = () => {
                 </Label>
                 <p className="text-[11px] text-muted-foreground">
                   Tạo hồ sơ thành viên gắn liền với tài khoản của bạn để dễ dàng điểm danh và tự động theo dõi tiền hoàn khi ứng tiền sân.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start space-x-2 pt-2 border-t">
+              <Checkbox
+                id="is-test-group"
+                checked={isTest}
+                onCheckedChange={(checked) => setIsTest(!!checked)}
+                className="mt-0.5"
+              />
+              <div className="grid gap-0.5 leading-none">
+                <Label htmlFor="is-test-group" className="text-xs font-medium cursor-pointer">
+                  Đánh dấu đây là nhóm thử nghiệm (Test group)
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Nhóm thử nghiệm sẽ được gom ở cuối trang và tách biệt khỏi các nhóm chính thức.
                 </p>
               </div>
             </div>
@@ -1115,6 +1275,23 @@ const Groups = () => {
               <p className="text-muted-foreground text-[11px]">
                 Đường dẫn này được dùng cho các link công khai, bảng xếp hạng và điểm danh của nhóm.
               </p>
+            </div>
+
+            <div className="flex items-start space-x-2 pt-2 border-t">
+              <Checkbox
+                id="edit-is-test-group"
+                checked={editIsTest}
+                onCheckedChange={(checked) => setEditIsTest(!!checked)}
+                className="mt-0.5"
+              />
+              <div className="grid gap-0.5 leading-none">
+                <Label htmlFor="edit-is-test-group" className="text-xs font-medium cursor-pointer">
+                  Đánh dấu là nhóm thử nghiệm (Test group)
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Xếp vào mục nhóm thử nghiệm ở cuối trang để tránh nhầm lẫn với các nhóm hoạt động thực tế.
+                </p>
+              </div>
             </div>
           </div>
 
