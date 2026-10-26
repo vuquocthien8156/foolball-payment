@@ -134,6 +134,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         sport: data.sport,
         kind: groupKindOf(data),
         status: data.status,
+        isTest: Boolean(data.isTest),
         ownerUid,
         ownerDisplayName: ownerDisplayName || ownerEmail || (ownerUid ? "Chủ nhóm" : "Hệ thống"),
         ownerEmail: ownerEmail || null,
@@ -152,6 +153,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     const kind = req.body.kind ?? "sports";
     if (!isValidGroupKind(kind)) return res.status(400).json({ error: "INVALID_GROUP_KIND" });
     if (kind === "sports" && !isValidSport(req.body.sport)) return res.status(400).json({ error: "INVALID_SPORT" });
+    const isTest = Boolean(req.body.isTest);
     const groupType = { kind, ...(kind === "sports" ? { sport: req.body.sport } : {}) };
 
     const rawSlug = typeof req.body.id === "string" ? req.body.id.trim().toLowerCase() : (typeof req.body.slug === "string" ? req.body.slug.trim().toLowerCase() : null);
@@ -169,6 +171,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         transaction.set(ref, {
           name,
           ...groupType,
+          isTest,
           ownerUid: req.uid,
           ownerEmail: req.email || "",
           ownerDisplayName: req.platform.displayName || req.email || "",
@@ -202,6 +205,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         transaction.set(ref, {
           name,
           ...groupType,
+          isTest,
           ownerUid: req.uid,
           ownerEmail: req.email || "",
           ownerDisplayName: req.platform.displayName || req.email || "",
@@ -229,7 +233,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
 
   router.patch("/groups/:groupId", requireGroupRole({ manager: true }), wrap(async (req, res) => {
     if (!isValidGroupId(req.params.groupId)) return res.status(400).json({ error: "INVALID_GROUP" });
-    const { name, sport, status } = req.body;
+    const { name, sport, status, isTest } = req.body;
     const ref = db.collection("groups").doc(req.params.groupId);
     const current = await ref.get();
     if (!current.exists) return res.status(404).json({ error: "NOT_FOUND" });
@@ -239,7 +243,13 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     if (sport !== undefined && !isValidSport(sport)) return res.status(400).json({ error: "INVALID_SPORT" });
     if (name !== undefined && (typeof name !== "string" || name.trim().length < 2 || name.trim().length > 60)) return res.status(400).json({ error: "INVALID_NAME" });
     if (status !== undefined && !["active", "archived"].includes(status)) return res.status(400).json({ error: "INVALID_STATUS" });
-    await ref.update({ ...(name !== undefined ? { name: name.trim() } : {}), ...(sport !== undefined ? { sport } : {}), ...(status !== undefined ? { status } : {}), updatedAt: FieldValue.serverTimestamp() });
+    await ref.update({
+      ...(name !== undefined ? { name: name.trim() } : {}),
+      ...(sport !== undefined ? { sport } : {}),
+      ...(status !== undefined ? { status } : {}),
+      ...(isTest !== undefined ? { isTest: Boolean(isTest) } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
     res.json({ id: req.params.groupId });
   }));
 

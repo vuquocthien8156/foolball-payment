@@ -18,7 +18,27 @@ import {
   Bell,
   History,
   LayoutGrid,
+  Check,
+  ChevronsUpDown,
+  Building2,
 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
+import { Badge } from "@/components/ui/badge";
+import { SPORT_LABELS, GroupSport } from "@/lib/groups";
+import { apiRequest } from "@/lib/api";
 import {
   Card,
   CardContent,
@@ -36,6 +56,22 @@ import { groupKindOf } from "@/lib/groups";
 import { useGroupRole } from "@/hooks/useGroupRole";
 import { usePlatformAccount } from "@/hooks/usePlatformAccount";
 
+interface PlatformGroup {
+  id: string;
+  name: string;
+  sport?: string;
+  kind?: string;
+  status?: string;
+}
+
+const removeDiacritics = (str: string) => {
+  return str
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
+};
+
 const AdminLayout = () => {
   const groupPath = useGroupPath();
   const { pathname } = useLocation();
@@ -45,6 +81,75 @@ const AdminLayout = () => {
   const { user } = useAuth();
   const { role, isManager: isSuperAdmin, tabs, loading: rolesLoading } = useGroupRole(groupId);
   const { account } = usePlatformAccount();
+  const [platformGroups, setPlatformGroups] = useState<PlatformGroup[]>([]);
+  const [isGroupSwitcherOpen, setIsGroupSwitcherOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (account?.uid) {
+      apiRequest("GET", "/platform/groups")
+        .then((data: any) => {
+          if (!cancelled && Array.isArray(data)) {
+            setPlatformGroups(data.filter((g) => g.status !== "deleted"));
+          }
+        })
+        .catch((err) => console.warn("Failed to load platform groups:", err));
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [account?.uid]);
+
+  const displayGroups = useMemo(() => {
+    if (platformGroups.length > 0) return platformGroups;
+    if (group && groupId) {
+      return [
+        {
+          id: groupId,
+          name: group.name || groupId,
+          sport: group.sport,
+          kind: group.kind,
+          isTest: (group as any)?.isTest,
+        },
+      ];
+    }
+    return [];
+  }, [platformGroups, group, groupId]);
+
+  const { mainGroups, testGroups } = useMemo(() => {
+    const main: any[] = [];
+    const test: any[] = [];
+    for (const g of displayGroups) {
+      const name = (g.name || "").toLowerCase();
+      const id = (g.id || "").toLowerCase();
+      const isTest =
+        typeof g.isTest === "boolean"
+          ? g.isTest
+          : name.startsWith("[test]") ||
+            name.includes("(test)") ||
+            id.startsWith("test-") ||
+            id.includes("-test") ||
+            id === "test";
+      if (isTest) {
+        test.push(g);
+      } else {
+        main.push(g);
+      }
+    }
+    return { mainGroups: main, testGroups: test };
+  }, [displayGroups]);
+
+  const currentGroupInfo = useMemo(() => {
+    return (
+      displayGroups.find((g) => g.id === groupId) || {
+        id: groupId,
+        name: group?.name || groupId,
+        sport: group?.sport,
+        kind: group?.kind,
+      }
+    );
+  }, [displayGroups, groupId, group]);
+
   const allowedTabs = useMemo(
     () =>
       new Set(
@@ -363,15 +468,220 @@ const AdminLayout = () => {
       </div>
       <div className="flex flex-col h-screen overflow-hidden">
         <header className="sticky top-0 z-20 bg-background border-b">
-          <div className="flex items-center justify-between p-4 lg:p-6">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setIsSidebarOpen((prev) => !prev)}
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-            <div className="text-sm text-muted-foreground">
+          <div className="flex items-center justify-between p-3 sm:p-4 lg:px-6">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsSidebarOpen((prev) => !prev)}
+                className="shrink-0"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+
+              {/* Quick Group Switcher Combobox with Search */}
+              {displayGroups.length > 0 && (
+                <Popover
+                  open={isGroupSwitcherOpen}
+                  onOpenChange={setIsGroupSwitcherOpen}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={isGroupSwitcherOpen}
+                      className="h-9 px-2.5 sm:px-3 text-xs sm:text-sm font-medium justify-between min-w-[150px] max-w-[210px] sm:max-w-[300px] bg-background hover:bg-accent/60 border-muted-foreground/20 shadow-sm"
+                    >
+                      <div className="flex items-center gap-1.5 sm:gap-2 truncate min-w-0">
+                        <Building2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{currentGroupInfo.name}</span>
+                        {(typeof currentGroupInfo.isTest === "boolean"
+                          ? currentGroupInfo.isTest
+                          : (currentGroupInfo.name || "").toLowerCase().startsWith("[test]") ||
+                            (currentGroupInfo.name || "").toLowerCase().includes("(test)") ||
+                            (currentGroupInfo.id || "").toLowerCase().startsWith("test-") ||
+                            (currentGroupInfo.id || "").toLowerCase().includes("-test") ||
+                            (currentGroupInfo.id || "").toLowerCase() === "test") && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] font-normal px-1 py-0 border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10 shrink-0"
+                          >
+                            Test
+                          </Badge>
+                        )}
+                      </div>
+                      <ChevronsUpDown className="ml-1 h-3.5 w-3.5 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className="w-[280px] sm:w-[320px] p-0"
+                    align="start"
+                  >
+                    <Command
+                      filter={(value, search) => {
+                        const v = removeDiacritics(value.toLowerCase());
+                        const s = removeDiacritics(search.toLowerCase());
+                        return v.includes(s) ? 1 : 0;
+                      }}
+                    >
+                      <CommandInput placeholder="Tìm kiếm nhóm..." />
+                      <CommandList>
+                        <CommandEmpty>Không tìm thấy nhóm.</CommandEmpty>
+                        {mainGroups.length > 0 && (
+                          <CommandGroup heading="Nhóm chính">
+                            {mainGroups.map((g) => {
+                              const isCurrent = g.id === groupId;
+                              const sportLabel = g.sport
+                                ? SPORT_LABELS[g.sport as GroupSport] || g.sport
+                                : g.kind === "shared_bills"
+                                ? "Chia tiền"
+                                : "Thể thao";
+                              return (
+                                <CommandItem
+                                  key={g.id}
+                                  value={`${g.name} ${g.id} ${sportLabel}`}
+                                  onSelect={() => {
+                                    setIsGroupSwitcherOpen(false);
+                                    if (!isCurrent) {
+                                      try {
+                                        localStorage.setItem(
+                                          "lastActiveGroupId",
+                                          g.id,
+                                        );
+                                      } catch {}
+                                      navigate(`/g/${g.id}/admin`);
+                                    }
+                                  }}
+                                  className="flex items-center justify-between py-2 px-2.5 cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <Check
+                                      className={cn(
+                                        "h-4 w-4 shrink-0 text-primary",
+                                        isCurrent ? "opacity-100" : "opacity-0",
+                                      )}
+                                    />
+                                    <div className="flex flex-col min-w-0">
+                                      <span
+                                        className={cn(
+                                          "truncate text-sm",
+                                          isCurrent && "font-semibold text-primary",
+                                        )}
+                                      >
+                                        {g.name}
+                                      </span>
+                                      <span className="text-[11px] text-muted-foreground truncate">
+                                        @{g.id}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-[10px] font-normal px-1.5 py-0.5 shrink-0 ml-2"
+                                  >
+                                    {sportLabel}
+                                  </Badge>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        )}
+                        {testGroups.length > 0 && (
+                          <>
+                            {mainGroups.length > 0 && <CommandSeparator />}
+                            <CommandGroup heading="Nhóm thử nghiệm (Test)">
+                              {testGroups.map((g) => {
+                                const isCurrent = g.id === groupId;
+                                const sportLabel = g.sport
+                                  ? SPORT_LABELS[g.sport as GroupSport] || g.sport
+                                  : g.kind === "shared_bills"
+                                  ? "Chia tiền"
+                                  : "Thể thao";
+                                return (
+                                  <CommandItem
+                                    key={g.id}
+                                    value={`${g.name} ${g.id} ${sportLabel} test thu nghiem`}
+                                    onSelect={() => {
+                                      setIsGroupSwitcherOpen(false);
+                                      if (!isCurrent) {
+                                        try {
+                                          localStorage.setItem(
+                                            "lastActiveGroupId",
+                                            g.id,
+                                          );
+                                        } catch {}
+                                        navigate(`/g/${g.id}/admin`);
+                                      }
+                                    }}
+                                    className="flex items-center justify-between py-2 px-2.5 cursor-pointer"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <Check
+                                        className={cn(
+                                          "h-4 w-4 shrink-0 text-primary",
+                                          isCurrent ? "opacity-100" : "opacity-0",
+                                        )}
+                                      />
+                                      <div className="flex flex-col min-w-0">
+                                        <span
+                                          className={cn(
+                                            "truncate text-sm",
+                                            isCurrent && "font-semibold text-primary",
+                                          )}
+                                        >
+                                          {g.name}
+                                        </span>
+                                        <span className="text-[11px] text-muted-foreground truncate">
+                                          @{g.id}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[9px] font-normal px-1 py-0 border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10"
+                                      >
+                                        Test
+                                      </Badge>
+                                      <Badge
+                                        variant="secondary"
+                                        className="text-[10px] font-normal px-1.5 py-0.5"
+                                      >
+                                        {sportLabel}
+                                      </Badge>
+                                    </div>
+                                  </CommandItem>
+                                );
+                              })}
+                            </CommandGroup>
+                          </>
+                        )}
+                        {account && (
+                          <>
+                            <CommandSeparator />
+                            <CommandGroup>
+                              <CommandItem
+                                value="quan ly tat ca nhom nen tang platform"
+                                onSelect={() => {
+                                  setIsGroupSwitcherOpen(false);
+                                  navigate("/platform");
+                                }}
+                                className="flex items-center gap-2 text-xs text-muted-foreground py-2 cursor-pointer"
+                              >
+                                <LayoutGrid className="h-3.5 w-3.5" />
+                                <span>Quản lý tất cả nhóm (Nền tảng)</span>
+                              </CommandItem>
+                            </CommandGroup>
+                          </>
+                        )}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              )}
+            </div>
+
+            <div className="text-xs sm:text-sm text-muted-foreground truncate ml-2">
               {rolesLoading
                 ? "Đang tải vai trò..."
                 : `Vai trò: ${role === "owner" ? "Chủ nhóm" : isSuperAdmin ? "Quản lý" : "Quản trị viên"}`}

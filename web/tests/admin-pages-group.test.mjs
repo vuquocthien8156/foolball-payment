@@ -81,3 +81,24 @@ test("AdminLayout has no notification subscription or bell", async () => {
   assert.equal(rendered.includes("Toggle notifications"), false);
   assert.equal(rendered.includes('"type":"Bell"'), false);
 });
+
+test("AdminLayout renders quick group switcher with separate main and test groups in header", async () => {
+  const fake = createFakeFirestore();
+  const navigations = [];
+  const host = mountPage("../components/AdminLayout", {}, {
+    "@/contexts/GroupContext": { useGroup: () => ({ groupId: "badm-1", group: { name: "Badminton Club", sport: "badminton" }, loading: false }), useGroupPath: () => (sub) => groups.groupPath("badm-1", sub) },
+    "@/lib/features": features, "@/lib/groups": groups, "@/lib/utils": utils, "@/lib/firebase": { db: fake.db }, "firebase/firestore": fake.firestore,
+    "firebase/auth": {}, "@/contexts/AuthContext": { useAuth: () => ({ user: { uid: "fake" } }) },
+    "@/hooks/useGroupRole": { useGroupRole: () => ({ role: "owner", isManager: true, tabs: [], loading: false }) },
+    "@/hooks/usePlatformAccount": { usePlatformAccount: () => ({ account: { uid: "fake", role: "owner", status: "active" } }) },
+    "@/lib/api": { apiRequest: async () => [{ id: "badm-1", name: "Badminton Club", sport: "badminton", isTest: false }, { id: "test-badm", name: "[Test] Badminton Club", sport: "badminton", isTest: true }] },
+    "react-router-dom": { NavLink: "NavLink", Outlet: "Outlet", useLocation: () => ({ pathname: "/g/badm-1/admin/matches" }), useNavigate: () => (path) => navigations.push(path) }, "@/hooks/use-toast": { toast() {} },
+  }, { window: { location: { pathname: "/g/badm-1/admin/matches" } } });
+  await host.flush({ runEffects: true });
+  const rendered = JSON.stringify(host.render());
+  assert.ok(rendered.includes("Nhóm chính"));
+  assert.ok(rendered.includes("Nhóm thử nghiệm (Test)"));
+  assert.ok(rendered.includes("Badminton Club"));
+  assert.ok(rendered.includes("[Test] Badminton Club"));
+  assert.ok(rendered.includes("Tìm kiếm nhóm..."));
+});

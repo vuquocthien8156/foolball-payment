@@ -29,6 +29,9 @@ export function loadSource(relativePath, mocks = {}, context = {}, transformers)
       if (id === "@/contexts/AuthContext") {
         return { useAuth: () => ({ user: { uid: "test-uid", displayName: "Test User" }, loading: false }) };
       }
+      if (id === "@/lib/api") {
+        return { apiRequest: async () => [], postApiJson: async () => ({}) };
+      }
       if (id === "firebase/firestore") {
         return {
           collection: () => ({}),
