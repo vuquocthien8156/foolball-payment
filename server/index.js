@@ -385,8 +385,8 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
       orderCode,
       amount: totalAmount,
       description,
-      returnUrl: groupId === DEFAULT_GROUP_ID ? process.env.PAYOS_RETURN_URL : new URL(process.env.PAYOS_RETURN_URL).origin + "/g/" + groupId + "/public/payment-success",
-      cancelUrl: groupId === DEFAULT_GROUP_ID ? process.env.PAYOS_CANCEL_URL : new URL(process.env.PAYOS_CANCEL_URL).origin + "/g/" + groupId + "/public/payment-cancel",
+      returnUrl: !req.body?.groupId && groupId === DEFAULT_GROUP_ID ? process.env.PAYOS_RETURN_URL : new URL(process.env.PAYOS_RETURN_URL).origin + "/g/" + groupId + "/public/payment-success",
+      cancelUrl: !req.body?.groupId && groupId === DEFAULT_GROUP_ID ? process.env.PAYOS_CANCEL_URL : new URL(process.env.PAYOS_CANCEL_URL).origin + "/g/" + groupId + "/public/payment-cancel",
       // Removed bank: "ACB" - let PayOS auto-select based on merchant account
     };
 
@@ -565,14 +565,14 @@ const payosWebhookHandler = async (req, res) => {
             });
 
             const notificationRef = db.collection("notifications").doc();
-            const matchId = shareData.matchId;
+            const matchId = shareData.matchId || doc.ref.parent?.parent?.id;
             if (!matchId) {
               console.error(`CRITICAL: matchId is missing in share ${doc.id}`);
               return;
             }
             transaction.set(notificationRef, {
               groupId,
-              message: `${ownerNames.get(shareData.memberId)} đã thanh toán ${shareData.amount.toLocaleString()} VND`,
+              message: `${ownerNames.get(shareData.memberId) || "Thành viên"} đã thanh toán ${(shareData.amount || 0).toLocaleString()} VND`,
               matchId: matchId,
               shareId: doc.id,
               isRead: false,

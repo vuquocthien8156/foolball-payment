@@ -45,6 +45,11 @@
       name="twitter:image"
       content="https://thienbun-payment.web.app/pwa-512x512.png"
     />
+    <script>
+      if (window.location.hostname.includes("foolball-payment")) {
+        window.location.replace("https://thienbun-payment.web.app" + window.location.pathname + window.location.search + window.location.hash);
+      }
+    </script>
   </head>
 
   <body>
