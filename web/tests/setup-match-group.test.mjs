@@ -68,6 +68,20 @@ test("attendance match creation writes group and notification context", async ()
   assert.equal(copied[0], "http://localhost/g/badm-1/public/attendance");
 });
 
+test("match creation without attendance skips notifications and clipboard copy, and hides calculation buttons", async () => {
+  const { host, log, requests, copied } = setup("badm-1");
+  await host.page.handleCreateMatch(false);
+  const matchSet = log.find((entry) => entry.op === "set");
+  assert.equal(matchSet.data.groupId, "badm-1");
+  assert.equal(matchSet.data.skipAutoAttendance, true);
+  assert.equal(requests.length, 0);
+  assert.equal(copied.length, 0);
+  const rendered = JSON.stringify(host.render());
+  assert.equal(rendered.includes("Chỉ tính tiền (nháp)"), false);
+  assert.equal(rendered.includes("Tính tiền & công khai"), false);
+  assert.ok(rendered.includes("Tạo trận (không điểm danh)") || rendered.includes("Tạo buổi (không điểm danh)"));
+});
+
 test("badminton loads one participant list and divides costs equally", async () => {
   const saved = { ...config, expenseItems: [{ id: "court", description: "Court", amount: 60001, type: "SHARED", exemptMemberIds: [], teamPercents: { A: 50, B: 50 } }], teamsConfig: [
     { id: "A", name: "Old A", percent: 50, members: [{ id: "a" }] },

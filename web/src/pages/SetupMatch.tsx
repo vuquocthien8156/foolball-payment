@@ -282,7 +282,11 @@ const SetupMatch = () => {
   const [teamCount, setTeamCount] = useState<2 | 3>(2);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isCreatingWithAttendance, setIsCreatingWithAttendance] =
+    useState(false);
+  const [isCreatingWithoutAttendance, setIsCreatingWithoutAttendance] =
+    useState(false);
+  const [hasPaidShares, setHasPaidShares] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
   const isBusy =
@@ -291,7 +295,8 @@ const SetupMatch = () => {
     isSaving ||
     isSavingConfig ||
     isUpdatingConfig ||
-    isCreating;
+    isCreatingWithAttendance ||
+    isCreatingWithoutAttendance;
   const [existingStatus, setExistingStatus] = useState<
     "PENDING" | "COMPLETED" | "PUBLISHED" | undefined
   >("PENDING");
@@ -521,6 +526,17 @@ const SetupMatch = () => {
           const attendanceSet = new Set<string>();
           attendanceSnapshot.forEach((doc) => attendanceSet.add(doc.id));
           setAttendance(attendanceSet);
+
+          const sharesCollectionRef = collection(
+            db,
+            "matches",
+            matchId,
+            "shares",
+          );
+          const sharesSnapshot = await getDocs(sharesCollectionRef);
+          setHasPaidShares(
+            sharesSnapshot.docs.some((doc) => doc.data().status === "PAID"),
+          );
         } else {
           toast({
             variant: "destructive",
@@ -531,6 +547,7 @@ const SetupMatch = () => {
           return;
         }
       } else {
+        setHasPaidShares(false);
         const configRef = doc(db, ...settingsDocPath(groupId, "lastMatch"));
         let configSnap = await getDoc(configRef);
         if (!configSnap.exists() && groupId === DEFAULT_GROUP_ID) {
@@ -1274,8 +1291,12 @@ const SetupMatch = () => {
     }
   };
 
-  const handleCreateMatchForAttendance = async () => {
-    setIsCreating(true);
+  const handleCreateMatch = async (withAttendance = true) => {
+    if (withAttendance) {
+      setIsCreatingWithAttendance(true);
+    } else {
+      setIsCreatingWithoutAttendance(true);
+    }
     try {
       const totalAmount = expenseItems
         .filter((e) => e.type !== "SUBSIDY")
@@ -1295,7 +1316,7 @@ const SetupMatch = () => {
         sufficientPlayerCount:
           sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
-        skipAutoAttendance,
+        skipAutoAttendance: withAttendance ? skipAutoAttendance : true,
         createdAt: serverTimestamp(),
         teamsConfig: activeTeams.map((t) => ({
           id: t.id,
@@ -1309,31 +1330,52 @@ const SetupMatch = () => {
         })),
       };
       await setDoc(matchRef, matchData);
-      const attendanceLink = `${window.location.origin}${groupPath("public/attendance")}`;
-      navigator.clipboard.writeText(attendanceLink);
-      toast({
-        title: "Tạo thành công!",
-        description:
-          "Đã tạo trận điểm danh. Link điểm danh chung đã được sao chép.",
-      });
-      // Fire push notification cho members
-      postApiJson("/notify/attendance-created", {
-        matchId: matchRef.id,
-        groupId,
-      }).catch((error) =>
-        console.error("Failed to send attendance created notification", error),
-      );
+
+      if (withAttendance) {
+        const attendanceLink = `${window.location.origin}${groupPath("public/attendance")}`;
+        try {
+          await navigator.clipboard.writeText(attendanceLink);
+        } catch (clipErr) {
+          console.warn("Could not copy to clipboard:", clipErr);
+        }
+        toast({
+          title: "Tạo thành công!",
+          description: usesTeams
+            ? "Đã tạo trận điểm danh. Link điểm danh chung đã được sao chép."
+            : "Đã tạo buổi điểm danh. Link điểm danh chung đã được sao chép.",
+        });
+        // Fire push notification cho members
+        postApiJson("/notify/attendance-created", {
+          matchId: matchRef.id,
+          groupId,
+        }).catch((error) =>
+          console.error("Failed to send attendance created notification", error),
+        );
+      } else {
+        toast({
+          title: "Tạo thành công!",
+          description: usesTeams
+            ? "Đã tạo trận đấu mới (chưa mở điểm danh)."
+            : "Đã tạo buổi chơi mới (chưa mở điểm danh).",
+        });
+      }
+
       navigate(groupPath(`admin/setup/${matchRef.id}`));
     } catch (error: any) {
-      console.error("Failed to create match for attendance:", error);
+      console.error("Failed to create match:", error);
       toast({
         variant: "destructive",
         title: "Lỗi",
-        description: error?.message ? `Không thể tạo trận đấu: ${error.message}` : "Không thể tạo trận đấu.",
+        description: error?.message ? `Không thể tạo: ${error.message}` : "Không thể tạo trận đấu.",
       });
     } finally {
-      setIsCreating(false);
+      setIsCreatingWithAttendance(false);
+      setIsCreatingWithoutAttendance(false);
     }
+  };
+
+  const handleCreateMatchForAttendance = async () => {
+    return handleCreateMatch(true);
   };
 
   const handleSave = async (publish = false) => {
@@ -3798,108 +3840,145 @@ const SetupMatch = () => {
           {/* Nhóm 2: Thao tác buổi chơi & Tính tiền */}
           <div className="flex flex-wrap items-center justify-end gap-2">
             {!matchId && (
-              <TooltipProvider delayDuration={150}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={handleCreateMatchForAttendance}
-                      disabled={isBusy}
-                      variant="default"
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
-                    >
-                      {isCreating ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <LinkIcon className="h-4 w-4 mr-2" />
-                      )}
-                      {usesTeams
-                        ? "Tạo trận & mở điểm danh"
-                        : "Tạo buổi & mở điểm danh"}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-[260px]">
-                    <p>
-                      Tạo buổi chơi mới ở trạng thái chờ điểm danh (PENDING) và
-                      tự động copy link điểm danh để gửi cho nhóm
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        onClick={() => void handleCreateMatch(false)}
+                        disabled={isBusy}
+                        variant="outline"
+                      >
+                        {isCreatingWithoutAttendance ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4 mr-2" />
+                        )}
+                        {usesTeams
+                          ? "Tạo trận (không điểm danh)"
+                          : "Tạo buổi (không điểm danh)"}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[260px]">
+                      <p>
+                        Tạo trận mới mà <b>không</b> mở cổng điểm danh và không
+                        gửi thông báo cho nhóm
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        onClick={() => void handleCreateMatch(true)}
+                        disabled={isBusy}
+                        variant="default"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+                      >
+                        {isCreatingWithAttendance ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <LinkIcon className="h-4 w-4 mr-2" />
+                        )}
+                        {usesTeams
+                          ? "Tạo trận & mở điểm danh"
+                          : "Tạo buổi & mở điểm danh"}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[260px]">
+                      <p>
+                        Tạo buổi chơi mới ở trạng thái chờ điểm danh (PENDING) và
+                        tự động copy link điểm danh để gửi cho nhóm
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </>
             )}
 
             {matchId && (
-              <TooltipProvider delayDuration={150}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={handleUpdateMatchConfig}
-                      disabled={isBusy}
-                      variant="secondary"
-                    >
-                      {isUpdatingConfig ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Save className="h-4 w-4 mr-2" />
-                      )}
-                      Lưu thay đổi
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-[260px]">
-                    <p>
-                      Lưu lại các thông tin sân, giờ, người tham gia, chi phí
-                      vừa sửa nhưng <b>CHƯA tính tiền</b>
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <>
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        onClick={handleUpdateMatchConfig}
+                        disabled={isBusy}
+                        variant="secondary"
+                      >
+                        {isUpdatingConfig ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4 mr-2" />
+                        )}
+                        Lưu thay đổi
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[260px]">
+                      <p>
+                        Lưu lại các thông tin sân, giờ, người tham gia, chi phí
+                        vừa sửa nhưng <b>CHƯA tính tiền</b>
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button
+                          onClick={() => void handleSave(false)}
+                          variant="outline"
+                          disabled={isBusy || hasPaidShares}
+                        >
+                          Chỉ tính tiền (nháp)
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[260px]">
+                      <p>
+                        {hasPaidShares
+                          ? "Trận đấu đã có thành viên thanh toán tiền. Không thể tính lại hóa đơn."
+                          : "Tính tiền chia cho từng người và lưu bản nháp (COMPLETED) để kiểm tra, chưa công khai cho thành viên thấy bill"}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+
+                <TooltipProvider delayDuration={150}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span>
+                        <Button
+                          onClick={() => void handleSave(true)}
+                          disabled={isBusy || hasPaidShares}
+                          className="bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white shadow font-medium"
+                        >
+                          {isSaving ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Đang lưu...
+                            </>
+                          ) : (
+                            "Tính tiền & công khai"
+                          )}
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[260px]">
+                      <p>
+                        {hasPaidShares
+                          ? "Trận đấu đã có thành viên thanh toán tiền. Không thể tính lại hóa đơn."
+                          : "Chốt tính tiền và công khai hóa đơn (PUBLISHED) để tất cả thành viên có thể vào xem bill và thanh toán ngay"}
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </>
             )}
-
-            <TooltipProvider delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => void handleSave(false)}
-                    variant="outline"
-                    disabled={isBusy}
-                  >
-                    Chỉ tính tiền (nháp)
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-[260px]">
-                  <p>
-                    Tính tiền chia cho từng người và lưu bản nháp (COMPLETED) để
-                    kiểm tra, <b>chưa công khai</b> cho thành viên thấy bill
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
-            <TooltipProvider delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => void handleSave(true)}
-                    disabled={isBusy}
-                    className="bg-gradient-to-r from-pink-500 to-rose-600 hover:from-pink-600 hover:to-rose-700 text-white shadow font-medium"
-                  >
-                    {isSaving ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Đang lưu...
-                      </>
-                    ) : (
-                      "Tính tiền & công khai"
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-[260px]">
-                  <p>
-                    Chốt tính tiền và công khai hóa đơn (PUBLISHED) để tất cả
-                    thành viên có thể vào xem bill và thanh toán ngay
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
           </div>
         </div>
       </div>
