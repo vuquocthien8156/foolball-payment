@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +34,8 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
 }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isPaid, setIsPaid] = useState(false);
+  const closeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Convert standard PayOS web checkout URL to embedded URL with required redirect_uri
   const embeddedUrl = React.useMemo(() => {
@@ -45,17 +47,68 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
     return `${base}${separator}redirect_uri=${targetReturnUrl}`;
   }, [checkoutUrl, returnUrl]);
 
-  // Reset loading state whenever dialog opens
+  // Clean up any pending close timers on unmount
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, []);
+
+  // Reset loading and celebration state whenever dialog opens
   useEffect(() => {
     if (open) {
       setIsLoading(true);
       setIsVerifying(false);
+      setIsPaid(false);
     }
   }, [open, checkoutUrl]);
 
+  // Common completion handler: shows celebration overlay, fires success, and closes dialog
+  const handlePaymentSuccess = () => {
+    if (isPaid) return;
+    setIsPaid(true);
+    toast({
+      title: "Thanh toán thành công!",
+      description: "Giao dịch đã được hệ thống ghi nhận.",
+    });
+
+    closeTimerRef.current = setTimeout(() => {
+      if (onSuccess) onSuccess();
+      onOpenChange(false);
+    }, 1200);
+  };
+
+  // Smart Auto-Polling: checks payment status every 3.5s in background while modal is open
+  useEffect(() => {
+    if (!open || !orderCode || isPaid) return;
+
+    let pollCount = 0;
+    const maxPolls = 35; // ~2 minutes of polling
+
+    const timer = setInterval(async () => {
+      pollCount++;
+      if (pollCount > maxPolls) {
+        clearInterval(timer);
+        return;
+      }
+
+      try {
+        const res = await verifyPayment(orderCode);
+        if (res?.status === "PAID") {
+          clearInterval(timer);
+          handlePaymentSuccess();
+        }
+      } catch {
+        // Silently continue polling on transient network drops
+      }
+    }, 3500);
+
+    return () => clearInterval(timer);
+  }, [open, orderCode, isPaid]);
+
   // Listen to PayOS postMessage events from the embedded iframe
   useEffect(() => {
-    if (!open) return;
+    if (!open || isPaid) return;
 
     const handleMessage = async (e: MessageEvent) => {
       const allowedOrigins = [
@@ -73,8 +126,7 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
           if (orderCode) {
             await verifyPayment(orderCode).catch(() => {});
           }
-          if (onSuccess) onSuccess();
-          onOpenChange(false);
+          handlePaymentSuccess();
         }
       } catch {
         // Not a JSON message, safely ignore
@@ -83,20 +135,16 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [open, orderCode, onSuccess, onOpenChange]);
+  }, [open, orderCode, isPaid]);
 
+  // Manual verification handler ("Đã chuyển tiền" button)
   const handleManualVerify = async () => {
-    if (!orderCode) return;
+    if (!orderCode || isVerifying || isPaid) return;
     setIsVerifying(true);
     try {
       const res = await verifyPayment(orderCode);
       if (res?.status === "PAID") {
-        toast({
-          title: "Thanh toán thành công!",
-          description: "Giao dịch đã được hệ thống xác nhận.",
-        });
-        if (onSuccess) onSuccess();
-        onOpenChange(false);
+        handlePaymentSuccess();
       } else {
         toast({
           title: "Chưa nhận được giao dịch",
@@ -117,7 +165,7 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
   const handleDialogChange = async (nextOpen: boolean) => {
     if (!nextOpen) {
       // Proactively check status upon dialog closing just in case user paid via mobile banking app
-      if (orderCode) {
+      if (orderCode && !isPaid) {
         try {
           const res = await verifyPayment(orderCode);
           if (res?.status === "PAID") {
@@ -180,7 +228,8 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
 
         {/* Embedded Iframe Body */}
         <div className="relative flex-1 w-full h-full bg-slate-50 dark:bg-slate-950 overflow-hidden">
-          {isLoading && (
+          {/* Loading Placeholder */}
+          {isLoading && !isPaid && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/90 backdrop-blur-xs z-10 space-y-3 px-6 text-center animate-in fade-in-50 duration-200">
               <div className="relative flex items-center justify-center">
                 <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-600 animate-pulse">
@@ -197,13 +246,29 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
             </div>
           )}
 
+          {/* Celebration Success Overlay */}
+          {isPaid && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/95 backdrop-blur-md p-6 text-center animate-in fade-in zoom-in-95 duration-300">
+              <div className="relative mb-4">
+                <div className="w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shadow-lg">
+                  <CheckCircle2 className="h-10 w-10 text-emerald-600 dark:text-emerald-400 animate-in zoom-in-50 duration-500" />
+                </div>
+                <span className="animate-ping absolute inset-0 rounded-full bg-emerald-400/20"></span>
+              </div>
+              <h3 className="text-lg font-bold text-foreground tracking-tight">Thanh toán thành công!</h3>
+              <p className="text-xs text-muted-foreground mt-1 max-w-[260px]">
+                Giao dịch đã được hệ thống xác nhận. Đang cập nhật dữ liệu...
+              </p>
+            </div>
+          )}
+
           {embeddedUrl ? (
             <iframe
               id="payos-checkout-iframe"
               src={embeddedUrl}
               title="PayOS Checkout"
               className={`w-full h-full border-0 transition-opacity duration-300 ${
-                isLoading ? "opacity-0" : "opacity-100"
+                isLoading || isPaid ? "opacity-0" : "opacity-100"
               }`}
               allow="clipboard-write; payment"
               onLoad={() => setIsLoading(false)}
@@ -218,15 +283,18 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
         {/* Action Footer */}
         <div className="px-4 py-2.5 border-t bg-muted/20 flex flex-row items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground truncate">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-            <span className="truncate">Thanh toán bảo mật qua PayOS 24/7</span>
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span className="truncate">Tự động nhận diện thanh toán...</span>
           </div>
           {orderCode ? (
             <Button
               type="button"
               variant="secondary"
               size="sm"
-              disabled={isVerifying}
+              disabled={isVerifying || isPaid}
               onClick={handleManualVerify}
               className="h-7 text-xs font-medium px-2.5 shrink-0 gap-1 rounded-lg shadow-2xs"
             >
@@ -243,3 +311,4 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
     </Dialog>
   );
 };
+
