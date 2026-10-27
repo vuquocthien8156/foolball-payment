@@ -5,7 +5,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "./contexts/AuthContext";
-import { PWAInstallProvider } from "./contexts/PWAInstallContext";
 import { useGroupRole } from "./hooks/useGroupRole";
 import { usePlatformAccount } from "./hooks/usePlatformAccount";
 import { signOut } from "firebase/auth";
@@ -171,8 +170,7 @@ const App = () => {
   if (loading || rolesLoading || platformLoading) return <LoadingSplash />;
 
   return (
-    <PWAInstallProvider>
-      <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <Toaster />
           <Sonner />
@@ -308,7 +306,6 @@ const App = () => {
           </BrowserRouter>
         </TooltipProvider>
       </QueryClientProvider>
-    </PWAInstallProvider>
   );
 };
 

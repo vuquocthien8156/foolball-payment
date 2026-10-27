@@ -18,6 +18,30 @@
       "site": "thienbun-payment",
       "public": "web/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "headers": [
+        {
+          "source": "/(manifest.json|manifest.webmanifest)",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/manifest+json; charset=utf-8"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/(sw.js|firebase-messaging-sw.js|registerSW.js)",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        }
+      ],
       "rewrites": [
         {
           "source": "/api/**",
@@ -34,6 +58,30 @@
       "site": "foolball-payment",
       "public": "web/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "headers": [
+        {
+          "source": "/(manifest.json|manifest.webmanifest)",
+          "headers": [
+            {
+              "key": "Content-Type",
+              "value": "application/manifest+json; charset=utf-8"
+            },
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        },
+        {
+          "source": "/(sw.js|firebase-messaging-sw.js|registerSW.js)",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache, no-store, must-revalidate"
+            }
+          ]
+        }
+      ],
       "rewrites": [
         {
           "source": "/api/**",

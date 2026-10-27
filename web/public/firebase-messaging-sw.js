@@ -38,3 +38,6 @@ messaging.onBackgroundMessage((payload) => {
 
   self.registration.showNotification(notificationTitle, notificationOptions);
 });
+
+// No-op fetch handler to satisfy PWA installation criteria across browsers
+self.addEventListener("fetch", () => {});

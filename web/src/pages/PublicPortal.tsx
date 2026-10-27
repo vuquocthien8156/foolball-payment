@@ -3,6 +3,7 @@ import { hasFeature } from "@/lib/features";
 import { useGroup, useGroupPath } from "@/contexts/GroupContext";
 import { getApiBaseUrl } from "@/lib/api";
 import { PayOSCheckoutDialog } from "@/components/PayOSCheckoutDialog";
+import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import {
   Card,
   CardContent,
@@ -231,6 +232,9 @@ const SharedBillsPublicPortal = ({
             Trang công khai theo dõi và thanh toán các khoản thu của nhóm.
           </p>
         </header>
+
+        {/* PWA Install Banner */}
+        <PWAInstallPrompt variant="banner" />
 
         {/* Member Debt Consolidation & Pay Box */}
         <Card className="border-primary/30 shadow-md bg-white overflow-hidden">
@@ -827,6 +831,9 @@ const PublicPortal = () => {
             Vui lòng chọn hành động bạn muốn thực hiện.
           </p>
         </div>
+
+        {/* PWA Install Banner */}
+        <PWAInstallPrompt variant="banner" />
 
         {hasFeature(groupId, group, "ratings") && (
           <Card className="shadow-card overflow-hidden">

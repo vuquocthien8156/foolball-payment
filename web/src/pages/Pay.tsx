@@ -83,7 +83,7 @@ import {
   fetchStoredMemberToken,
   removeNotificationToken,
 } from "@/lib/notifications";
-import { usePWAInstall } from "@/contexts/PWAInstallContext";
+import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
 import {
   Bar,
   BarChart as RechartsBarChart,
@@ -179,7 +179,6 @@ declare global {
 const Pay = () => {
   const { groupId, group } = useGroup();
   const usesTeams = group?.sport !== "badminton";
-  const { canInstall, installPWA } = usePWAInstall();
   const [members, setMembers] = useState<Member[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState<string>("");
   const [isGroupPayment, setIsGroupPayment] = useState(false);
@@ -1088,7 +1087,11 @@ const Pay = () => {
 
   return (
     <div className="min-h-screen bg-primary flex justify-center p-2 sm:p-4">
-      <div className="w-full max-w-2xl py-8">
+      <div className="w-full max-w-2xl py-8 space-y-4">
+        <PWAInstallPrompt
+          variant="banner"
+          className="bg-white/95 text-slate-900 border-white/20 shadow-md backdrop-blur-sm"
+        />
         <Card className="shadow-card-hover">
           <CardHeader className="text-center px-4 pt-6 sm:px-6 sm:pt-8">
             <div className="mx-auto mb-4 h-14 w-14 sm:h-16 sm:w-16 rounded-full bg-primary flex items-center justify-center shadow-card">
@@ -1112,15 +1115,10 @@ const Pay = () => {
             ) : ( */}
             {(
               <>
-                {canInstall && (
-                  <Button
-                    onClick={installPWA}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700"
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Cài đặt ứng dụng
-                  </Button>
-                )}
+                <PWAInstallPrompt
+                  variant="button"
+                  className="w-full h-10 bg-indigo-600 hover:bg-indigo-700 text-white border-0 hover:text-white"
+                />
 
                 {/* [RATING_FLOW_DISABLED] — Top Payers Card hidden
                 <Card>
