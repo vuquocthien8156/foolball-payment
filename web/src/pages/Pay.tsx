@@ -62,6 +62,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { toast } from "@/hooks/use-toast";
+import { PayOSCheckoutDialog } from "@/components/PayOSCheckoutDialog";
 import {
   collection,
   doc,
@@ -202,6 +203,12 @@ const Pay = () => {
   const [isRating, setIsRating] = useState(false);
   const [ratingTargets, setRatingTargets] = useState<Share[]>([]);
   const [ratedMatchIds, setRatedMatchIds] = useState<Set<string>>(new Set());
+  const [checkoutModal, setCheckoutModal] = useState<{
+    open: boolean;
+    checkoutUrl: string;
+    orderCode?: number | string;
+    amount?: number;
+  }>({ open: false, checkoutUrl: "" });
 
   const apiBaseUrl = useMemo(() => {
     const envUrl = import.meta.env.VITE_API_URL || "";
@@ -897,7 +904,12 @@ const Pay = () => {
       }
 
       if (data.checkoutUrl) {
-        window.location.href = data.checkoutUrl;
+        setCheckoutModal({
+          open: true,
+          checkoutUrl: data.checkoutUrl,
+          orderCode: data.orderCode,
+          amount: totalAmount,
+        });
       } else {
         throw new Error("Không tìm thấy URL thanh toán.");
       }
@@ -998,7 +1010,12 @@ const Pay = () => {
         });
 
         if (paymentLinkData.checkoutUrl) {
-          window.location.href = paymentLinkData.checkoutUrl;
+          setCheckoutModal({
+            open: true,
+            checkoutUrl: paymentLinkData.checkoutUrl,
+            orderCode: paymentLinkData.orderCode,
+            amount: totalAmount,
+          });
         } else {
           throw new Error("Không tìm thấy URL thanh toán.");
         }
@@ -1621,6 +1638,21 @@ const Pay = () => {
             {/* [RATING_FLOW_DISABLED] — end of original ternary closing was here */}
           </CardContent>
         </Card>
+
+        <PayOSCheckoutDialog
+          open={checkoutModal.open}
+          onOpenChange={(open) => setCheckoutModal((prev) => ({ ...prev, open }))}
+          checkoutUrl={checkoutModal.checkoutUrl}
+          orderCode={checkoutModal.orderCode}
+          amount={checkoutModal.amount}
+          onSuccess={() => {
+            toast({
+              title: "Thanh toán thành công!",
+              description: "Giao dịch đã được xác nhận vào hệ thống.",
+            });
+            void fetchUnpaidShares();
+          }}
+        />
       </div>
     </div>
   );

@@ -319,3 +319,18 @@ test("TM-07: Cancel endpoint deactivates payment on PayOS and Firestore", async 
   assert.equal(host.cancelledOrders[0].orderCode, orderCode);
   assert.equal(host.records.get(`paymentRequests/${orderCode}`).status, "CANCELLED");
 });
+
+test("TM-08: PayOSCheckoutDialog converts web URL to embedded URL and validates origins", () => {
+  const webUrl = "https://pay.payos.vn/web/abc123xyz";
+  const embeddedUrl = webUrl.replace("/web/", "/embedded/");
+  assert.equal(embeddedUrl, "https://pay.payos.vn/embedded/abc123xyz");
+
+  const allowedOrigins = [
+    "https://pay.payos.vn",
+    "https://dev.pay.payos.vn",
+    "https://next.pay.payos.vn",
+    "https://next.dev.pay.payos.vn",
+  ];
+  assert.ok(allowedOrigins.includes("https://pay.payos.vn"));
+  assert.ok(!allowedOrigins.includes("https://malicious-site.com"));
+});

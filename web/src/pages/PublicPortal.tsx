@@ -2,6 +2,7 @@ import { groupIdOf, scopedKey, groupKindOf } from "@/lib/groups";
 import { hasFeature } from "@/lib/features";
 import { useGroup, useGroupPath } from "@/contexts/GroupContext";
 import { getApiBaseUrl } from "@/lib/api";
+import { PayOSCheckoutDialog } from "@/components/PayOSCheckoutDialog";
 import {
   Card,
   CardContent,
@@ -67,13 +68,23 @@ const SharedBillsPublicPortal = ({
   const [selectedMemberId, setSelectedMemberId] = useState<string>("");
   const [selectedAllocationKeys, setSelectedAllocationKeys] = useState<Set<string>>(new Set());
   const [isPayingPayOS, setIsPayingPayOS] = useState(false);
+  const [checkoutModal, setCheckoutModal] = useState<{
+    open: boolean;
+    checkoutUrl: string;
+    orderCode?: number | string;
+    amount?: number;
+  }>({ open: false, checkoutUrl: "" });
 
-  useEffect(() => {
+  const loadData = () => {
     fetch(`${getApiBaseUrl()}/public/${groupId}/shared-bills`)
       .then((res) => res.json())
       .then((res) => setData(res))
       .catch((e) => console.error(e))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadData();
   }, [groupId]);
 
   const bills = data?.bills || [];
@@ -177,7 +188,12 @@ const SharedBillsPublicPortal = ({
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error || "Không thể tạo liên kết thanh toán PayOS");
       if (resData.checkoutUrl) {
-        window.location.href = resData.checkoutUrl;
+        setCheckoutModal({
+          open: true,
+          checkoutUrl: resData.checkoutUrl,
+          orderCode: resData.orderCode,
+          amount: totalSelected,
+        });
       }
     } catch (err: any) {
       alert(err.message || "Lỗi tạo thanh toán");
@@ -467,6 +483,18 @@ const SharedBillsPublicPortal = ({
           )}
         </div>
       </div>
+
+      <PayOSCheckoutDialog
+        open={checkoutModal.open}
+        onOpenChange={(open) => setCheckoutModal((prev) => ({ ...prev, open }))}
+        checkoutUrl={checkoutModal.checkoutUrl}
+        orderCode={checkoutModal.orderCode}
+        amount={checkoutModal.amount}
+        onSuccess={() => {
+          setSelectedAllocationKeys(new Set());
+          loadData();
+        }}
+      />
     </div>
   );
 };
