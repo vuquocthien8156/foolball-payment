@@ -711,7 +711,9 @@ const SetupMatch = () => {
                 ? item.type || "SHARED"
                 : item.type === "INDIVIDUAL"
                   ? "INDIVIDUAL"
-                  : "EQUAL",
+                  : item.type === "SUBSIDY"
+                    ? "SUBSIDY"
+                    : "EQUAL",
               teamPercents: item.teamPercents || { ...initialTeamPercents },
             })),
           );
@@ -1113,17 +1115,23 @@ const SetupMatch = () => {
       });
     });
 
-    // Adjust for rounding errors
+    // Adjust only for tiny rounding errors (e.g. integer division remainders <= 100 VND)
+    // Large differences mean team members are not yet assigned, which is NOT a rounding error.
+    // Crucially: NEVER adjust rounding error onto a SUBSIDY or INDIVIDUAL payer!
     const calculatedTotal = Object.values(memberAmounts).reduce(
       (sum, item) => sum + item.totalAmount,
       0,
     );
     const diff = grandMatchTotal - calculatedTotal;
-    if (diff !== 0 && Object.keys(memberAmounts).length > 0) {
-      const eligibleAdjustId =
-        Object.keys(memberAmounts).find(
-          (id) => !expenseItems.some((e) => e.type === "SUBSIDY" && e.targetMemberId === id)
-        ) || Object.keys(memberAmounts)[0];
+    if (Math.abs(diff) > 0 && Math.abs(diff) <= 100) {
+      const eligibleAdjustId = Object.keys(memberAmounts).find(
+        (id) =>
+          !expenseItems.some(
+            (e) =>
+              (e.type === "SUBSIDY" || e.type === "INDIVIDUAL") &&
+              e.targetMemberId === id,
+          ),
+      );
       if (eligibleAdjustId && memberAmounts[eligibleAdjustId]) {
         memberAmounts[eligibleAdjustId].totalAmount += diff;
         const lastDetail =
@@ -1792,18 +1800,22 @@ const SetupMatch = () => {
         });
       });
 
-      // Recalculate total and adjust for rounding errors
+      // Recalculate total and adjust for small rounding errors (<= 100 VND)
+      // Never apply rounding differences to SUBSIDY or INDIVIDUAL shares!
       const calculatedTotal = shares.reduce((sum, s) => sum + s.amount, 0);
       const diff = numericTotalAmount - calculatedTotal;
-      if (diff !== 0 && shares.length > 0) {
-        const eligibleShare =
-          shares.find(
-            (s) =>
-              !expenseItems.some(
-                (e) => e.type === "SUBSIDY" && e.targetMemberId === s.memberId,
-              ),
-          ) || shares[shares.length - 1];
-        eligibleShare.amount += diff;
+      if (Math.abs(diff) > 0 && Math.abs(diff) <= 100 && shares.length > 0) {
+        const eligibleShare = shares.find(
+          (s) =>
+            !expenseItems.some(
+              (e) =>
+                (e.type === "SUBSIDY" || e.type === "INDIVIDUAL") &&
+                e.targetMemberId === s.memberId,
+            ),
+        );
+        if (eligibleShare) {
+          eligibleShare.amount += diff;
+        }
       }
 
       const batch = writeBatch(db);
