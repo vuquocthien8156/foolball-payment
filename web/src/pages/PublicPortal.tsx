@@ -73,6 +73,7 @@ const SharedBillsPublicPortal = ({
     checkoutUrl: string;
     orderCode?: number | string;
     amount?: number;
+    returnUrl?: string;
   }>({ open: false, checkoutUrl: "" });
 
   const loadData = () => {
@@ -193,6 +194,7 @@ const SharedBillsPublicPortal = ({
           checkoutUrl: resData.checkoutUrl,
           orderCode: resData.orderCode,
           amount: totalSelected,
+          returnUrl: resData.returnUrl,
         });
       }
     } catch (err: any) {
@@ -490,6 +492,7 @@ const SharedBillsPublicPortal = ({
         checkoutUrl={checkoutModal.checkoutUrl}
         orderCode={checkoutModal.orderCode}
         amount={checkoutModal.amount}
+        returnUrl={checkoutModal.returnUrl}
         onSuccess={() => {
           setSelectedAllocationKeys(new Set());
           loadData();

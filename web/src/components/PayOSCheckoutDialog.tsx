@@ -17,6 +17,7 @@ interface PayOSCheckoutDialogProps {
   checkoutUrl: string;
   orderCode?: number | string;
   amount?: number;
+  returnUrl?: string;
   onSuccess?: () => void;
   onClose?: () => void;
 }
@@ -27,17 +28,22 @@ export const PayOSCheckoutDialog: React.FC<PayOSCheckoutDialogProps> = ({
   checkoutUrl,
   orderCode,
   amount,
+  returnUrl,
   onSuccess,
   onClose,
 }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // Convert standard PayOS web checkout URL to embedded URL
+  // Convert standard PayOS web checkout URL to embedded URL with required redirect_uri
   const embeddedUrl = React.useMemo(() => {
     if (!checkoutUrl) return "";
-    return checkoutUrl.replace("/web/", "/embedded/");
-  }, [checkoutUrl]);
+    const base = checkoutUrl.replace("/web/", "/embedded/");
+    const targetReturnUrl = returnUrl || (typeof window !== "undefined" ? window.location.href : "");
+    if (!targetReturnUrl) return base;
+    const separator = base.includes("?") ? "&" : "?";
+    return `${base}${separator}redirect_uri=${targetReturnUrl}`;
+  }, [checkoutUrl, returnUrl]);
 
   // Reset loading state whenever dialog opens
   useEffect(() => {

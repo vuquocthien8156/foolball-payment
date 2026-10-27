@@ -208,6 +208,7 @@ const Pay = () => {
     checkoutUrl: string;
     orderCode?: number | string;
     amount?: number;
+    returnUrl?: string;
   }>({ open: false, checkoutUrl: "" });
 
   const apiBaseUrl = useMemo(() => {
@@ -909,6 +910,7 @@ const Pay = () => {
           checkoutUrl: data.checkoutUrl,
           orderCode: data.orderCode,
           amount: totalAmount,
+          returnUrl: data.returnUrl,
         });
       } else {
         throw new Error("Không tìm thấy URL thanh toán.");
@@ -1015,6 +1017,7 @@ const Pay = () => {
             checkoutUrl: paymentLinkData.checkoutUrl,
             orderCode: paymentLinkData.orderCode,
             amount: totalAmount,
+            returnUrl: paymentLinkData.returnUrl,
           });
         } else {
           throw new Error("Không tìm thấy URL thanh toán.");
@@ -1645,6 +1648,7 @@ const Pay = () => {
           checkoutUrl={checkoutModal.checkoutUrl}
           orderCode={checkoutModal.orderCode}
           amount={checkoutModal.amount}
+          returnUrl={checkoutModal.returnUrl}
           onSuccess={() => {
             toast({
               title: "Thanh toán thành công!",

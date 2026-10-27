@@ -201,6 +201,7 @@ test("TM-01: Create payment link returns fields needed for in-app popup", async 
   assert.ok(payment.orderCode, "orderCode must exist");
   assert.equal(response.body.checkoutUrl, `https://checkout.test/order/${payment.orderCode}`);
   assert.equal(response.body.orderCode, payment.orderCode);
+  assert.ok(response.body.returnUrl, "returnUrl must be returned for embedded iframe redirect_uri");
 });
 
 test("TM-02: Verify endpoint settles debts when PayOS reports PAID", async () => {
@@ -320,10 +321,12 @@ test("TM-07: Cancel endpoint deactivates payment on PayOS and Firestore", async 
   assert.equal(host.records.get(`paymentRequests/${orderCode}`).status, "CANCELLED");
 });
 
-test("TM-08: PayOSCheckoutDialog converts web URL to embedded URL and validates origins", () => {
+test("TM-08: PayOSCheckoutDialog converts web URL to embedded URL with required redirect_uri", () => {
   const webUrl = "https://pay.payos.vn/web/abc123xyz";
-  const embeddedUrl = webUrl.replace("/web/", "/embedded/");
-  assert.equal(embeddedUrl, "https://pay.payos.vn/embedded/abc123xyz");
+  const returnUrl = "https://foolball-payment.web.app/public/payment-success";
+  const base = webUrl.replace("/web/", "/embedded/");
+  const embeddedUrl = `${base}?redirect_uri=${returnUrl}`;
+  assert.equal(embeddedUrl, "https://pay.payos.vn/embedded/abc123xyz?redirect_uri=https://foolball-payment.web.app/public/payment-success");
 
   const allowedOrigins = [
     "https://pay.payos.vn",

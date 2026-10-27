@@ -262,6 +262,7 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
         checkoutUrl: paymentLink.checkoutUrl,
         orderCode,
         amount: totalAmount,
+        returnUrl: paymentData.returnUrl,
       });
     } catch (err) {
       console.error("PayOS bill checkout error:", err);
@@ -414,7 +415,7 @@ apiRoutes.post("/create-payment-link", async (req, res) => {
     }
 
     // Return the entire payment link object for the embedded checkout
-    res.json({ ...paymentLink, orderCode });
+    res.json({ ...paymentLink, orderCode, returnUrl: paymentData.returnUrl });
   } catch (error) {
     console.error("Error creating payment link:", error);
     res
