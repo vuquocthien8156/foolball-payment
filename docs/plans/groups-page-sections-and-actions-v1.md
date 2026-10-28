@@ -22,9 +22,28 @@ Authorized: user requested visual separation of Sport groups vs. Shared Bills gr
      - **Primary CTA**: `[+ Tạo nhóm mới]` (Plus icon, prominent primary button).
      - **User Account Menu**: Avatar dropdown containing user profile info, `Quản lý Tài khoản` (if owner), divider, and `Đăng xuất` (with LogOut icon in destructive red).
 
+3. **Quick Public Links Access & Settlement History Resolution**:
+   - **Card Interactive Public Links**:
+     - Direct open in new tab (`/g/:groupId/public`) and copy button directly beside the slug `/g/:groupId`.
+     - Dedicated `Public Links` dropdown menu with 1-click open and copy for:
+       - 🌐 Public Portal (`/g/:groupId/public`)
+       - 💳 Direct Pay (`/g/:groupId/public/pay`)
+       - 📋 Attendance (`/g/:groupId/public/attendance`) (sports)
+       - 🏆 Ratings (`/g/:groupId/public/ratings`) (sports)
+     - 3-dot dropdown menu options for opening and copying public links.
+     - Root redirect: `/g/:groupId` in `App.tsx` redirects automatically to `/g/:groupId/public`.
+   - **Settlement History Payer Resolution**:
+     - `GET /settlement/history` in `platformRoutes.js` resolves payer name dynamically across `members` collection and group managers for past and present matches.
+     - `POST /settlement/batch-settle` captures and snapshots `paidByMemberName`.
+     - History list displays the verified payer (`Người ứng: <Tên>`) instead of "Không rõ".
+
 ## 2. Evidence & Verification
 
-- Modified: `web/src/pages/Groups.tsx`
-- Unit tests: 220/220 automated unit tests pass.
+- Modified:
+  - `web/src/pages/Groups.tsx`
+  - `web/src/App.tsx`
+  - `server/lib/platformRoutes.js`
+  - `web/tests/settlement-net-offset.test.mjs`
+- Unit tests: 235/235 automated unit tests pass.
 - Build: `npm run build` completed cleanly without errors.
-- Deployed live to Firebase Hosting.
+- Deployed live to Firebase Cloud Functions and Hosting.
