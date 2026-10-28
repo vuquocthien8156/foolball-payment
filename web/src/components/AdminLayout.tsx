@@ -657,25 +657,22 @@ const AdminLayout = () => {
                             </CommandGroup>
                           </>
                         )}
-                        {account && (
-                          <>
-                            <CommandSeparator />
-                            <CommandGroup>
-                              <CommandItem
-                                value="quan ly tat ca nhom nen tang platform"
-                                onSelect={() => {
-                                  setIsGroupSwitcherOpen(false);
-                                  navigate("/platform");
-                                }}
-                                className="flex items-center gap-2 text-xs text-muted-foreground py-2 cursor-pointer"
-                              >
-                                <LayoutGrid className="h-3.5 w-3.5" />
-                                <span>Quản lý tất cả nhóm (Nền tảng)</span>
-                              </CommandItem>
-                            </CommandGroup>
-                          </>
-                        )}
                       </CommandList>
+                      {account && (
+                        <div className="border-t bg-muted/30 p-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsGroupSwitcherOpen(false);
+                              navigate("/platform");
+                            }}
+                            className="w-full flex items-center gap-2.5 text-xs font-medium text-foreground bg-muted/60 hover:bg-muted/90 rounded-lg px-3 py-2.5 cursor-pointer transition-colors border border-border/40 shadow-2xs"
+                          >
+                            <LayoutGrid className="h-4 w-4 text-primary shrink-0" />
+                            <span>Quản lý tất cả nhóm (Nền tảng)</span>
+                          </button>
+                        </div>
+                      )}
                     </Command>
                   </PopoverContent>
                 </Popover>

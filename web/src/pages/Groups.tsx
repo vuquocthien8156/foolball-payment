@@ -36,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
   Users,
   Trash2,
@@ -62,6 +63,7 @@ import {
   MoreVertical,
   FlaskConical,
   History,
+  Menu,
 } from "lucide-react";
 
 type Group = {
@@ -166,6 +168,7 @@ const Groups = () => {
   const [activeCategory, setActiveCategory] = useState<"all" | "sports" | "shared_bills">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [isTestSectionOpen, setIsTestSectionOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const sportGroups = useMemo(() => {
     return groups.filter((g) => {
@@ -735,35 +738,241 @@ const Groups = () => {
 
   return (
     <main className="container max-w-5xl py-8 space-y-6">
+      {/* Mobile Drawer Navigation */}
+      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+        <SheetContent side="left" className="w-[300px] sm:w-[350px] p-0 flex flex-col h-full">
+          <SheetHeader className="p-4 border-b text-left">
+            <div className="flex items-center gap-3">
+              <img src="/pwa-192x192.png" alt="Bún Pay" className="h-10 w-10 rounded-xl object-cover shadow-xs shrink-0" />
+              <div className="min-w-0">
+                <SheetTitle className="text-base font-bold truncate">Bún Pay Platform</SheetTitle>
+                <p className="text-xs text-muted-foreground truncate">
+                  {account?.displayName || user?.displayName || "Tài khoản"}
+                </p>
+              </div>
+            </div>
+            <div className="mt-2 pt-2 border-t flex items-center justify-between text-xs">
+              <span className="text-muted-foreground truncate max-w-[170px]">{account?.email || user?.email}</span>
+              <Badge variant="outline" className="text-[10px] shrink-0 font-normal">
+                {account?.role === "owner" ? "👑 Owner" : "Quản lý"}
+              </Badge>
+            </div>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto p-3 space-y-4 text-xs">
+            {/* THAO TÁC CHÍNH */}
+            <div className="space-y-1">
+              <p className="px-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                Thao tác chính
+              </p>
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-2.5 h-9 text-xs"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setName("");
+                  setSlug("");
+                  setSlugManuallyEdited(false);
+                  setSport("");
+                  setKind("sports");
+                  setIsTest(false);
+                  setOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4 text-primary" />
+                <span>Tạo nhóm mới</span>
+              </Button>
+
+              {account && (
+                <Button
+                  variant="outline"
+                  className="w-full justify-start gap-2.5 h-9 text-xs border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    openSettlementOverview();
+                  }}
+                >
+                  <CreditCard className="h-4 w-4 text-emerald-600" />
+                  <span className="truncate">
+                    {account?.role === "owner" ? "Đối soát hoàn tiền nền tảng" : "Đối soát & Theo dõi hoàn tiền"}
+                  </span>
+                </Button>
+              )}
+
+              {account?.role === "owner" && (
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start gap-2.5 h-9 text-xs"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    navigate("/platform/accounts");
+                  }}
+                >
+                  <Users className="h-4 w-4 text-blue-600" />
+                  <span>Quản lý Tài khoản (Owner)</span>
+                </Button>
+              )}
+            </div>
+
+            {/* BỘ LỌC NHÓM */}
+            <div className="space-y-1 border-t pt-3">
+              <p className="px-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                Bộ lọc danh sách nhóm
+              </p>
+              <button
+                type="button"
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-colors ${
+                  activeCategory === "all" ? "bg-muted font-semibold text-primary" : "text-muted-foreground hover:bg-muted/60"
+                }`}
+                onClick={() => {
+                  setActiveCategory("all");
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Layers className="h-4 w-4" />
+                  <span>Tất cả nhóm</span>
+                </div>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{groups.length}</Badge>
+              </button>
+
+              <button
+                type="button"
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-colors ${
+                  activeCategory === "sports" ? "bg-muted font-semibold text-primary" : "text-muted-foreground hover:bg-muted/60"
+                }`}
+                onClick={() => {
+                  setActiveCategory("sports");
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Trophy className="h-4 w-4 text-amber-500" />
+                  <span>Nhóm Thể thao</span>
+                </div>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{sportGroups.length}</Badge>
+              </button>
+
+              <button
+                type="button"
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-colors ${
+                  activeCategory === "shared_bills" ? "bg-muted font-semibold text-primary" : "text-muted-foreground hover:bg-muted/60"
+                }`}
+                onClick={() => {
+                  setActiveCategory("shared_bills");
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Receipt className="h-4 w-4 text-emerald-500" />
+                  <span>Quỹ chung / Chi tiêu</span>
+                </div>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{sharedBillGroups.length}</Badge>
+              </button>
+            </div>
+
+            {/* VÀO NHANH NHÓM */}
+            {groups.length > 0 && (
+              <div className="space-y-1 border-t pt-3">
+                <p className="px-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                  Vào nhanh nhóm
+                </p>
+                <div className="space-y-0.5 max-h-[220px] overflow-y-auto pr-1">
+                  {groups.slice(0, 12).map((g) => {
+                    const isShared = groupKindOf(g) === "shared_bills";
+                    const isTest = isTestGroup(g);
+                    return (
+                      <button
+                        key={g.id}
+                        type="button"
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          try {
+                            localStorage.setItem("lastActiveGroupId", g.id);
+                          } catch {}
+                          navigate(`/g/${g.id}/admin`);
+                        }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors text-left"
+                      >
+                        <div className="min-w-0 flex-1 mr-2">
+                          <p className="font-medium truncate text-foreground">{g.name}</p>
+                          <p className="text-[10px] text-muted-foreground/80 truncate">@{g.id}</p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isTest && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 border-amber-500/40 text-amber-600 bg-amber-500/10">
+                              Test
+                            </Badge>
+                          )}
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            {isShared ? "Chia tiền" : g.sport ? SPORT_LABELS[g.sport as GroupSport] || g.sport : "Thể thao"}
+                          </Badge>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer: Sign out */}
+          <div className="p-3 border-t bg-muted/20">
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 h-9"
+              onClick={async () => {
+                setMobileMenuOpen(false);
+                await signOut(auth);
+                navigate("/platform/login");
+              }}
+            >
+              <LogOut className="h-4 w-4" />
+              <span>Đăng xuất</span>
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <header className="flex flex-wrap items-center justify-between gap-4 border-b pb-6">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileMenuOpen(true)}
+            className="shrink-0 h-9 w-9 text-muted-foreground hover:text-foreground"
+            aria-label="Mở menu"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+
           <img src="/pwa-192x192.png" alt="Bún Pay" className="h-11 w-11 rounded-2xl object-cover shadow-sm shrink-0" />
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Quản lý Nhóm</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-sm font-medium text-foreground">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Quản lý Nhóm</h1>
+            <div className="flex items-center gap-2 mt-0.5 sm:mt-1 flex-wrap">
+              <span className="text-xs sm:text-sm font-medium text-foreground">
                 {account?.displayName || user?.displayName || "Tài khoản"}
               </span>
-              <span className="text-xs text-muted-foreground">({account?.email || user?.email})</span>
-              <Badge variant="outline" className="text-[11px] font-normal">
+              <span className="text-[11px] sm:text-xs text-muted-foreground hidden sm:inline">({account?.email || user?.email})</span>
+              <Badge variant="outline" className="text-[10px] sm:text-[11px] font-normal">
                 {account?.role === "owner" ? "Chủ nền tảng (Owner)" : "Quản lý"}
               </Badge>
             </div>
           </div>
         </div>
 
-        <nav className="flex items-center gap-2.5" aria-label="Thao tác nhanh">
+        <nav className="flex items-center gap-2 sm:gap-2.5" aria-label="Thao tác nhanh">
           {account && (
             <Button
               variant="outline"
               onClick={openSettlementOverview}
-              className="gap-2 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+              className="hidden sm:inline-flex gap-2 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
             >
               <CreditCard className="h-4 w-4" />
-              <span className="hidden sm:inline">
+              <span className="hidden lg:inline">
                 {account?.role === "owner" ? "Đối soát hoàn tiền nền tảng" : "Đối soát & Theo dõi hoàn tiền"}
               </span>
-              <span className="sm:hidden">Đối soát</span>
+              <span className="lg:hidden">Đối soát</span>
             </Button>
           )}
 
@@ -777,7 +986,7 @@ const Groups = () => {
               setIsTest(false);
               setOpen(true);
             }}
-            className="gap-1.5 shadow-xs"
+            className="hidden sm:inline-flex gap-1.5 shadow-xs"
           >
             <Plus className="h-4 w-4" />
             <span>Tạo nhóm mới</span>
