@@ -37,9 +37,23 @@ Authorized: user requested visual separation of Sport groups vs. Shared Bills gr
      - `POST /settlement/batch-settle` captures and snapshots `paidByMemberName`.
      - History list displays the verified payer (`Người ứng: <Tên>`) instead of "Không rõ".
 
+4. **Public Visited Groups Switcher for PWA & Web**:
+   - **Local Storage Group Persistence**:
+     - Automatically caches groups explicitly accessed via public links on the device (`STORAGE_KEY: "bun_pay_visited_groups"`).
+     - Associates selected member name (`scopedKey("lastSelectedMemberName", groupId)`) with the group.
+     - Preserves link-based privacy without exposing any server-side group directory.
+   - **Public Group Switcher Bottom Sheet**:
+     - Sleek trigger button in public headers ([`PublicPortal.tsx`](file:///Users/thien/Documents/Coder/foolball-payment/web/src/pages/PublicPortal.tsx) and [`Pay.tsx`](file:///Users/thien/Documents/Coder/foolball-payment/web/src/pages/Pay.tsx)).
+     - Bottom Sheet / Drawer on mobile allowing 1-tap switching between groups with pre-selected member names.
+     - Supports removing (`[X]`) stale groups from local device memory.
+     - Works identically on both standalone PWA and regular mobile/desktop web browsers.
+
 ## 2. Evidence & Verification
 
 - Modified:
+  - `web/src/components/PublicGroupSwitcher.tsx`
+  - `web/src/pages/PublicPortal.tsx`
+  - `web/src/pages/Pay.tsx`
   - `web/src/pages/Groups.tsx`
   - `web/src/App.tsx`
   - `server/lib/platformRoutes.js`
