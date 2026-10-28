@@ -96,10 +96,20 @@
 5. **Manager Guidance Tip Banner (`Groups.tsx`)**:
    - Callout banner displayed in Settlement Modal guiding managers to self-claim if they have not linked their profile yet.
 
+### Slice 6: Cross-Group Member Settlement History for Managers (Completed)
+1. **Cross-Group Settlement History Query (`server/lib/platformRoutes.js`)**:
+   - `GET /platform/settlement/history` queries all groups where the manager is an owner/manager, PLUS groups where the manager is a linked member (`member.accountUid === req.uid`).
+   - In foreign groups, filters strictly to matches where `isCurrentCallerPayer` is true, ensuring zero privacy leakage of unrelated matches.
+   - Attaches `isRecipientCurrentUser: true` to indicate payouts made by Super Admin to the caller.
+2. **Reimbursement Badge in UI (`web/src/pages/Groups.tsx`)**:
+   - Displays `[Super Admin đã hoàn cho bạn]` badge next to matches where the caller was reimbursed by the platform owner.
+3. **Automated Unit Tests (`web/tests/settlement-net-offset.test.mjs`)**:
+   - Verifies cross-group match retrieval for managers while asserting that other members' matches in foreign groups remain invisible.
+
 ---
 
 ## 4. Verification & Testing
-1. Run `node --test web/tests/*.test.mjs` (220 tests passed).
+1. Run `node --test web/tests/*.test.mjs` (235 tests passed).
 2. Build frontend via `npm run build` in `web/` (build passed cleanly).
 3. Deployed both Cloud Functions and Firebase Hosting to live production.
 
