@@ -187,6 +187,7 @@ const App = () => {
                 <Route path="/public/*" element={<LegacyRedirect />} />
                 <Route path="/admin/*" element={<LegacyRedirect />} />
                 <Route path="/g/:groupId" element={<GroupProvider><Outlet /></GroupProvider>}>
+                <Route index element={<Navigate to="public" replace />} />
                 <Route
                   path="login"
                   element={<Login />}

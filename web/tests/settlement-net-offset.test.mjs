@@ -166,4 +166,5 @@ test("Automated Net Offset: deducts payer unpaid share and supports history retr
   assert.equal(historyMatch.payerShareAmount, 76500);
   assert.equal(historyMatch.netPayoutAmount, 323500);
   assert.equal(historyMatch.recipientName, "Thien Bong (Advance Payer)");
+  assert.equal(historyMatch.paidByMemberName, "Thien Bong (Advance Payer)");
 });

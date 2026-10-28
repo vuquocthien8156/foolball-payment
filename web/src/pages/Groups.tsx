@@ -64,6 +64,8 @@ import {
   FlaskConical,
   History,
   Menu,
+  Globe,
+  CalendarCheck,
 } from "lucide-react";
 
 type Group = {
@@ -623,11 +625,167 @@ const Groups = () => {
       >
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2">
-            <div className="space-y-1 pr-2">
+            <div className="space-y-1.5 pr-2">
               <CardTitle className="break-words text-lg font-bold group-hover:text-primary transition-colors">
                 {group.name}
               </CardTitle>
-              <p className="text-xs text-muted-foreground font-mono">/g/{group.id}</p>
+              <div className="flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                <a
+                  href={`/g/${group.id}/public`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-primary hover:underline transition-colors"
+                  title="Mở cổng thông tin công khai trong tab mới"
+                >
+                  /g/{group.id}
+                  <ExternalLink className="h-3 w-3 opacity-70" />
+                </a>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                  title="Sao chép link công khai"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(`${window.location.origin}/g/${group.id}/public`);
+                    toast({
+                      title: "Đã sao chép link công khai",
+                      description: `${window.location.origin}/g/${group.id}/public`,
+                    });
+                  }}
+                >
+                  <Copy className="h-3 w-3" />
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-5 px-1.5 text-[11px] font-normal gap-1 text-muted-foreground hover:text-foreground border-dashed"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Xem các liên kết công khai của nhóm"
+                    >
+                      <Globe className="h-2.5 w-2.5 text-primary" />
+                      <span>Public Links</span>
+                      <ChevronDown className="h-2.5 w-2.5 opacity-60" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-56" onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenuLabel className="text-xs font-semibold">Liên kết công khai</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+
+                    <div className="flex items-center justify-between px-2 py-1.5 text-xs hover:bg-muted/50 rounded-sm">
+                      <a
+                        href={`/g/${group.id}/public`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-2 flex-1 truncate font-medium hover:text-primary"
+                      >
+                        <Globe className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                        <span className="truncate">Cổng thông tin nhóm</span>
+                        <ExternalLink className="h-3 w-3 opacity-50 shrink-0 ml-auto" />
+                      </a>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 ml-1"
+                        title="Sao chép"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(`${window.location.origin}/g/${group.id}/public`);
+                          toast({ title: "Đã sao chép link", description: `${window.location.origin}/g/${group.id}/public` });
+                        }}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+
+                    <div className="flex items-center justify-between px-2 py-1.5 text-xs hover:bg-muted/50 rounded-sm">
+                      <a
+                        href={`/g/${group.id}/public/pay`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-2 flex-1 truncate font-medium hover:text-primary"
+                      >
+                        <CreditCard className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                        <span className="truncate">Trang thanh toán (Pay)</span>
+                        <ExternalLink className="h-3 w-3 opacity-50 shrink-0 ml-auto" />
+                      </a>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 ml-1"
+                        title="Sao chép"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(`${window.location.origin}/g/${group.id}/public/pay`);
+                          toast({ title: "Đã sao chép link", description: `${window.location.origin}/g/${group.id}/public/pay` });
+                        }}
+                      >
+                        <Copy className="h-3 w-3" />
+                      </Button>
+                    </div>
+
+                    {groupKindOf(group) === "sports" && (
+                      <>
+                        <div className="flex items-center justify-between px-2 py-1.5 text-xs hover:bg-muted/50 rounded-sm">
+                          <a
+                            href={`/g/${group.id}/public/attendance`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-2 flex-1 truncate font-medium hover:text-primary"
+                          >
+                            <CalendarCheck className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                            <span className="truncate">Điểm danh trận đấu</span>
+                            <ExternalLink className="h-3 w-3 opacity-50 shrink-0 ml-auto" />
+                          </a>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0 ml-1"
+                            title="Sao chép"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(`${window.location.origin}/g/${group.id}/public/attendance`);
+                              toast({ title: "Đã sao chép link", description: `${window.location.origin}/g/${group.id}/public/attendance` });
+                            }}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+
+                        <div className="flex items-center justify-between px-2 py-1.5 text-xs hover:bg-muted/50 rounded-sm">
+                          <a
+                            href={`/g/${group.id}/public/ratings`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-2 flex-1 truncate font-medium hover:text-primary"
+                          >
+                            <Trophy className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
+                            <span className="truncate">Bảng xếp hạng / Ratings</span>
+                            <ExternalLink className="h-3 w-3 opacity-50 shrink-0 ml-auto" />
+                          </a>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 shrink-0 ml-1"
+                            title="Sao chép"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(`${window.location.origin}/g/${group.id}/public/ratings`);
+                              toast({ title: "Đã sao chép link", description: `${window.location.origin}/g/${group.id}/public/ratings` });
+                            }}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
               {isTestGroup(group) && (
@@ -656,6 +814,28 @@ const Groups = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-52" onClick={(e) => e.stopPropagation()}>
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(`${window.location.origin}/g/${group.id}/public`, "_blank");
+                      }}
+                      className="cursor-pointer gap-2"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      <span>Mở trang công khai</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(`${window.location.origin}/g/${group.id}/public`);
+                        toast({ title: "Đã sao chép link công khai", description: `${window.location.origin}/g/${group.id}/public` });
+                      }}
+                      className="cursor-pointer gap-2"
+                    >
+                      <Copy className="h-4 w-4" />
+                      <span>Sao chép link công khai</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2220,8 +2400,12 @@ const Groups = () => {
                               {h.venueName && <span className="text-muted-foreground">• {h.venueName}</span>}
                             </div>
                             <div className="flex items-center gap-2 text-muted-foreground flex-wrap text-[11px]">
-                              <span>👤 Người ứng: <strong>{h.paidByMemberName || "Không rõ"}</strong></span>
-                              {h.recipientName && <span>• Nhận: <strong>{h.recipientName}</strong></span>}
+                              <span>
+                                👤 Người ứng: <strong>{h.paidByMemberName || h.recipientName || h.paidByName || "Không rõ"}</strong>
+                              </span>
+                              {h.recipientName && h.recipientName !== (h.paidByMemberName || h.paidByName) && (
+                                <span>• Nhận: <strong>{h.recipientName}</strong></span>
+                              )}
                               <span>• Lúc: {pDateStr}</span>
                             </div>
                           </div>

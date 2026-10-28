@@ -799,16 +799,21 @@ function createPlatformRouter({ db, auth, FieldValue }) {
             payerShareAmount = Number(s.amount) || 0;
           }
         }
+      } else {
+        const gDoc = await db.collection("groups").doc(m.groupId || groupId).get();
+        payerName = (gDoc.exists && gDoc.data().ownerDisplayName) || "Quản lý nhóm";
       }
 
       const netAmount = Math.max(0, grossAmount - payerShareAmount);
+      const finalPayerName = payerName || (m.paidByMemberId ? "Thành viên" : "Quản lý nhóm");
 
       batch.update(mDoc.ref, {
         payoutStatus: "PAID_OUT",
         payoutGrossAmount: grossAmount,
         payoutPayerShareAmount: payerShareAmount,
         payoutNetAmount: netAmount,
-        payoutRecipientName: payerName || (m.paidByMemberId ? "Thành viên" : "Quản lý nhóm"),
+        paidByMemberName: finalPayerName,
+        payoutRecipientName: finalPayerName,
         paidOutAt: FieldValue.serverTimestamp(),
         paidOutBy: req.uid,
         payoutNote: note || (isSuperAdmin ? "Batch settled by Super Admin" : "Settled by Manager"),
@@ -852,10 +857,32 @@ function createPlatformRouter({ db, auth, FieldValue }) {
       return res.json({ history: [] });
     }
 
+    // Preload groups, members, and platformAccounts for fast and robust resolution
+    const [allGroupsSnap, allMembersSnap, allAccountsSnap] = await Promise.all([
+      db.collection("groups").get(),
+      db.collection("members").get(),
+      db.collection("platformAccounts").get(),
+    ]);
+
+    const groupsMap = new Map();
+    allGroupsSnap.docs.forEach((d) => groupsMap.set(d.id, d.data()));
+
+    const membersMap = new Map();
+    allMembersSnap.docs.forEach((d) => membersMap.set(d.id, d.data()));
+
+    const accountsMap = new Map();
+    allAccountsSnap.docs.forEach((d) => accountsMap.set(d.id, d.data()));
+
     const history = [];
     for (const gid of allowedGroupIds) {
-      const gDoc = await db.collection("groups").doc(gid).get();
-      const gName = gDoc.exists ? gDoc.data().name : gid;
+      const gData = groupsMap.get(gid) || {};
+      const gName = gData.name || gid;
+      const ownerUid = gData.ownerUid;
+      let managerName = gData.ownerDisplayName || "";
+      if (!managerName && ownerUid && accountsMap.has(ownerUid)) {
+        managerName = accountsMap.get(ownerUid).displayName || accountsMap.get(ownerUid).email || "";
+      }
+
       const matchesSnap = await db.collection("matches")
         .where("groupId", "==", gid)
         .where("payoutStatus", "==", "PAID_OUT")
@@ -871,6 +898,19 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         if (m.paidOutAt?.toDate) paidOutAtIso = m.paidOutAt.toDate().toISOString();
         else if (m.paidOutAt) paidOutAtIso = new Date(m.paidOutAt).toISOString();
 
+        let payerName = m.paidByMemberName;
+        if (!payerName || payerName === "Thành viên" || payerName === "Quản lý nhóm") {
+          if (m.paidByMemberId && membersMap.has(m.paidByMemberId)) {
+            payerName = membersMap.get(m.paidByMemberId).name;
+          } else if (m.payoutRecipientName && m.payoutRecipientName !== "Thành viên" && m.payoutRecipientName !== "Quản lý nhóm") {
+            payerName = m.payoutRecipientName;
+          } else if (m.paidByMemberId) {
+            payerName = "Thành viên #" + m.paidByMemberId.slice(0, 6);
+          } else {
+            payerName = managerName || m.payoutRecipientName || "Quản lý nhóm";
+          }
+        }
+
         history.push({
           id: d.id,
           groupId: gid,
@@ -882,9 +922,9 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           payerShareAmount: m.payoutPayerShareAmount || 0,
           netPayoutAmount: m.payoutNetAmount !== undefined ? m.payoutNetAmount : (m.totalAmount || 0),
           paidByMemberId: m.paidByMemberId || null,
-          paidByMemberName: m.paidByMemberName || null,
-          paidByName: m.payoutRecipientName || null,
-          recipientName: m.payoutRecipientName || null,
+          paidByMemberName: payerName,
+          paidByName: payerName,
+          recipientName: m.payoutRecipientName || payerName,
           paidOutAt: paidOutAtIso,
           paidOutBy: m.paidOutBy || null,
           payoutNote: m.payoutNote || null,
