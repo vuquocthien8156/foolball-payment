@@ -1,5 +1,6 @@
 import { groupIdOf, scopedKey } from "@/lib/groups";
 import { useGroup } from "@/contexts/GroupContext";
+import { PublicGroupSwitcher } from "@/components/PublicGroupSwitcher";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -700,6 +701,10 @@ const Pay = () => {
     }
     setSelectedMemberId(memberId);
     localStorage.setItem(scopedKey("lastSelectedMemberId", groupId), memberId);
+    const foundMem = members.find((m) => m.id === memberId);
+    if (foundMem?.name) {
+      localStorage.setItem(scopedKey("lastSelectedMemberName", groupId), foundMem.name);
+    }
   };
 
   const handleViewTeamDetails = async (share: Share) => {
@@ -1100,6 +1105,9 @@ const Pay = () => {
   return (
     <div className="min-h-screen bg-primary flex justify-center p-2 sm:p-4">
       <div className="w-full max-w-2xl py-8 space-y-4">
+        <div className="flex justify-between items-center px-1">
+          <PublicGroupSwitcher currentSubPath="public/pay" variant="on-primary" />
+        </div>
         <PWAInstallPrompt
           variant="banner"
           className="bg-white/95 text-slate-900 border-white/20 shadow-md backdrop-blur-sm"

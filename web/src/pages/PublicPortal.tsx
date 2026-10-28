@@ -1,6 +1,7 @@
 import { groupIdOf, scopedKey, groupKindOf } from "@/lib/groups";
 import { hasFeature } from "@/lib/features";
 import { useGroup, useGroupPath } from "@/contexts/GroupContext";
+import { PublicGroupSwitcher } from "@/components/PublicGroupSwitcher";
 import { getApiBaseUrl } from "@/lib/api";
 import { PayOSCheckoutDialog } from "@/components/PayOSCheckoutDialog";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
@@ -224,7 +225,10 @@ const SharedBillsPublicPortal = ({
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-8">
-        <header className="text-center space-y-2">
+        <header className="text-center space-y-3">
+          <div className="flex justify-center">
+            <PublicGroupSwitcher currentSubPath="public" />
+          </div>
           <h1 className="text-3xl font-extrabold tracking-tight">
             {group?.name || "Chia sẻ chi phí"}
           </h1>
@@ -820,14 +824,17 @@ const PublicPortal = () => {
   return (
     <div className="min-h-screen animated-gradient flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-6">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center p-4 bg-primary rounded-2xl shadow-card mb-4">
+        <div className="text-center mb-8 space-y-3">
+          <div className="flex justify-center">
+            <PublicGroupSwitcher currentSubPath="public" />
+          </div>
+          <div className="inline-flex items-center justify-center p-4 bg-primary rounded-2xl shadow-card">
             <Trophy className="h-10 w-10 text-white" />
           </div>
           <h1 className="text-4xl font-bold text-foreground">
             {group?.name || "Bún Pay"}
           </h1>
-          <p className="text-muted-foreground mt-2">
+          <p className="text-muted-foreground">
             Vui lòng chọn hành động bạn muốn thực hiện.
           </p>
         </div>
