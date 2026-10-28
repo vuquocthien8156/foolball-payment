@@ -543,10 +543,14 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         let pendingSharesCount = 0;
         let paidSharesCount = 0;
 
+        let payerShare = null;
         sharesSnap.docs.forEach((sDoc) => {
           const s = sDoc.data();
           const amt = Number(s.amount) || 0;
           totalShareAmount += amt;
+          if (m.paidByMemberId && s.memberId === m.paidByMemberId) {
+            payerShare = s;
+          }
           if (s.status === "PAID") {
             collectedAmount += amt;
             paidSharesCount++;
@@ -556,7 +560,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         });
 
         const isFullyCollected = totalShareAmount > 0 ? (pendingSharesCount === 0) : false;
-        const amount = Number(m.totalAmount) || 0;
+        const grossAmount = Number(m.totalAmount) || 0;
 
         let paidByName = "";
         let isManagerPayer = false;
@@ -577,6 +581,12 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           isCurrentCallerPayer = ownerUid === req.uid;
         }
 
+        const payerShareAmount = payerShare ? (Number(payerShare.amount) || 0) : 0;
+        const payerSharePaid = payerShare ? (payerShare.status === "PAID" && payerShare.channel !== "MANUAL") : false;
+        const payerShareStatus = payerShare ? (payerShare.status || "PENDING") : "NONE";
+        // If owner payer, 0 refund needed. If payer already paid via PayOS, refund gross amount; otherwise deduct payer share.
+        const netPayoutAmount = isOwnerPayer ? 0 : (payerSharePaid ? grossAmount : Math.max(0, grossAmount - payerShareAmount));
+
         let dateIso = null;
         if (m.date?.toDate) {
           dateIso = m.date.toDate().toISOString();
@@ -589,7 +599,12 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           groupId: gid,
           groupName: gData.name,
           date: dateIso,
-          totalAmount: amount,
+          totalAmount: grossAmount,
+          grossAmount,
+          payerShareAmount,
+          payerSharePaid,
+          payerShareStatus,
+          netPayoutAmount,
           venueName: m.venueName || null,
           status: m.status,
           paidByMemberId: m.paidByMemberId || null,
@@ -612,10 +627,10 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         // Super Admin sees all matches; Manager only sees matches in groups they manage (excluding matches they themselves fronted)
         if (managesThisGroup) {
           if (isSuperAdmin) {
-            if (!isOwnerPayer) groupPendingAmount += amount;
+            if (!isOwnerPayer) groupPendingAmount += netPayoutAmount;
             pendingMatches.push(matchRecord);
           } else if (!isCurrentCallerPayer) {
-            groupPendingAmount += amount;
+            groupPendingAmount += netPayoutAmount;
             pendingMatches.push(matchRecord);
           }
         }
@@ -641,12 +656,18 @@ function createPlatformRouter({ db, auth, FieldValue }) {
             payerName: pm.paidByMemberName,
             isManager: pm.isManagerPayer,
             isOwner: pm.isOwnerPayer,
+            totalGrossAmount: 0,
+            totalPayerShareAmount: 0,
+            totalNetAmount: 0,
             totalAmount: 0,
             matches: [],
           });
         }
         const item = payerGroupsMap.get(key);
-        item.totalAmount += pm.totalAmount;
+        item.totalGrossAmount += pm.grossAmount;
+        item.totalPayerShareAmount += pm.payerShareAmount;
+        item.totalNetAmount += pm.netPayoutAmount;
+        item.totalAmount += pm.netPayoutAmount;
         item.matches.push(pm);
       });
       const payerGroups = Array.from(payerGroupsMap.values());
@@ -758,19 +779,128 @@ function createPlatformRouter({ db, auth, FieldValue }) {
       return res.json({ success: true, count: 0 });
     }
 
+    const matchDocs = await Promise.all(targetMatchIds.map((mId) => db.collection("matches").doc(mId).get()));
     const batch = db.batch();
-    targetMatchIds.forEach((mId) => {
-      batch.update(db.collection("matches").doc(mId), {
+    for (const mDoc of matchDocs) {
+      if (!mDoc.exists) continue;
+      const m = mDoc.data();
+      const grossAmount = Number(m.totalAmount) || 0;
+      let payerShareAmount = 0;
+      let payerName = null;
+
+      if (m.paidByMemberId) {
+        const memDoc = await db.collection("members").doc(m.paidByMemberId).get();
+        if (memDoc.exists) payerName = memDoc.data().name;
+        const sharesSnap = await db.collection(`matches/${mDoc.id}/shares`).where("memberId", "==", m.paidByMemberId).get();
+        if (!sharesSnap.empty) {
+          const s = sharesSnap.docs[0].data();
+          const isPaid = s.status === "PAID" && s.channel !== "MANUAL";
+          if (!isPaid) {
+            payerShareAmount = Number(s.amount) || 0;
+          }
+        }
+      }
+
+      const netAmount = Math.max(0, grossAmount - payerShareAmount);
+
+      batch.update(mDoc.ref, {
         payoutStatus: "PAID_OUT",
+        payoutGrossAmount: grossAmount,
+        payoutPayerShareAmount: payerShareAmount,
+        payoutNetAmount: netAmount,
+        payoutRecipientName: payerName || (m.paidByMemberId ? "Thành viên" : "Quản lý nhóm"),
         paidOutAt: FieldValue.serverTimestamp(),
         paidOutBy: req.uid,
         payoutNote: note || (isSuperAdmin ? "Batch settled by Super Admin" : "Settled by Manager"),
         updatedAt: FieldValue.serverTimestamp(),
       });
-    });
+    }
     await batch.commit();
 
     res.json({ success: true, count: targetMatchIds.length });
+  }));
+
+  // Settlement History: View past settled matches
+  router.get("/settlement/history", requirePlatform, wrap(async (req, res) => {
+    const isSuperAdmin = req.platform?.role === "owner";
+    const { groupId, limit = 50 } = req.query;
+
+    let allowedGroupIds = [];
+    if (isSuperAdmin) {
+      if (groupId) {
+        allowedGroupIds = [groupId];
+      } else {
+        const groupsSnap = await db.collection("groups").get();
+        allowedGroupIds = groupsSnap.docs.map((d) => d.id);
+      }
+    } else {
+      const ownedGroups = await db.collection("groups").where("ownerUid", "==", req.uid).get();
+      const coGroups = await db.collection("groupMembers").where("uid", "==", req.uid).get();
+      const gSet = new Set(ownedGroups.docs.map((d) => d.id));
+      coGroups.docs.forEach((d) => {
+        if (["manager", "admin"].includes(d.data().role)) gSet.add(d.data().groupId);
+      });
+      if (groupId) {
+        if (!gSet.has(groupId)) return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
+        allowedGroupIds = [groupId];
+      } else {
+        allowedGroupIds = Array.from(gSet);
+      }
+    }
+
+    if (allowedGroupIds.length === 0) {
+      return res.json({ history: [] });
+    }
+
+    const history = [];
+    for (const gid of allowedGroupIds) {
+      const gDoc = await db.collection("groups").doc(gid).get();
+      const gName = gDoc.exists ? gDoc.data().name : gid;
+      const matchesSnap = await db.collection("matches")
+        .where("groupId", "==", gid)
+        .where("payoutStatus", "==", "PAID_OUT")
+        .get();
+
+      matchesSnap.docs.forEach((d) => {
+        const m = d.data();
+        let dateIso = null;
+        if (m.date?.toDate) dateIso = m.date.toDate().toISOString();
+        else if (m.date) dateIso = new Date(m.date).toISOString();
+
+        let paidOutAtIso = null;
+        if (m.paidOutAt?.toDate) paidOutAtIso = m.paidOutAt.toDate().toISOString();
+        else if (m.paidOutAt) paidOutAtIso = new Date(m.paidOutAt).toISOString();
+
+        history.push({
+          id: d.id,
+          groupId: gid,
+          groupName: gName,
+          date: dateIso,
+          venueName: m.venueName || null,
+          totalAmount: m.totalAmount || 0,
+          grossAmount: m.payoutGrossAmount !== undefined ? m.payoutGrossAmount : (m.totalAmount || 0),
+          payerShareAmount: m.payoutPayerShareAmount || 0,
+          netPayoutAmount: m.payoutNetAmount !== undefined ? m.payoutNetAmount : (m.totalAmount || 0),
+          paidByMemberId: m.paidByMemberId || null,
+          paidByMemberName: m.paidByMemberName || null,
+          paidByName: m.payoutRecipientName || null,
+          recipientName: m.payoutRecipientName || null,
+          paidOutAt: paidOutAtIso,
+          paidOutBy: m.paidOutBy || null,
+          payoutNote: m.payoutNote || null,
+        });
+      });
+    }
+
+    // Sort by paidOutAt descending
+    history.sort((a, b) => {
+      const tA = a.paidOutAt ? new Date(a.paidOutAt).getTime() : 0;
+      const tB = b.paidOutAt ? new Date(b.paidOutAt).getTime() : 0;
+      return tB - tA;
+    });
+
+    const parsedLimit = Math.min(Math.max(1, Number(limit) || 50), 100);
+    res.json({ history: history.slice(0, parsedLimit) });
   }));
 
   return router;

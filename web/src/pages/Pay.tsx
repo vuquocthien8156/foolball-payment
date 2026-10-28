@@ -202,6 +202,8 @@ const Pay = () => {
   const [isRating, setIsRating] = useState(false);
   const [ratingTargets, setRatingTargets] = useState<Share[]>([]);
   const [ratedMatchIds, setRatedMatchIds] = useState<Set<string>>(new Set());
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const triggerRefresh = () => setRefreshTrigger((prev) => prev + 1);
   const [checkoutModal, setCheckoutModal] = useState<{
     open: boolean;
     checkoutUrl: string;
@@ -387,7 +389,7 @@ const Pay = () => {
     };
     void fetchGroupShares();
     return () => { cancelled = true; };
-  }, [isGroupPayment, groupMemberIds, members, groupId]);
+  }, [isGroupPayment, groupMemberIds, members, groupId, refreshTrigger]);
 
   useEffect(() => {
     if (isGroupPayment) return;
@@ -643,22 +645,21 @@ const Pay = () => {
           });
         }
 
+        // Include payable shares (PENDING with amount > 0) and rating-only shares for exempt members
         const allShares = [
-          ...pendingShares,
-          ...manualPaidShares,
+          ...pendingShares.filter(
+            (share) => share.status === "PENDING" && (Number(share.amount) || 0) > 0
+          ),
           ...ratingOnlyShares,
         ];
 
         if (cancelled) return;
         setUnpaidShares(allShares);
-        // Automatically select payable shares; if không có khoản phải trả, chọn các trận chỉ đánh giá
+        // Automatically select only truly payable shares (never select 0 VND or rating-only shares)
         const payableIds = allShares
-          .filter((share) => share.status === "PENDING" && !share.isRatingOnly)
+          .filter((share) => share.status === "PENDING" && !share.isRatingOnly && (Number(share.amount) || 0) > 0)
           .map((share) => share.id);
-        const ratingOnlyIds = allShares
-          .filter((share) => share.isRatingOnly || share.channel === "MANUAL")
-          .map((share) => share.id);
-        setSelectedShares(payableIds.length > 0 ? payableIds : ratingOnlyIds);
+        setSelectedShares(payableIds);
         setExpandedItems([]);
       } catch (error) {
         if (cancelled) return;
@@ -675,7 +676,7 @@ const Pay = () => {
 
     void fetchUnpaidShares();
     return () => { cancelled = true; };
-  }, [selectedMemberId, members, isGroupPayment, groupId]);
+  }, [selectedMemberId, members, isGroupPayment, groupId, refreshTrigger]);
 
   const clearPaymentSelection = () => {
     setUnpaidShares([]);
@@ -900,6 +901,14 @@ const Pay = () => {
       }
 
       if (!response.ok) {
+        if (response.status === 409 || data?.error?.includes("changed")) {
+          toast({
+            title: "Dữ liệu đã thay đổi",
+            description: "Một số khoản nợ vừa được cập nhật hoặc đã được thanh toán. Đang tự động làm mới danh sách...",
+          });
+          triggerRefresh();
+          return;
+        }
         throw new Error(data?.error || "Yêu cầu thất bại.");
       }
 
@@ -916,6 +925,9 @@ const Pay = () => {
       }
     } catch (error) {
       console.error("Error creating payment link:", error);
+      if (error instanceof Error && error.message.includes("changed")) {
+        triggerRefresh();
+      }
       toast({
         title: "Lỗi",
         description: `Không thể tạo link thanh toán: ${
@@ -1652,7 +1664,7 @@ const Pay = () => {
               title: "Thanh toán thành công!",
               description: "Giao dịch đã được xác nhận vào hệ thống.",
             });
-            void fetchUnpaidShares();
+            triggerRefresh();
           }}
         />
       </div>

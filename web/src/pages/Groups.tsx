@@ -26,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,6 +61,7 @@ import {
   Search,
   MoreVertical,
   FlaskConical,
+  History,
 } from "lucide-react";
 
 type Group = {
@@ -138,6 +140,9 @@ const Groups = () => {
   const [settlementOpen, setSettlementOpen] = useState(false);
   const [settlementLoading, setSettlementLoading] = useState(false);
   const [settlementData, setSettlementData] = useState<any>(null);
+  const [settlementTab, setSettlementTab] = useState<"pending" | "history">("pending");
+  const [settlementHistory, setSettlementHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedGroupQr, setSelectedGroupQr] = useState<any>(null);
   const [batchSettlingGid, setBatchSettlingGid] = useState<string | null>(null);
   const [settlingAllPast, setSettlingAllPast] = useState(false);
@@ -406,7 +411,20 @@ const Groups = () => {
     }
   };
 
+  const fetchSettlementHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const data = await apiRequest("GET", "/platform/settlement/history");
+      setSettlementHistory(data.history || []);
+    } catch (e) {
+      toast({ variant: "destructive", title: "Không thể tải lịch sử đối soát" });
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const openSettlementOverview = () => {
+    setSettlementTab("pending");
     setSettlementOpen(true);
     fetchSettlementOverview();
   };
@@ -433,6 +451,7 @@ const Groups = () => {
       toast({ title: "Đã xác nhận hoàn tiền thành công cho các trận của nhóm" });
       setSelectedGroupQr(null);
       await fetchSettlementOverview();
+      if (settlementTab === "history") await fetchSettlementHistory();
     } catch {
       toast({ variant: "destructive", title: "Không thể hoàn tất đối soát" });
     } finally {
@@ -441,25 +460,42 @@ const Groups = () => {
   };
 
   const handleSettleSingleMatch = async (match: any, groupId: string, payerName: string) => {
-    if (!match.isFullyCollected) {
-      const confirmed = window.confirm(
-        `Cảnh báo: Trận đấu này chưa thu đủ tiền từ các thành viên (Mới thu ${match.collectedAmount?.toLocaleString() || 0} / ${match.totalAmount?.toLocaleString()} VND).\n\nBạn có chắc chắn muốn hoàn tiền trước cho người ứng không?`
-      );
-      if (!confirmed) return;
+    const gross = match.grossAmount ?? match.totalAmount;
+    const payerShare = match.payerShareAmount || 0;
+    const net = match.netPayoutAmount ?? (match.payerSharePaid ? gross : Math.max(0, gross - payerShare));
+
+    let confirmMsg = `Xác nhận hoàn tiền trận đấu cho ${payerName}:\n`;
+    confirmMsg += `• Tiền sân gốc: ${gross.toLocaleString()} VND\n`;
+    if (payerShare > 0) {
+      if (match.payerSharePaid) {
+        confirmMsg += `• Phần người ứng: ${payerShare.toLocaleString()} VND (Đã nộp PayOS - Không khấu trừ)\n`;
+      } else {
+        confirmMsg += `• Khấu trừ phần người ứng: -${payerShare.toLocaleString()} VND (Tự động trừ vì chưa nộp PayOS)\n`;
+      }
     }
+    confirmMsg += `👉 Thực chuyển cho người ứng: ${net.toLocaleString()} VND\n\n`;
+
+    if (!match.isFullyCollected) {
+      confirmMsg += `⚠️ Chú ý: Trận này chưa thu đủ tiền từ các thành viên (Mới thu ${match.collectedAmount?.toLocaleString() || 0} / ${gross.toLocaleString()} VND).\n\n`;
+    }
+    confirmMsg += `Bạn có chắc chắn muốn xác nhận đã chuyển ${net.toLocaleString()} VND cho người ứng không?`;
+
+    const confirmed = window.confirm(confirmMsg);
+    if (!confirmed) return;
 
     setSettlingMatchId(match.id);
     try {
       await apiRequest("POST", "/platform/settlement/batch-settle", {
         groupId,
         matchIds: [match.id],
-        note: `Settled single match for payer ${payerName}`,
+        note: `Settled single match for payer ${payerName} (Net: ${net.toLocaleString()}đ, Gross: ${gross.toLocaleString()}đ)`,
       });
       toast({
         title: "Hoàn tiền thành công",
-        description: `Đã đánh dấu hoàn tiền trận đấu cho ${payerName}.`,
+        description: `Đã hoàn tất đối soát ${net.toLocaleString()} VND cho ${payerName}.`,
       });
       await fetchSettlementOverview();
+      if (settlementTab === "history") await fetchSettlementHistory();
     } catch (err: any) {
       toast({
         variant: "destructive",
@@ -1334,7 +1370,18 @@ const Groups = () => {
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
           ) : settlementData ? (
-            <div className="space-y-6 py-2">
+            <Tabs value={settlementTab} onValueChange={(v: any) => { setSettlementTab(v); if (v === "history") fetchSettlementHistory(); }} className="w-full">
+              <TabsList className="grid grid-cols-2 mb-3">
+                <TabsTrigger value="pending">
+                  Chờ hoàn tiền ({settlementData?.summary?.pendingMatchesCount || 0})
+                </TabsTrigger>
+                <TabsTrigger value="history" className="gap-1.5">
+                  <History className="h-3.5 w-3.5" />
+                  Lịch sử đã hoàn ({settlementHistory?.length || 0})
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="pending" className="space-y-6 py-1 mt-0">
               {/* Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {settlementData.isSuperAdmin ? (
@@ -1648,10 +1695,30 @@ const Groups = () => {
                                               )}
                                             </div>
 
-                                            <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
-                                              <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                                                {match.totalAmount?.toLocaleString()} VND
-                                              </span>
+                                            <div className="flex flex-col sm:items-end justify-center gap-1 shrink-0">
+                                              <div className="flex items-center gap-2">
+                                                {match.payerShareAmount > 0 && !match.payerSharePaid && (
+                                                  <span className="text-[11px] text-muted-foreground line-through">
+                                                    {(match.grossAmount ?? match.totalAmount)?.toLocaleString()}đ
+                                                  </span>
+                                                )}
+                                                <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                                  {(match.netPayoutAmount ?? match.totalAmount)?.toLocaleString()} VND
+                                                </span>
+                                              </div>
+                                              {match.payerShareAmount > 0 && (
+                                                <div className="text-[10px]">
+                                                  {match.payerSharePaid ? (
+                                                    <span className="text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                                                      Phần người ứng: {match.payerShareAmount?.toLocaleString()}đ (Đã nộp PayOS)
+                                                    </span>
+                                                  ) : (
+                                                    <span className="text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                                                      Trừ phần người ứng: -{match.payerShareAmount?.toLocaleString()}đ
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              )}
                                               <Button
                                                 size="sm"
                                                 variant="outline"
@@ -1670,7 +1737,7 @@ const Groups = () => {
                                                 ) : (
                                                   <Check className="h-3 w-3 mr-1" />
                                                 )}
-                                                Đã hoàn
+                                                Đã hoàn ({(match.netPayoutAmount ?? match.totalAmount)?.toLocaleString()}đ)
                                               </Button>
                                             </div>
                                           </div>
@@ -1889,7 +1956,89 @@ const Groups = () => {
                     })
                 )}
               </div>
-            </div>
+              </TabsContent>
+
+              <TabsContent value="history" className="space-y-4 py-1 mt-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Lịch sử các trận đã hoàn tiền đối soát:
+                  </h3>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-muted-foreground"
+                    onClick={fetchSettlementHistory}
+                    disabled={historyLoading}
+                  >
+                    {historyLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+                    Làm mới
+                  </Button>
+                </div>
+
+                {historyLoading ? (
+                  <div className="flex items-center justify-center p-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : settlementHistory.length === 0 ? (
+                  <div className="p-8 text-center border border-dashed rounded-lg bg-muted/10 text-xs text-muted-foreground">
+                    Chưa có lịch sử đối soát hoàn tiền nào được ghi nhận.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                    {settlementHistory.map((h: any) => {
+                      const pDate = h.paidOutAt ? new Date(h.paidOutAt) : null;
+                      const pDateStr = pDate && !isNaN(pDate.getTime())
+                        ? pDate.toLocaleDateString("vi-VN", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "Không rõ";
+
+                      return (
+                        <div
+                          key={h.id}
+                          className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-lg border bg-card text-xs hover:bg-muted/20 transition-colors"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant="outline" className="text-[10px] bg-muted/50">{h.groupName}</Badge>
+                              <span className="font-semibold text-foreground">
+                                📅 {h.date ? new Date(h.date).toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" }) : "Trận đấu"}
+                              </span>
+                              {h.venueName && <span className="text-muted-foreground">• {h.venueName}</span>}
+                            </div>
+                            <div className="flex items-center gap-2 text-muted-foreground flex-wrap text-[11px]">
+                              <span>👤 Người ứng: <strong>{h.paidByMemberName || "Không rõ"}</strong></span>
+                              {h.recipientName && <span>• Nhận: <strong>{h.recipientName}</strong></span>}
+                              <span>• Lúc: {pDateStr}</span>
+                            </div>
+                          </div>
+
+                          <div className="text-left sm:text-right shrink-0">
+                            <div className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                              {(h.netPayoutAmount ?? h.grossAmount)?.toLocaleString()} VND
+                            </div>
+                            {h.payerShareAmount > 0 && (
+                              <div className="text-[10px] text-muted-foreground">
+                                Tiền sân: {h.grossAmount?.toLocaleString()}đ | Trừ phần ứng: -{h.payerShareAmount?.toLocaleString()}đ
+                              </div>
+                            )}
+                            {h.payoutNote && (
+                              <p className="text-[10px] text-muted-foreground italic max-w-xs truncate">
+                                {h.payoutNote}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           ) : null}
         </DialogContent>
       </Dialog>

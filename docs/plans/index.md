@@ -10,6 +10,8 @@ PayOS consolidation & settlement evolution: [Shared Bills Consolidation, Subscri
  
 Expense engine alignment & subsidies: [General Subsidy/Deduction & Shared Bill Synchronization](subsidy-deduction-and-shared-bill-sync-v1.md) (2026-10-24) records generalized subsidy/deductions, safe recalculation on paid matches, and the rule to reuse the expense engine across Shared Bills.
 
+Settlement net offset & audit history: [Settlement Net Offset, Payer Transparency & Audit History](settlement-net-offset-and-history-reconciliation-v1.md) (2026-10-28) records automated net offset for member payers, transparent 3-line settlement cards, audit history ledger, and public Pay UI cleanup.
+
 Production execution: [Group production rollout v1](group-production-rollout-v1.md)
 records the user's 2026-10-22 authorization, ordered tasks and live evidence.
 

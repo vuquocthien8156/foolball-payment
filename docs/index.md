@@ -13,3 +13,4 @@ Welcome to the documentation for the Football Payment and Shared Billing Platfor
   - [Group Platform v3 Master Specs](plans/group-platform-v3.md)
   - [Group Production Rollout](plans/group-production-rollout-v1.md)
   - [PayOS In-App Embedded Checkout & Status Verification](plans/payos-in-app-checkout-and-verification-v1.md)
+  - [Settlement Net Offset, Payer Transparency & Audit History](plans/settlement-net-offset-and-history-reconciliation-v1.md)
