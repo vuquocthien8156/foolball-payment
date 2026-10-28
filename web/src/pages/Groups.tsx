@@ -2398,6 +2398,14 @@ const Groups = () => {
                                 📅 {h.date ? new Date(h.date).toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" }) : "Trận đấu"}
                               </span>
                               {h.venueName && <span className="text-muted-foreground">• {h.venueName}</span>}
+                              {!settlementData?.isSuperAdmin && h.isRecipientCurrentUser && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] font-medium border-amber-500/40 text-amber-700 dark:text-amber-400 bg-amber-500/10"
+                                >
+                                  Super Admin đã hoàn cho bạn
+                                </Badge>
+                              )}
                             </div>
                             <div className="flex items-center gap-2 text-muted-foreground flex-wrap text-[11px]">
                               <span>

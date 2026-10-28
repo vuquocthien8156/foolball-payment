@@ -73,6 +73,43 @@ async function setup(t) {
       status: "PAID",
       channel: "PAYOS",
     },
+    // Super Admin group where manager is only a linked member
+    "groups/football-super": {
+      name: "Football Super Group",
+      sport: "football",
+      status: "active",
+      ownerUid: "owner",
+    },
+    "members/super_mem_manager": {
+      groupId: "football-super",
+      name: "Manager Linked Member",
+      accountUid: "manager",
+    },
+    "members/super_mem_other": {
+      groupId: "football-super",
+      name: "Other Player",
+      accountUid: "other_uid",
+    },
+    "matches/match-super-mgr": {
+      groupId: "football-super",
+      totalAmount: 550000,
+      paidByMemberId: "super_mem_manager",
+      payoutStatus: "PAID_OUT",
+      payoutGrossAmount: 550000,
+      payoutNetAmount: 550000,
+      date: new Date().toISOString(),
+      paidOutAt: new Date().toISOString(),
+    },
+    "matches/match-super-other": {
+      groupId: "football-super",
+      totalAmount: 400000,
+      paidByMemberId: "super_mem_other",
+      payoutStatus: "PAID_OUT",
+      payoutGrossAmount: 400000,
+      payoutNetAmount: 400000,
+      date: new Date().toISOString(),
+      paidOutAt: new Date().toISOString(),
+    },
   });
 
   const { createPlatformRouter } = loadCjs("../../server/lib/platformRoutes.js", {
@@ -167,4 +204,21 @@ test("Automated Net Offset: deducts payer unpaid share and supports history retr
   assert.equal(historyMatch.netPayoutAmount, 323500);
   assert.equal(historyMatch.recipientName, "Thien Bong (Advance Payer)");
   assert.equal(historyMatch.paidByMemberName, "Thien Bong (Advance Payer)");
+
+  // 4. Manager requests settlement history:
+  // Should see their own group's matches, PLUS match-super-mgr from Super Admin's group!
+  // Should NOT see match-super-other!
+  const mgrHistoryRes = await host.request("GET", "/settlement/history", null, "manager");
+  assert.equal(mgrHistoryRes.status, 200);
+  const mgrHistory = mgrHistoryRes.data.history;
+  assert.ok(Array.isArray(mgrHistory));
+
+  const crossGroupMatch = mgrHistory.find((h) => h.id === "match-super-mgr");
+  assert.ok(crossGroupMatch, "Manager must see matches they fronted in Super Admin's group");
+  assert.equal(crossGroupMatch.isRecipientCurrentUser, true);
+  assert.equal(crossGroupMatch.isManagedByCurrentUser, false);
+  assert.equal(crossGroupMatch.paidByMemberName, "Manager Linked Member");
+
+  const otherMatch = mgrHistory.find((h) => h.id === "match-super-other");
+  assert.equal(otherMatch, undefined, "Manager must NOT see other members' matches in foreign groups");
 });

@@ -830,33 +830,6 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     const isSuperAdmin = req.platform?.role === "owner";
     const { groupId, limit = 50 } = req.query;
 
-    let allowedGroupIds = [];
-    if (isSuperAdmin) {
-      if (groupId) {
-        allowedGroupIds = [groupId];
-      } else {
-        const groupsSnap = await db.collection("groups").get();
-        allowedGroupIds = groupsSnap.docs.map((d) => d.id);
-      }
-    } else {
-      const ownedGroups = await db.collection("groups").where("ownerUid", "==", req.uid).get();
-      const coGroups = await db.collection("groupMembers").where("uid", "==", req.uid).get();
-      const gSet = new Set(ownedGroups.docs.map((d) => d.id));
-      coGroups.docs.forEach((d) => {
-        if (["manager", "admin"].includes(d.data().role)) gSet.add(d.data().groupId);
-      });
-      if (groupId) {
-        if (!gSet.has(groupId)) return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
-        allowedGroupIds = [groupId];
-      } else {
-        allowedGroupIds = Array.from(gSet);
-      }
-    }
-
-    if (allowedGroupIds.length === 0) {
-      return res.json({ history: [] });
-    }
-
     // Preload groups, members, and platformAccounts for fast and robust resolution
     const [allGroupsSnap, allMembersSnap, allAccountsSnap] = await Promise.all([
       db.collection("groups").get(),
@@ -868,19 +841,67 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     allGroupsSnap.docs.forEach((d) => groupsMap.set(d.id, d.data()));
 
     const membersMap = new Map();
-    allMembersSnap.docs.forEach((d) => membersMap.set(d.id, d.data()));
+    const myLinkedMemberIds = new Set();
+    allMembersSnap.docs.forEach((d) => {
+      const data = d.data();
+      membersMap.set(d.id, { id: d.id, ...data });
+      if (data.accountUid === req.uid) {
+        myLinkedMemberIds.add(d.id);
+      }
+    });
 
     const accountsMap = new Map();
     allAccountsSnap.docs.forEach((d) => accountsMap.set(d.id, d.data()));
 
+    // Managed groups for current user
+    const managedGroupIds = new Set();
+    if (isSuperAdmin) {
+      allGroupsSnap.docs.forEach((d) => managedGroupIds.add(d.id));
+    } else {
+      const ownedGroups = await db.collection("groups").where("ownerUid", "==", req.uid).get();
+      const coGroups = await db.collection("groupMembers").where("uid", "==", req.uid).get();
+      ownedGroups.docs.forEach((d) => managedGroupIds.add(d.id));
+      coGroups.docs.forEach((d) => {
+        if (["manager", "admin"].includes(d.data().role)) managedGroupIds.add(d.data().groupId);
+      });
+    }
+
+    // Determine target groups
+    let targetGroupIds = [];
+    if (groupId) {
+      const managesThis = managedGroupIds.has(groupId);
+      const hasMemberInGroup = Array.from(myLinkedMemberIds).some((mId) => {
+        const mObj = membersMap.get(mId);
+        return mObj && (mObj.groupId === groupId || (!mObj.groupId && groupId === DEFAULT_GROUP_ID));
+      });
+      if (!managesThis && !hasMemberInGroup && !isSuperAdmin) {
+        return res.status(403).json({ error: "GROUP_ACCESS_DENIED" });
+      }
+      targetGroupIds = [groupId];
+    } else {
+      // If no groupId specified, inspect all groups in the system
+      targetGroupIds = allGroupsSnap.docs.map((d) => d.id);
+    }
+
     const history = [];
-    for (const gid of allowedGroupIds) {
+    for (const gid of targetGroupIds) {
       const gData = groupsMap.get(gid) || {};
       const gName = gData.name || gid;
       const ownerUid = gData.ownerUid;
       let managerName = gData.ownerDisplayName || "";
       if (!managerName && ownerUid && accountsMap.has(ownerUid)) {
         managerName = accountsMap.get(ownerUid).displayName || accountsMap.get(ownerUid).email || "";
+      }
+
+      const managesThisGroup = isSuperAdmin || managedGroupIds.has(gid);
+      const hasMemberInGroup = Array.from(myLinkedMemberIds).some((mId) => {
+        const mObj = membersMap.get(mId);
+        return mObj && (mObj.groupId === gid || (!mObj.groupId && gid === DEFAULT_GROUP_ID));
+      });
+
+      // If user does not manage this group and has no linked member in it, skip querying
+      if (!managesThisGroup && !hasMemberInGroup) {
+        continue;
       }
 
       const matchesSnap = await db.collection("matches")
@@ -890,6 +911,15 @@ function createPlatformRouter({ db, auth, FieldValue }) {
 
       matchesSnap.docs.forEach((d) => {
         const m = d.data();
+        const isCurrentCallerPayer = (m.paidByMemberId && myLinkedMemberIds.has(m.paidByMemberId)) ||
+          (!m.paidByMemberId && ownerUid === req.uid) ||
+          (m.paidOutRecipientId && m.paidOutRecipientId === req.uid);
+
+        // Security check: If manager does not manage this group, they can ONLY view matches where they were the payer
+        if (!managesThisGroup && !isCurrentCallerPayer) {
+          return;
+        }
+
         let dateIso = null;
         if (m.date?.toDate) dateIso = m.date.toDate().toISOString();
         else if (m.date) dateIso = new Date(m.date).toISOString();
@@ -928,6 +958,8 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           paidOutAt: paidOutAtIso,
           paidOutBy: m.paidOutBy || null,
           payoutNote: m.payoutNote || null,
+          isRecipientCurrentUser: isCurrentCallerPayer,
+          isManagedByCurrentUser: managesThisGroup,
         });
       });
     }
