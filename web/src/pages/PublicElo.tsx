@@ -1,20 +1,27 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { doc, onSnapshot, collection, query, where, getDocs } from "firebase/firestore";
+import {
+  doc,
+  onSnapshot,
+  collection,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useGroup, useGroupPath } from "@/contexts/GroupContext";
 import {
   MemberEloStats,
   GroupEloSnapshot,
   TIER_CONFIG,
-  EloTier
+  EloTier,
 } from "@/lib/elo";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle
+  CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,7 +31,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogHeader,
-  DialogTitle
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
   Trophy,
@@ -38,7 +45,7 @@ import {
   Zap,
   Target,
   ShieldAlert,
-  ChevronRight
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -50,7 +57,9 @@ const PublicElo: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTier, setSelectedTier] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"elo" | "winRate" | "matches">("elo");
-  const [selectedMember, setSelectedMember] = useState<MemberEloStats | null>(null);
+  const [selectedMember, setSelectedMember] = useState<MemberEloStats | null>(
+    null,
+  );
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
@@ -71,13 +80,13 @@ const PublicElo: React.FC = () => {
       (error) => {
         console.warn("Snapshot subscription notice:", error.message);
         loadFromMembersCollection();
-      }
+      },
     );
 
     const loadFromMembersCollection = async () => {
       try {
         const snap = await getDocs(
-          query(collection(db, "members"), where("groupId", "==", groupId))
+          query(collection(db, "members"), where("groupId", "==", groupId)),
         );
         const membersList: MemberEloStats[] = snap.docs
           .map((d) => {
@@ -98,7 +107,7 @@ const PublicElo: React.FC = () => {
               winRate: data.winRate || 0,
               recentForm: data.recentForm || [],
               lastDelta: data.lastDelta || 0,
-              history: data.eloHistory || []
+              history: data.eloHistory || [],
             } as MemberEloStats;
           })
           .filter((m) => !m.inactive)
@@ -112,7 +121,7 @@ const PublicElo: React.FC = () => {
           groupId,
           updatedAt: new Date().toISOString(),
           totalMatchesProcessed: 0,
-          rankings: membersList
+          rankings: membersList,
         });
       } catch (err) {
         console.error("Error loading members for Elo:", err);
@@ -153,7 +162,7 @@ const PublicElo: React.FC = () => {
       list = list.filter(
         (m) =>
           m.name.toLowerCase().includes(q) ||
-          (m.nickname && m.nickname.toLowerCase().includes(q))
+          (m.nickname && m.nickname.toLowerCase().includes(q)),
       );
     }
 
@@ -168,7 +177,8 @@ const PublicElo: React.FC = () => {
       });
     } else if (sortBy === "matches") {
       list.sort((a, b) => {
-        if (b.matchesPlayed !== a.matchesPlayed) return b.matchesPlayed - a.matchesPlayed;
+        if (b.matchesPlayed !== a.matchesPlayed)
+          return b.matchesPlayed - a.matchesPlayed;
         return b.elo - a.elo;
       });
     } else {
@@ -194,7 +204,7 @@ const PublicElo: React.FC = () => {
           "inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold shadow-xs",
           isW && "bg-emerald-500 text-white",
           isD && "bg-amber-500 text-white",
-          !isW && !isD && "bg-rose-500 text-white"
+          !isW && !isD && "bg-rose-500 text-white",
         )}
       >
         {isW ? "W" : isD ? "D" : "L"}
@@ -219,7 +229,10 @@ const PublicElo: React.FC = () => {
             </Link>
           </Button>
 
-          <Badge variant="outline" className="text-xs py-1 px-2.5 bg-background shadow-xs">
+          <Badge
+            variant="outline"
+            className="text-xs py-1 px-2.5 bg-background shadow-xs"
+          >
             {group?.name || "Bóng đá"}
           </Badge>
         </div>
@@ -233,7 +246,8 @@ const PublicElo: React.FC = () => {
             Bảng Xếp Hạng ELO
           </h1>
           <p className="text-sm sm:text-base text-muted-foreground max-w-lg mx-auto">
-            Hệ thống tính điểm ELO tự động dựa trên kết quả Thắng, Thua, Hoà của từng trận đấu bóng đá.
+            Hệ thống tính điểm ELO tự động dựa trên kết quả Thắng, Thua, Hoà của
+            từng trận đấu bóng đá.
           </p>
         </div>
 
@@ -283,7 +297,8 @@ const PublicElo: React.FC = () => {
                       {bestWinratePlayer.name}
                     </p>
                     <p className="text-xs font-black text-emerald-600">
-                      {bestWinratePlayer.winRate}% ({bestWinratePlayer.wins}/{bestWinratePlayer.matchesPlayed} trận)
+                      {bestWinratePlayer.winRate}% ({bestWinratePlayer.wins}/
+                      {bestWinratePlayer.matchesPlayed} trận)
                     </p>
                   </div>
                 </CardContent>
@@ -308,7 +323,9 @@ const PublicElo: React.FC = () => {
                       {hotStreakPlayer.name}
                     </p>
                     <div className="flex items-center gap-1 mt-0.5">
-                      {hotStreakPlayer.recentForm.slice(-4).map((f, i) => renderFormBadge(f, i))}
+                      {hotStreakPlayer.recentForm
+                        .slice(-4)
+                        .map((f, i) => renderFormBadge(f, i))}
                     </div>
                   </div>
                 </CardContent>
@@ -336,23 +353,29 @@ const PublicElo: React.FC = () => {
                 onClick={() => setSelectedTier("all")}
                 className={cn(
                   "px-2.5 py-1 rounded-md font-medium transition-all",
-                  selectedTier === "all" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"
+                  selectedTier === "all"
+                    ? "bg-background text-foreground shadow-xs font-bold"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 Tất cả ({rawRankings.length})
               </button>
-              {(["master", "diamond", "gold", "silver"] as EloTier[]).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setSelectedTier(t)}
-                  className={cn(
-                    "px-2 py-1 rounded-md font-medium transition-all",
-                    selectedTier === t ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {TIER_CONFIG[t].icon} {TIER_CONFIG[t].label}
-                </button>
-              ))}
+              {(["master", "diamond", "gold", "silver"] as EloTier[]).map(
+                (t) => (
+                  <button
+                    key={t}
+                    onClick={() => setSelectedTier(t)}
+                    className={cn(
+                      "px-2 py-1 rounded-md font-medium transition-all",
+                      selectedTier === t
+                        ? "bg-background text-foreground shadow-xs font-bold"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {TIER_CONFIG[t].icon} {TIER_CONFIG[t].label}
+                  </button>
+                ),
+              )}
             </div>
 
             {/* Sort Toggle */}
@@ -361,7 +384,9 @@ const PublicElo: React.FC = () => {
                 onClick={() => setSortBy("elo")}
                 className={cn(
                   "px-2.5 py-1 rounded-md font-medium transition-all",
-                  sortBy === "elo" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"
+                  sortBy === "elo"
+                    ? "bg-background text-foreground shadow-xs font-bold"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 ELO
@@ -370,7 +395,9 @@ const PublicElo: React.FC = () => {
                 onClick={() => setSortBy("winRate")}
                 className={cn(
                   "px-2.5 py-1 rounded-md font-medium transition-all",
-                  sortBy === "winRate" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"
+                  sortBy === "winRate"
+                    ? "bg-background text-foreground shadow-xs font-bold"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 % Thắng
@@ -379,7 +406,9 @@ const PublicElo: React.FC = () => {
                 onClick={() => setSortBy("matches")}
                 className={cn(
                   "px-2.5 py-1 rounded-md font-medium transition-all",
-                  sortBy === "matches" ? "bg-background text-foreground shadow-xs font-bold" : "text-muted-foreground hover:text-foreground"
+                  sortBy === "matches"
+                    ? "bg-background text-foreground shadow-xs font-bold"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 Số trận
@@ -461,7 +490,7 @@ const PublicElo: React.FC = () => {
                               variant="outline"
                               className={cn(
                                 "text-[10px] px-1.5 py-0 h-4 font-normal shrink-0",
-                                tier.bgBadge
+                                tier.bgBadge,
                               )}
                             >
                               {tier.label}
@@ -472,18 +501,21 @@ const PublicElo: React.FC = () => {
                             <span className="font-black text-base sm:text-lg text-foreground">
                               {member.elo}
                             </span>
-                            {member.lastDelta !== undefined && member.lastDelta !== 0 && (
-                              <span
-                                className={cn(
-                                  "text-xs font-bold px-1.5 py-0.5 rounded",
-                                  member.lastDelta > 0
-                                    ? "text-emerald-700 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300"
-                                    : "text-rose-700 bg-rose-100 dark:bg-rose-950/60 dark:text-rose-300"
-                                )}
-                              >
-                                {member.lastDelta > 0 ? `+${member.lastDelta}` : member.lastDelta}
-                              </span>
-                            )}
+                            {member.lastDelta !== undefined &&
+                              member.lastDelta !== 0 && (
+                                <span
+                                  className={cn(
+                                    "text-xs font-bold px-1.5 py-0.5 rounded",
+                                    member.lastDelta > 0
+                                      ? "text-emerald-700 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                      : "text-rose-700 bg-rose-100 dark:bg-rose-950/60 dark:text-rose-300",
+                                  )}
+                                >
+                                  {member.lastDelta > 0
+                                    ? `+${member.lastDelta}`
+                                    : member.lastDelta}
+                                </span>
+                              )}
                           </div>
                         </div>
 
@@ -531,10 +563,11 @@ const PublicElo: React.FC = () => {
                       <Badge
                         className={cn(
                           "text-xs font-semibold",
-                          TIER_CONFIG[selectedMember.tier]?.bgBadge
+                          TIER_CONFIG[selectedMember.tier]?.bgBadge,
                         )}
                       >
-                        {TIER_CONFIG[selectedMember.tier]?.icon} {TIER_CONFIG[selectedMember.tier]?.label}
+                        {TIER_CONFIG[selectedMember.tier]?.icon}{" "}
+                        {TIER_CONFIG[selectedMember.tier]?.label}
                       </Badge>
                     </div>
                     {selectedMember.nickname && (
@@ -573,24 +606,40 @@ const PublicElo: React.FC = () => {
               {/* Detailed Breakdown */}
               <div className="space-y-2 text-sm bg-muted/40 p-3 rounded-xl border">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-muted-foreground">Tổng số trận tham gia:</span>
-                  <span className="font-bold">{selectedMember.matchesPlayed} trận</span>
+                  <span className="text-muted-foreground">
+                    Tổng số trận tham gia:
+                  </span>
+                  <span className="font-bold">
+                    {selectedMember.matchesPlayed} trận
+                  </span>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-muted-foreground">Kết quả chi tiết:</span>
+                  <span className="text-muted-foreground">
+                    Kết quả chi tiết:
+                  </span>
                   <div className="flex items-center gap-2 font-medium">
-                    <span className="text-emerald-600">{selectedMember.wins} Thắng</span>
+                    <span className="text-emerald-600">
+                      {selectedMember.wins} Thắng
+                    </span>
                     <span>•</span>
-                    <span className="text-amber-600">{selectedMember.draws} Hòa</span>
+                    <span className="text-amber-600">
+                      {selectedMember.draws} Hòa
+                    </span>
                     <span>•</span>
-                    <span className="text-rose-600">{selectedMember.losses} Thua</span>
+                    <span className="text-rose-600">
+                      {selectedMember.losses} Thua
+                    </span>
                   </div>
                 </div>
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-muted-foreground">Phong độ gần nhất:</span>
+                  <span className="text-muted-foreground">
+                    Phong độ gần nhất:
+                  </span>
                   <div className="flex items-center gap-1">
                     {selectedMember.recentForm.length > 0 ? (
-                      selectedMember.recentForm.map((f, i) => renderFormBadge(f, i))
+                      selectedMember.recentForm.map((f, i) =>
+                        renderFormBadge(f, i),
+                      )
                     ) : (
                       <span className="text-muted-foreground">Chưa có</span>
                     )}
@@ -618,12 +667,22 @@ const PublicElo: React.FC = () => {
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
                               <Badge
-                                variant={isWin ? "default" : isDraw ? "secondary" : "destructive"}
+                                variant={
+                                  isWin
+                                    ? "default"
+                                    : isDraw
+                                      ? "secondary"
+                                      : "destructive"
+                                }
                                 className={cn(
                                   "text-[10px] font-bold px-1.5 py-0 h-4.5",
-                                  isWin && "bg-emerald-600 hover:bg-emerald-600 text-white",
-                                  isDraw && "bg-amber-500 hover:bg-amber-500 text-white",
-                                  !isWin && !isDraw && "bg-rose-600 hover:bg-rose-600 text-white"
+                                  isWin &&
+                                    "bg-emerald-600 hover:bg-emerald-600 text-white",
+                                  isDraw &&
+                                    "bg-amber-500 hover:bg-amber-500 text-white",
+                                  !isWin &&
+                                    !isDraw &&
+                                    "bg-rose-600 hover:bg-rose-600 text-white",
                                 )}
                               >
                                 {isWin ? "THẮNG" : isDraw ? "HÒA" : "THUA"}
@@ -633,7 +692,9 @@ const PublicElo: React.FC = () => {
                               </span>
                             </div>
                             <p className="text-[11px] text-muted-foreground mt-0.5">
-                              {h.date ? new Date(h.date).toLocaleDateString("vi-VN") : "Trận đấu"}
+                              {h.date
+                                ? new Date(h.date).toLocaleDateString("vi-VN")
+                                : "Trận đấu"}
                               {h.scoreLabel && ` • Tỉ lệ tiền: ${h.scoreLabel}`}
                             </p>
                           </div>
@@ -645,8 +706,8 @@ const PublicElo: React.FC = () => {
                                 h.delta > 0
                                   ? "text-emerald-600"
                                   : h.delta < 0
-                                  ? "text-rose-600"
-                                  : "text-muted-foreground"
+                                    ? "text-rose-600"
+                                    : "text-muted-foreground",
                               )}
                             >
                               {h.delta > 0 ? `+${h.delta}` : h.delta}
@@ -693,4 +754,3 @@ function CrownIcon(props: React.SVGProps<SVGSVGElement>) {
 }
 
 export default PublicElo;
-
