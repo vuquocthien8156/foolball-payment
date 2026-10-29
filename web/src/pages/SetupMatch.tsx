@@ -170,6 +170,7 @@ interface MatchConfig {
   venueName?: string;
   mapIframe?: string;
   attendanceCloseHours?: number;
+  attendanceReminderOnly?: boolean;
   paidByMemberId?: string | null;
   skipAutoAttendance?: boolean;
   sufficientPlayerCount?: number;
@@ -307,6 +308,7 @@ const SetupMatch = () => {
   const [venueName, setVenueName] = useState("");
   const [mapIframe, setMapIframe] = useState("");
   const [attendanceCloseHours, setAttendanceCloseHours] = useState(12);
+  const [attendanceReminderOnly, setAttendanceReminderOnly] = useState(false);
   const [sufficientPlayerCount, setSufficientPlayerCount] = useState<
     number | ""
   >(usesTeams ? 14 : "");
@@ -374,6 +376,10 @@ const SetupMatch = () => {
     if (tpl.mapIframe !== undefined) setMapIframe(tpl.mapIframe || "");
     if (tpl.attendanceCloseHours !== undefined)
       setAttendanceCloseHours(tpl.attendanceCloseHours);
+    if (tpl.attendanceReminderOnly !== undefined)
+      setAttendanceReminderOnly(Boolean(tpl.attendanceReminderOnly));
+    else
+      setAttendanceReminderOnly(false);
     if (tpl.sufficientPlayerCount !== undefined)
       setSufficientPlayerCount(
         tpl.sufficientPlayerCount ?? (usesTeams ? 14 : ""),
@@ -427,6 +433,7 @@ const SetupMatch = () => {
         totalAmount,
         mapIframe: mapIframe || "",
         attendanceCloseHours,
+        attendanceReminderOnly,
         sufficientPlayerCount:
           sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
@@ -481,6 +488,7 @@ const SetupMatch = () => {
         totalAmount: numericTotal,
         mapIframe: mapIframe || "",
         attendanceCloseHours,
+        attendanceReminderOnly,
         sufficientPlayerCount:
           sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
@@ -747,6 +755,7 @@ const SetupMatch = () => {
         setVenueName(savedConfig.venueName || "");
         setMapIframe(savedConfig.mapIframe || "");
         setAttendanceCloseHours(savedConfig.attendanceCloseHours ?? 12);
+        setAttendanceReminderOnly(Boolean(savedConfig.attendanceReminderOnly));
         setSufficientPlayerCount(
           savedConfig.sufficientPlayerCount ?? (usesTeams ? 14 : ""),
         );
@@ -1199,6 +1208,7 @@ const SetupMatch = () => {
         venueName: venueName || null,
         mapIframe: mapIframe || null,
         attendanceCloseHours,
+        attendanceReminderOnly,
         sufficientPlayerCount:
           sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
@@ -1261,6 +1271,7 @@ const SetupMatch = () => {
         venueName: venueName || null,
         mapIframe: mapIframe || null,
         attendanceCloseHours,
+        attendanceReminderOnly,
         sufficientPlayerCount:
           sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
@@ -1390,6 +1401,7 @@ const SetupMatch = () => {
         venueName: venueName || null,
         mapIframe: mapIframe || null,
         attendanceCloseHours,
+        attendanceReminderOnly,
         sufficientPlayerCount:
           sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
@@ -1830,6 +1842,7 @@ const SetupMatch = () => {
         venueName: venueName || null,
         mapIframe: mapIframe || null,
         attendanceCloseHours,
+        attendanceReminderOnly,
         sufficientPlayerCount:
           sufficientPlayerCount === "" ? null : Number(sufficientPlayerCount),
         paidByMemberId: paidByMemberId || null,
@@ -3057,9 +3070,13 @@ const SetupMatch = () => {
                   className="flex items-center gap-2"
                 >
                   <Clock className="h-4 w-4" />
-                  {usesTeams
-                    ? "Đóng điểm danh trước giờ đá (giờ)"
-                    : "Đóng điểm danh trước giờ chơi (giờ)"}
+                  {attendanceReminderOnly
+                    ? (usesTeams
+                        ? "Nhắc nhở trước giờ đá (giờ)"
+                        : "Nhắc nhở trước giờ chơi (giờ)")
+                    : usesTeams
+                        ? "Đóng điểm danh trước giờ đá (giờ)"
+                        : "Đóng điểm danh trước giờ chơi (giờ)"}
                 </Label>
                 <Input
                   id="close-hours"
@@ -3071,6 +3088,24 @@ const SetupMatch = () => {
                     setAttendanceCloseHours(parseInt(e.target.value) || 12)
                   }
                 />
+                <div className="flex items-center justify-between rounded-lg border p-2.5 bg-muted/20">
+                  <div className="space-y-0.5 pr-2">
+                    <Label
+                      htmlFor="attendance-reminder-only"
+                      className="text-xs font-medium cursor-pointer"
+                    >
+                      Chỉ gửi nhắc nhở (không đóng điểm danh)
+                    </Label>
+                    <p className="text-[11px] text-muted-foreground leading-tight">
+                      Đến mốc này chỉ gửi thông báo nhắc chốt sân. Thành viên vẫn có thể tiếp tục điểm danh thêm.
+                    </p>
+                  </div>
+                  <Switch
+                    id="attendance-reminder-only"
+                    checked={attendanceReminderOnly}
+                    onCheckedChange={setAttendanceReminderOnly}
+                  />
+                </div>
                 <p className="text-xs text-muted-foreground">
                   Mặc định: 12 giờ trước giờ bắt đầu
                 </p>

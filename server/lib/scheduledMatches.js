@@ -43,6 +43,7 @@ async function createMatchFromTemplate({ db, FieldValue, groupId, templateId, cr
     expenseItems: [{ id: "default", description: "Tiền sân", amount: 0, exemptMemberIds: [], type: "SHARED" }],
     teamCount: groupData.sport === "badminton" ? 1 : 2,
     attendanceCloseHours: 12,
+    attendanceReminderOnly: false,
     sufficientPlayerCount: groupData.sport === "badminton" ? null : 14,
     kickoffTime: "19:00",
   };
@@ -78,6 +79,7 @@ async function createMatchFromTemplate({ db, FieldValue, groupId, templateId, cr
     venueName: templateData.venueName || null,
     mapIframe: templateData.mapIframe || null,
     attendanceCloseHours: templateData.attendanceCloseHours ?? 12,
+    attendanceReminderOnly: Boolean(templateData.attendanceReminderOnly),
     sufficientPlayerCount: templateData.sufficientPlayerCount || null,
     paidByMemberId: templateData.paidByMemberId || null,
     skipAutoAttendance: false,

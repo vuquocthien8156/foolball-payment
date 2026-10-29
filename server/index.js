@@ -1777,21 +1777,30 @@ exports.checkAttendanceClose = onSchedule(
               }`
             : `${remainingMin} phút`;
 
+        const isReminderOnly = Boolean(data.attendanceReminderOnly);
         {
           const target = await targets.getSlackTarget(groupId);
           if (target) {
             await slack
               .sendBlock({
-                headerText: "⏰ Sắp đóng cổng điểm danh",
-                bodyMarkdown: `<!channel>\n📅 Trận *${slack.formatMatchDate(data.date)}*${
-                  data.venueName ? `\n📍 ${data.venueName}` : ""
-                }\n\n🚪 Cổng đóng lúc *${slack.formatTimestamp(closing)}* — ⏳ còn *${remainingLabel}*\n👥 Hiện đã có *${attCount} người* điểm danh.\n\n🏃 Ai chưa điểm danh thì vào nhanh nhé!`,
+                headerText: isReminderOnly
+                  ? "⏰ Sắp đến mốc nhắc chốt điểm danh"
+                  : "⏰ Sắp đóng cổng điểm danh",
+                bodyMarkdown: isReminderOnly
+                  ? `<!channel>\n📅 Trận *${slack.formatMatchDate(data.date)}*${
+                      data.venueName ? `\n📍 ${data.venueName}` : ""
+                    }\n\n📋 Mốc nhắc chốt lúc *${slack.formatTimestamp(closing)}* — ⏳ còn *${remainingLabel}*\n👥 Hiện đã có *${attCount} người* điểm danh.\n\n🏃 Ai chưa điểm danh vào cập nhật sớm để chốt số lượng sân nhé! (Cổng điểm danh vẫn mở sau mốc này)`
+                  : `<!channel>\n📅 Trận *${slack.formatMatchDate(data.date)}*${
+                      data.venueName ? `\n📍 ${data.venueName}` : ""
+                    }\n\n🚪 Cổng đóng lúc *${slack.formatTimestamp(closing)}* — ⏳ còn *${remainingLabel}*\n👥 Hiện đã có *${attCount} người* điểm danh.\n\n🏃 Ai chưa điểm danh thì vào nhanh nhé!`,
                 cta: {
                   label: "Điểm danh ngay",
                   url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/attendance`,
                   style: "primary",
                 },
-                fallbackText: "Sắp đóng cổng điểm danh",
+                fallbackText: isReminderOnly
+                  ? "Sắp đến mốc nhắc chốt điểm danh"
+                  : "Sắp đóng cổng điểm danh",
               }, target)
               .catch((e) => console.error("[slack] A3 failed", e));
           }
@@ -1820,20 +1829,42 @@ exports.checkAttendanceClose = onSchedule(
           (d) => d.data().memberName || "Không rõ"
         );
 
+        const isReminderOnly = Boolean(data.attendanceReminderOnly);
         {
           const target = await targets.getSlackTarget(groupId);
           if (target) {
             await slack
               .sendBlock({
-                headerText: "🔒 Đã chốt danh sách điểm danh",
-                bodyMarkdown: `📅 Trận *${slack.formatMatchDate(data.date)}*${
-                  data.venueName ? `\n📍 ${data.venueName}` : ""
-                }\n\n👥 *${attSnap.size} người tham gia*${
-                  attendees.length > 0
-                    ? `:\n${attendees.map((n) => `   👤 ${n}`).join("\n")}`
-                    : ""
-                }${notAttSnap.size > 0 ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_` : ""}\n\n⚽ Hẹn anh em ra sân!`,
-                fallbackText: `Chốt ${attSnap.size} người tham gia`,
+                headerText: isReminderOnly
+                  ? "📋 Tình hình điểm danh (Mốc chốt sân)"
+                  : "🔒 Đã chốt danh sách điểm danh",
+                bodyMarkdown: isReminderOnly
+                  ? `📅 Trận *${slack.formatMatchDate(data.date)}*${
+                      data.venueName ? `\n📍 ${data.venueName}` : ""
+                    }\n\n👥 *${attSnap.size} người tham gia*${
+                      attendees.length > 0
+                        ? `:\n${attendees.map((n) => `   👤 ${n}`).join("\n")}`
+                        : ""
+                    }${notAttSnap.size > 0 ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_` : ""}\n\n💡 Cổng điểm danh vẫn tiếp tục mở để anh em đăng ký thêm.\n⚽ Hẹn anh em ra sân!`
+                  : `📅 Trận *${slack.formatMatchDate(data.date)}*${
+                      data.venueName ? `\n📍 ${data.venueName}` : ""
+                    }\n\n👥 *${attSnap.size} người tham gia*${
+                      attendees.length > 0
+                        ? `:\n${attendees.map((n) => `   👤 ${n}`).join("\n")}`
+                        : ""
+                    }${notAttSnap.size > 0 ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_` : ""}\n\n⚽ Hẹn anh em ra sân!`,
+                fallbackText: isReminderOnly
+                  ? `Mốc chốt sân: ${attSnap.size} người tham gia`
+                  : `Chốt ${attSnap.size} người tham gia`,
+                ...(isReminderOnly
+                  ? {
+                      cta: {
+                        label: "Điểm danh tiếp",
+                        url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/attendance`,
+                        style: "primary",
+                      },
+                    }
+                  : {}),
               }, target)
               .catch((e) => console.error("[slack] A4 failed", e));
           }

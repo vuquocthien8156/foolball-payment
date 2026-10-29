@@ -172,6 +172,7 @@ function createGroupRouter({ db, auth, FieldValue, slack, env = process.env }) {
       totalAmount: Number(req.body.totalAmount) || 0,
       mapIframe: typeof req.body.mapIframe === "string" ? req.body.mapIframe.trim() : "",
       attendanceCloseHours: req.body.attendanceCloseHours !== undefined ? Number(req.body.attendanceCloseHours) : 12,
+      attendanceReminderOnly: Boolean(req.body.attendanceReminderOnly),
       sufficientPlayerCount: req.body.sufficientPlayerCount ? Number(req.body.sufficientPlayerCount) : null,
       paidByMemberId: req.body.paidByMemberId || null,
       kickoffTime: typeof req.body.kickoffTime === "string" ? req.body.kickoffTime : "19:00",

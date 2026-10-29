@@ -89,6 +89,7 @@ interface Match {
   venueName?: string;
   mapIframe?: string;
   attendanceCloseHours?: number;
+  attendanceReminderOnly?: boolean;
   teamsConfig?: {
     id: string;
     name: string;
@@ -209,15 +210,17 @@ const Attendance = () => {
     return () => clearInterval(id);
   }, []);
 
-  const { closingTime, isAttendanceClosed, timeUntilClose } = useMemo(() => {
+  const { closingTime, isAttendanceClosed, isReminderOnly, timeUntilClose } = useMemo(() => {
     if (!match) {
       return {
         closingTime: null,
         isAttendanceClosed: false,
+        isReminderOnly: false,
         timeUntilClose: null,
       };
     }
 
+    const isReminderOnly = Boolean(match.attendanceReminderOnly);
     const closeHours = match.attendanceCloseHours ?? 12;
     const matchDate = new Date(match.date.seconds * 1000);
 
@@ -225,13 +228,13 @@ const Attendance = () => {
       matchDate.getTime() - closeHours * 60 * 60 * 1000
     );
 
-    const isClosed = now > closingDate;
+    const isClosed = !isReminderOnly && now > closingDate;
     let timeUntilClose: {
       label: string;
       tone: "safe" | "warning" | "danger";
     } | null = null;
 
-    if (!isClosed) {
+    if (now <= closingDate) {
       const diffMs = closingDate.getTime() - now.getTime();
       const diffHours = diffMs / (1000 * 60 * 60);
       const totalHours = Math.floor(diffHours);
@@ -258,6 +261,7 @@ const Attendance = () => {
     return {
       closingTime: closingDate,
       isAttendanceClosed: isClosed,
+      isReminderOnly,
       timeUntilClose,
     };
   }, [match, now]);
@@ -943,10 +947,10 @@ const Attendance = () => {
                                 : "text-emerald-600"
                             }`}
                           >
-                            {timeUntilClose?.label ?? "--"}
+                            {timeUntilClose?.label ?? (isReminderOnly ? "Mở" : "--")}
                           </span>
                           <span className="mt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                            Còn lại
+                            {isReminderOnly ? (timeUntilClose ? "Nhắc chốt" : "Điểm danh") : "Còn lại"}
                           </span>
                         </>
                       )}
@@ -966,16 +970,50 @@ const Attendance = () => {
                   ) : (
                     closingTime && (
                       <div className={`border-t px-5 py-2 text-center text-xs ${countdownToneClass}`}>
-                        Cổng đóng lúc{" "}
-                        <span className="font-bold tabular-nums">
-                          {closingTime.toLocaleString("vi-VN", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            day: "2-digit",
-                            month: "2-digit",
-                            timeZone: MATCH_TZ,
-                          })}
-                        </span>
+                        {isReminderOnly ? (
+                          now > closingDate ? (
+                            <span>
+                              Đã qua mốc nhắc chốt sân (
+                              <span className="font-bold tabular-nums">
+                                {closingTime.toLocaleString("vi-VN", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  timeZone: MATCH_TZ,
+                                })}
+                              </span>
+                              ). Cổng vẫn nhận điểm danh.
+                            </span>
+                          ) : (
+                            <span>
+                              Mốc nhắc chốt sân lúc{" "}
+                              <span className="font-bold tabular-nums">
+                                {closingTime.toLocaleString("vi-VN", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  timeZone: MATCH_TZ,
+                                })}
+                              </span>{" "}
+                              (vẫn nhận điểm danh sau mốc này)
+                            </span>
+                          )
+                        ) : (
+                          <span>
+                            Cổng đóng lúc{" "}
+                            <span className="font-bold tabular-nums">
+                              {closingTime.toLocaleString("vi-VN", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                day: "2-digit",
+                                month: "2-digit",
+                                timeZone: MATCH_TZ,
+                              })}
+                            </span>
+                          </span>
+                        )}
                       </div>
                     )
                   )}
