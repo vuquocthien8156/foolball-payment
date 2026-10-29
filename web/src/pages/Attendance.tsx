@@ -51,6 +51,7 @@ import {
   ChevronUp,
   Eye,
   EyeOff,
+  Sparkles,
 } from "lucide-react";
 import {
   collection,
@@ -68,7 +69,13 @@ import { Badge } from "@/components/ui/badge";
 import useLocalStorage from "@/hooks/useLocalStorage";
 import { ensureNotificationToken } from "@/lib/notifications";
 import { postApiJson } from "@/lib/api";
-import { MATCH_TZ, getMatchTimeParts, formatMatchDateTime } from "@/lib/utils";
+import { MATCH_TZ, getMatchTimeParts, formatMatchDateTime, cn } from "@/lib/utils";
+import {
+  EloTier,
+  TIER_CONFIG,
+  getEloTier,
+  balanceTeamsByElo,
+} from "@/lib/elo";
 
 // Interfaces
 interface Member {
@@ -78,6 +85,9 @@ interface Member {
   autoAttendance?: boolean;
   inactive?: boolean;
   isPriority?: boolean;
+  elo?: number;
+  eloTier?: EloTier;
+  eloRank?: number;
 }
 
 interface Match {
@@ -660,6 +670,51 @@ const Attendance = () => {
       prevTeams.map((team) => ({ ...team, members: [] }))
     );
     setTeamPool(attendanceMembers);
+  };
+
+  const handleAutoBalanceElo = () => {
+    if (teams.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Chưa có đội",
+        description: "Trận đấu chưa có cấu hình đội để phân chia.",
+      });
+      return;
+    }
+
+    // Collect all attending members currently in either pool or teams
+    const allPlayersMap = new Map<string, Member>();
+    teamPool.forEach((m) => allPlayersMap.set(m.id, m));
+    teams.forEach((t) => t.members.forEach((m) => allPlayersMap.set(m.id, m)));
+    attendanceMembers.forEach((m) => allPlayersMap.set(m.id, m));
+
+    const playersToBalance = Array.from(allPlayersMap.values());
+    if (playersToBalance.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Chưa có ai điểm danh",
+        description: "Cần ít nhất 1 thành viên điểm danh để chia đội.",
+      });
+      return;
+    }
+
+    const { teams: balancedTeamLists, deltaElo } = balanceTeamsByElo(
+      playersToBalance,
+      teams.length
+    );
+
+    const updatedTeams = teams.map((team, idx) => ({
+      ...team,
+      members: balancedTeamLists[idx] || [],
+    }));
+
+    setTeams(updatedTeams);
+    setTeamPool([]);
+
+    toast({
+      title: "⚡ Đã chia đều theo ELO",
+      description: `Đã phân chia ${playersToBalance.length} người vào ${teams.length} đội (Độ chênh lệch: ${deltaElo} ELO).`,
+    });
   };
 
   const [isSendingTeams, setIsSendingTeams] = useState(false);
@@ -1261,7 +1316,7 @@ const Attendance = () => {
                     <p className="font-bold text-foreground text-lg leading-tight truncate w-full px-1" title={member.name}>
                       {member.name}
                     </p>
-                    <div className="h-8 w-full min-w-0 flex items-center justify-center px-1">
+                    <div className="min-h-[1.75rem] w-full min-w-0 flex items-center justify-center px-1">
                       {member.nickname && (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -1282,6 +1337,28 @@ const Attendance = () => {
                           </TooltipContent>
                         </Tooltip>
                       )}
+                    </div>
+
+                    {/* ELO Rating & Tier Badge */}
+                    <div className="mt-1.5 mb-2 flex items-center justify-center gap-1.5 flex-wrap">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-black bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                        ⚡ {member.elo ?? 1000}
+                      </span>
+                      {(() => {
+                        const tierKey = member.eloTier || getEloTier(member.elo ?? 1000);
+                        const tier = TIER_CONFIG[tierKey] || TIER_CONFIG.silver;
+                        return (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] px-1.5 py-0 h-4 font-normal",
+                              tier.bgBadge
+                            )}
+                          >
+                            {tier.icon} {tier.label}
+                          </Badge>
+                        );
+                      })()}
                     </div>
                   </div>
                   <div className="flex gap-2 w-full mt-auto">
@@ -1443,10 +1520,18 @@ const Attendance = () => {
                   className="pl-10"
                 />
               </div>
-              <div className="flex items-center gap-2 justify-between sm:justify-end">
+              <div className="flex flex-wrap items-center gap-2 justify-between sm:justify-end">
                 <Badge variant="outline" className="py-2">
                   {teamPool.length} người chờ
                 </Badge>
+                <Button
+                  variant="outline"
+                  onClick={handleAutoBalanceElo}
+                  className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30 font-semibold"
+                >
+                  <Sparkles className="h-4 w-4 mr-1.5 text-amber-500" />
+                  Tự động chia theo ELO
+                </Button>
                 <Button
                   variant="ghost"
                   onClick={handleResetTeams}
@@ -1488,21 +1573,26 @@ const Attendance = () => {
                         className="p-3 rounded-lg border bg-card cursor-move hover:shadow-md transition-all"
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <p className="font-semibold leading-tight">
+                          <div className="min-w-0">
+                            <p className="font-semibold leading-tight break-words">
                               {member.name}
                             </p>
-                            {member.nickname && (
-                              <Badge
-                                variant="secondary"
-                                className="mt-1 text-xs max-w-full truncate inline-block"
-                                title={member.nickname}
-                              >
-                                {member.nickname}
-                              </Badge>
-                            )}
+                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                              {member.nickname && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px] px-1.5 py-0 max-w-full truncate inline-block"
+                                  title={member.nickname}
+                                >
+                                  {member.nickname}
+                                </Badge>
+                              )}
+                              <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                                ⚡ {member.elo ?? 1000}
+                              </span>
+                            </div>
                           </div>
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className="text-[10px] shrink-0">
                             Kéo
                           </Badge>
                         </div>
@@ -1528,9 +1618,19 @@ const Attendance = () => {
                     onDrop={(e) => handleTeamDrop(e, team.id)}
                   >
                     <CardHeader>
-                      <CardTitle className="flex items-center justify-between text-lg">
+                      <CardTitle className="flex items-center justify-between text-base sm:text-lg">
                         <span>{team.name}</span>
-                        <Badge variant="secondary">{team.members.length}</Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="secondary">{team.members.length} người</Badge>
+                          {team.members.length > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/30"
+                            >
+                              TB: {Math.round(team.members.reduce((sum, m) => sum + (m.elo ?? 1000), 0) / team.members.length)} ELO
+                            </Badge>
+                          )}
+                        </div>
                       </CardTitle>
                       <CardDescription>
                         Kéo thành viên vào để hoàn thiện đội hình.
@@ -1552,19 +1652,24 @@ const Attendance = () => {
                             className="p-3 rounded-lg border bg-card cursor-move hover:shadow-md transition-all"
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <div>
-                                <p className="font-medium leading-tight">
+                              <div className="min-w-0">
+                                <p className="font-medium leading-tight break-words">
                                   {member.name}
                                 </p>
-                                {member.nickname && (
-                                  <Badge
-                                    variant="secondary"
-                                    className="mt-1 text-xs max-w-full truncate inline-block"
-                                    title={member.nickname}
-                                  >
-                                    {member.nickname}
-                                  </Badge>
-                                )}
+                                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                  {member.nickname && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-[10px] px-1.5 py-0 max-w-full truncate inline-block"
+                                      title={member.nickname}
+                                    >
+                                      {member.nickname}
+                                    </Badge>
+                                  )}
+                                  <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                                    ⚡ {member.elo ?? 1000}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>

@@ -242,7 +242,7 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                     {top3[1] && (
                       <div
                         onClick={() => handleOpenMember(top3[1])}
-                        className="group relative cursor-pointer flex flex-col items-center p-3 sm:p-4 rounded-2xl bg-gradient-to-b from-slate-100 to-slate-200/80 dark:from-slate-800/60 dark:to-slate-900/60 border border-slate-300/80 dark:border-slate-700 hover:shadow-md hover:scale-[1.02] transition-all"
+                        className="group relative cursor-pointer flex flex-col items-center p-2 sm:p-4 rounded-2xl bg-gradient-to-b from-slate-100 to-slate-200/80 dark:from-slate-800/60 dark:to-slate-900/60 border border-slate-300/80 dark:border-slate-700 hover:shadow-md hover:scale-[1.02] transition-all"
                       >
                         <div className="absolute -top-3.5 flex items-center justify-center w-7 h-7 rounded-full bg-slate-300 dark:bg-slate-700 text-slate-800 dark:text-slate-100 font-extrabold text-xs shadow-sm border-2 border-background">
                           2
@@ -250,15 +250,17 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-tr from-slate-400 to-slate-200 flex items-center justify-center text-slate-900 font-black text-base sm:text-lg shadow-inner mb-2 group-hover:ring-2 group-hover:ring-slate-400 transition-all">
                           {top3[1].name.charAt(0)}
                         </div>
-                        <p className="font-bold text-xs sm:text-sm text-foreground text-center line-clamp-1">
-                          {top3[1].name}
-                        </p>
-                        {top3[1].nickname && (
-                          <p className="text-[10px] text-muted-foreground text-center line-clamp-1">
-                            ({top3[1].nickname})
+                        <div className="min-h-[2.75rem] sm:min-h-[3rem] flex flex-col items-center justify-center w-full px-0.5">
+                          <p className="font-bold text-xs sm:text-sm text-foreground text-center break-words leading-tight max-w-full">
+                            {top3[1].name}
                           </p>
-                        )}
-                        <div className="mt-2 text-center">
+                          {top3[1].nickname && (
+                            <p className="text-[10px] text-muted-foreground text-center break-words leading-tight">
+                              ({top3[1].nickname})
+                            </p>
+                          )}
+                        </div>
+                        <div className="mt-1 text-center">
                           <span className="inline-block px-2 py-0.5 rounded-full bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-black text-xs sm:text-sm">
                             {top3[1].elo}
                           </span>
@@ -273,7 +275,7 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                     {top3[0] && (
                       <div
                         onClick={() => handleOpenMember(top3[0])}
-                        className="group relative cursor-pointer flex flex-col items-center p-3.5 sm:p-5 rounded-2xl bg-gradient-to-b from-amber-50 via-yellow-100/90 to-amber-200/90 dark:from-amber-950/40 dark:via-yellow-950/30 dark:to-amber-900/40 border-2 border-amber-400 dark:border-amber-500 shadow-md hover:shadow-lg hover:scale-[1.03] transition-all -translate-y-2 z-10"
+                        className="group relative cursor-pointer flex flex-col items-center p-2.5 sm:p-5 rounded-2xl bg-gradient-to-b from-amber-50 via-yellow-100/90 to-amber-200/90 dark:from-amber-950/40 dark:via-yellow-950/30 dark:to-amber-900/40 border-2 border-amber-400 dark:border-amber-500 shadow-md hover:shadow-lg hover:scale-[1.03] transition-all -translate-y-2 z-10"
                       >
                         <div className="absolute -top-4 flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-tr from-amber-500 to-yellow-400 text-amber-950 font-black text-sm shadow-md border-2 border-background">
                           👑
@@ -284,15 +286,17 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                         <Badge className="bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/40 text-[10px] font-semibold py-0 px-1.5 mb-1">
                           Quán quân
                         </Badge>
-                        <p className="font-extrabold text-sm sm:text-base text-foreground text-center line-clamp-1">
-                          {top3[0].name}
-                        </p>
-                        {top3[0].nickname && (
-                          <p className="text-[10px] text-muted-foreground text-center line-clamp-1">
-                            ({top3[0].nickname})
+                        <div className="min-h-[2.75rem] sm:min-h-[3rem] flex flex-col items-center justify-center w-full px-0.5">
+                          <p className="font-extrabold text-xs sm:text-base text-foreground text-center break-words leading-tight max-w-full">
+                            {top3[0].name}
                           </p>
-                        )}
-                        <div className="mt-2 text-center">
+                          {top3[0].nickname && (
+                            <p className="text-[10px] text-muted-foreground text-center break-words leading-tight">
+                              ({top3[0].nickname})
+                            </p>
+                          )}
+                        </div>
+                        <div className="mt-1 text-center">
                           <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-600 text-white font-black text-sm sm:text-base shadow-xs">
                             {top3[0].elo}
                           </span>
@@ -307,7 +311,7 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                     {top3[2] && (
                       <div
                         onClick={() => handleOpenMember(top3[2])}
-                        className="group relative cursor-pointer flex flex-col items-center p-3 sm:p-4 rounded-2xl bg-gradient-to-b from-orange-50 to-amber-100/70 dark:from-orange-950/30 dark:to-amber-950/30 border border-orange-300/80 dark:border-orange-800 hover:shadow-md hover:scale-[1.02] transition-all"
+                        className="group relative cursor-pointer flex flex-col items-center p-2 sm:p-4 rounded-2xl bg-gradient-to-b from-orange-50 to-amber-100/70 dark:from-orange-950/30 dark:to-amber-950/30 border border-orange-300/80 dark:border-orange-800 hover:shadow-md hover:scale-[1.02] transition-all"
                       >
                         <div className="absolute -top-3.5 flex items-center justify-center w-7 h-7 rounded-full bg-orange-300 dark:bg-orange-800 text-orange-950 dark:text-orange-100 font-extrabold text-xs shadow-sm border-2 border-background">
                           3
@@ -315,15 +319,17 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                         <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-tr from-orange-400 to-amber-300 flex items-center justify-center text-orange-950 font-black text-base sm:text-lg shadow-inner mb-2 group-hover:ring-2 group-hover:ring-orange-400 transition-all">
                           {top3[2].name.charAt(0)}
                         </div>
-                        <p className="font-bold text-xs sm:text-sm text-foreground text-center line-clamp-1">
-                          {top3[2].name}
-                        </p>
-                        {top3[2].nickname && (
-                          <p className="text-[10px] text-muted-foreground text-center line-clamp-1">
-                            ({top3[2].nickname})
+                        <div className="min-h-[2.75rem] sm:min-h-[3rem] flex flex-col items-center justify-center w-full px-0.5">
+                          <p className="font-bold text-xs sm:text-sm text-foreground text-center break-words leading-tight max-w-full">
+                            {top3[2].name}
                           </p>
-                        )}
-                        <div className="mt-2 text-center">
+                          {top3[2].nickname && (
+                            <p className="text-[10px] text-muted-foreground text-center break-words leading-tight">
+                              ({top3[2].nickname})
+                            </p>
+                          )}
+                        </div>
+                        <div className="mt-1 text-center">
                           <span className="inline-block px-2 py-0.5 rounded-full bg-orange-700 text-white font-black text-xs sm:text-sm">
                             {top3[2].elo}
                           </span>
@@ -373,12 +379,12 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                         </span>
 
                         <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-semibold text-sm text-foreground truncate">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-sm text-foreground break-words">
                               {member.name}
                             </span>
                             {member.nickname && (
-                              <span className="text-xs text-muted-foreground truncate hidden sm:inline">
+                              <span className="text-xs text-muted-foreground">
                                 ({member.nickname})
                               </span>
                             )}

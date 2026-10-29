@@ -279,7 +279,7 @@ const PublicElo: React.FC = () => {
                     <p className="text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
                       Tỉ lệ thắng cao nhất
                     </p>
-                    <p className="font-bold text-base text-foreground truncate">
+                    <p className="font-bold text-base text-foreground break-words line-clamp-2 leading-snug">
                       {bestWinratePlayer.name}
                     </p>
                     <p className="text-xs font-black text-emerald-600">
@@ -304,7 +304,7 @@ const PublicElo: React.FC = () => {
                     <p className="text-xs text-rose-700 dark:text-rose-400 font-semibold">
                       Phong độ rực cháy
                     </p>
-                    <p className="font-bold text-base text-foreground truncate">
+                    <p className="font-bold text-base text-foreground break-words line-clamp-2 leading-snug">
                       {hotStreakPlayer.name}
                     </p>
                     <div className="flex items-center gap-1 mt-0.5">
@@ -446,12 +446,12 @@ const PublicElo: React.FC = () => {
                         </div>
 
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-sm sm:text-base text-foreground truncate">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-sm sm:text-base text-foreground break-words">
                               {member.name}
                             </span>
                             {member.nickname && (
-                              <span className="text-xs text-muted-foreground truncate hidden sm:inline">
+                              <span className="text-xs text-muted-foreground">
                                 ({member.nickname})
                               </span>
                             )}

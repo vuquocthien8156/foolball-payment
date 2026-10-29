@@ -55,6 +55,9 @@ export function loadSource(relativePath, mocks = {}, context = {}, transformers)
       if (id.startsWith("@/components/") || id === "lucide-react") {
         return new Proxy({}, { get: (_, key) => key });
       }
+      if (id === "@/lib/elo") {
+        return loadSource("../src/lib/elo.ts", {}).exports;
+      }
       throw new Error(`Unmocked dependency: ${id}`);
     },
   };

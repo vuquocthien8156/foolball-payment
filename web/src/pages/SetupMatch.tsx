@@ -91,6 +91,7 @@ import {
 } from "@/components/ui/popover";
 import { cn, createMatchDate, getMatchDateTimeInput } from "@/lib/utils";
 import { Check, ChevronsUpDown } from "lucide-react";
+import { balanceTeamsByElo } from "@/lib/elo";
 
 // Interfaces
 interface Member {
@@ -102,6 +103,8 @@ interface Member {
   reason?: string;
   inactive?: boolean;
   isPriority?: boolean;
+  elo?: number;
+  eloTier?: string;
 }
 
 interface Team {
@@ -2020,6 +2023,48 @@ const SetupMatch = () => {
     });
   };
 
+  const handleAutoBalanceElo = () => {
+    let playersToBalance = activeTeams.flatMap((t) => t.members);
+    if (playersToBalance.length === 0) {
+      playersToBalance = pool.filter((m) => attendance.has(m.id));
+      if (playersToBalance.length === 0) {
+        playersToBalance = [...pool];
+      }
+    }
+
+    if (playersToBalance.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Chưa có thành viên",
+        description: "Không có thành viên nào để chia đội.",
+      });
+      return;
+    }
+
+    const { teams: balancedTeamLists, deltaElo } = balanceTeamsByElo(
+      playersToBalance,
+      activeTeams.length
+    );
+
+    const balancedIds = new Set(playersToBalance.map((m) => m.id));
+    const remainingPool = pool.filter((m) => !balancedIds.has(m.id));
+
+    const updatedTeams = teams.map((team, idx) => {
+      if (idx < activeTeams.length) {
+        return { ...team, members: balancedTeamLists[idx] || [] };
+      }
+      return team;
+    });
+
+    setPool(remainingPool);
+    setTeams(updatedTeams);
+
+    toast({
+      title: "⚡ Đã chia đều theo ELO",
+      description: `Đã phân chia ${playersToBalance.length} người vào ${activeTeams.length} đội (Độ chênh lệch: ${deltaElo} ELO).`,
+    });
+  };
+
   const filteredPool = useMemo(() => {
     if (!searchQuery) return pool;
     const lowerCaseQuery = removeDiacritics(searchQuery.toLowerCase());
@@ -3290,7 +3335,18 @@ const SetupMatch = () => {
                   Thêm người đã điểm danh
                 </Button>
               )}
-              <div className="flex flex-wrap gap-2 mt-2">
+              <div className="flex flex-col gap-2 mt-2">
+                {usesTeams && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAutoBalanceElo}
+                    className="w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30 font-semibold"
+                  >
+                    <Sparkles className="h-4 w-4 mr-2 text-amber-500" />
+                    Tự động chia theo ELO
+                  </Button>
+                )}
                 <Button
                   variant="destructive"
                   size="sm"
@@ -3325,27 +3381,34 @@ const SetupMatch = () => {
                     className="p-3 rounded-lg border bg-card cursor-move hover:shadow-md transition-all"
                   >
                     <div className="flex justify-between items-center">
-                      <div>
-                        <p className="font-medium">{member.name}</p>
-                        {member.nickname && (
-                          <Badge variant="secondary" className="mt-1 text-xs">
-                            {member.nickname}
-                          </Badge>
+                      <div className="min-w-0">
+                        <p className="font-medium leading-tight break-words">{member.name}</p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          {member.nickname && (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 max-w-full truncate inline-block">
+                              {member.nickname}
+                            </Badge>
+                          )}
+                          <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                            ⚡ {member.elo ?? 1000}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {attendance.has(member.id) && (
+                          <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
+                        )}
+                        {!usesTeams && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => toggleParticipant(member, true)}
+                            aria-label={`Thêm ${member.name}`}
+                          >
+                            Thêm
+                          </Button>
                         )}
                       </div>
-                      {attendance.has(member.id) && (
-                        <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
-                      )}
-                      {!usesTeams && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => toggleParticipant(member, true)}
-                          aria-label={`Thêm ${member.name}`}
-                        >
-                          Thêm
-                        </Button>
-                      )}
                     </div>
                   </div>
                 ))
@@ -3361,9 +3424,19 @@ const SetupMatch = () => {
               onDrop={(e) => handleDrop(e, team.id)}
             >
               <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <div className={`h-4 w-4 rounded-full ${team.color}`} />
-                  {team.name} ({team.members.length})
+                <CardTitle className="text-lg flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`h-4 w-4 rounded-full ${team.color}`} />
+                    <span>{team.name} ({team.members.length})</span>
+                  </div>
+                  {team.members.length > 0 && (
+                    <Badge
+                      variant="outline"
+                      className="text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/30"
+                    >
+                      TB: {Math.round(team.members.reduce((sum, m) => sum + (m.elo ?? 1000), 0) / team.members.length)} ELO
+                    </Badge>
+                  )}
                 </CardTitle>
                 <CardDescription className="space-y-2">
                   {(() => {
@@ -3549,13 +3622,18 @@ const SetupMatch = () => {
                     className="p-3 rounded-lg border bg-card cursor-move hover:shadow-md transition-all space-y-2"
                   >
                     <div className="flex justify-between items-center">
-                      <div>
-                        <p className="font-medium">{member.name}</p>
-                        {member.nickname && (
-                          <Badge variant="secondary" className="mt-1 text-xs">
-                            {member.nickname}
-                          </Badge>
-                        )}
+                      <div className="min-w-0">
+                        <p className="font-medium leading-tight break-words">{member.name}</p>
+                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                          {member.nickname && (
+                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 max-w-full truncate inline-block">
+                              {member.nickname}
+                            </Badge>
+                          )}
+                          <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                            ⚡ {member.elo ?? 1000}
+                          </span>
+                        </div>
                       </div>
                       {attendance.has(member.id) && (
                         <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
