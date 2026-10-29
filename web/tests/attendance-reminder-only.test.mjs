@@ -75,3 +75,49 @@ test("A3 and A4 notification blocks differentiate between reminder-only and lock
     assert.equal(a4Header, "🔒 Đã chốt danh sách điểm danh");
   }
 });
+
+test("teams/lock formats full member list breakdown in Slack message", () => {
+  const teamsConfig = [
+    {
+      id: "A",
+      name: "Đội A",
+      members: [
+        { id: "m1", name: "Nguyễn Văn A" },
+        { id: "m2", name: "Trần Văn B" },
+      ],
+    },
+    {
+      id: "B",
+      name: "Đội B",
+      members: [
+        { id: "m3", name: "Lê Văn C" },
+      ],
+    },
+  ];
+
+  const nameByMemberId = new Map([
+    ["m1", "Nguyễn Văn A"],
+    ["m2", "Trần Văn B"],
+    ["m3", "Lê Văn C"],
+  ]);
+
+  const teamBreakdown = teamsConfig
+    .filter((t) => (t.members || []).length > 0)
+    .map((t, idx) => {
+      const teamIcon = idx === 0 ? "🔵" : idx === 1 ? "🔴" : "🟡";
+      const names = (t.members || [])
+        .map((m) => {
+          const name = nameByMemberId.get(m.id) || m.name || "Không rõ";
+          return `   👤 ${name}`;
+        })
+        .join("\n");
+      return `${teamIcon} *${t.name}* (${(t.members || []).length}):\n${names}`;
+    })
+    .join("\n\n");
+
+  assert.ok(teamBreakdown.includes("🔵 *Đội A* (2):"));
+  assert.ok(teamBreakdown.includes("   👤 Nguyễn Văn A"));
+  assert.ok(teamBreakdown.includes("   👤 Trần Văn B"));
+  assert.ok(teamBreakdown.includes("🔴 *Đội B* (1):"));
+  assert.ok(teamBreakdown.includes("   👤 Lê Văn C"));
+});

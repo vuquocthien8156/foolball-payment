@@ -1586,7 +1586,7 @@ apiRoutes.post("/teams/lock", async (req, res) => {
         proposedTeam: FieldValue.delete(),
       });
 
-      return { ok: true, lockedTeam, matchData: match };
+      return { ok: true, lockedTeam, matchData: match, proposedTeams };
     });
 
     if (!result.ok) {
@@ -1599,10 +1599,54 @@ apiRoutes.post("/teams/lock", async (req, res) => {
     const matchSnapAfter = await matchRef.get();
     const matchAfter = matchSnapAfter.data();
     const groupId = groupIdOf(matchAfter);
+
+    const nameByMemberId = new Map();
+    for (const t of (result.proposedTeams || [])) {
+      for (const m of (t.members || [])) {
+        if (m.id && m.name) nameByMemberId.set(m.id, m.name);
+      }
+    }
+
+    const allMemberIds = (matchAfter.teamsConfig || [])
+      .flatMap((t) => (t.members || []).map((m) => m.id))
+      .filter(Boolean);
+
+    const missingIds = allMemberIds.filter((id) => !nameByMemberId.has(id));
+    if (missingIds.length > 0) {
+      const memberDocs = await Promise.all(
+        missingIds.map((id) =>
+          db.collection("members").doc(id).get().catch(() => null)
+        )
+      );
+      for (const d of memberDocs) {
+        if (d && d.exists) {
+          nameByMemberId.set(
+            d.id,
+            d.data().name || d.data().nickname || "Không rõ"
+          );
+        }
+      }
+    }
+
+    const teamBreakdown = (matchAfter.teamsConfig || [])
+      .filter((t) => (t.members || []).length > 0)
+      .map((t, idx) => {
+        const teamIcon = idx === 0 ? "🔵" : idx === 1 ? "🔴" : "🟡";
+        const names = (t.members || [])
+          .map((m) => {
+            const name = nameByMemberId.get(m.id) || m.name || "Không rõ";
+            return `   👤 ${name}`;
+          })
+          .join("\n");
+        return `${teamIcon} *${t.name}* (${(t.members || []).length}):\n${names}`;
+      })
+      .join("\n\n");
+
     const teamSummary = (matchAfter.teamsConfig || [])
       .filter((t) => (t.members || []).length > 0)
       .map((t) => `*${t.name}* (${(t.members || []).length})`)
       .join(" · ");
+    const teamDisplay = teamBreakdown || (teamSummary ? `🏁 ${teamSummary}` : "");
 
     {
       const target = await targets.getSlackTarget(groupId);
@@ -1612,7 +1656,7 @@ apiRoutes.post("/teams/lock", async (req, res) => {
             headerText: "✅ Đội hình đã được chốt",
             bodyMarkdown: `📅 Trận *${slack.formatMatchDate(matchAfter.date)}*${
               matchAfter.venueName ? `\n📍 ${matchAfter.venueName}` : ""
-            }\n\n🏁 ${teamSummary}\n\n🕐 _Chốt lúc ${slack.formatTimestamp(
+            }${teamDisplay ? `\n\n${teamDisplay}` : ""}\n\n🕐 _Chốt lúc ${slack.formatTimestamp(
               result.lockedTeam.lockedAt
             )}_`,
             fallbackText: "Đội hình đã được chốt",
