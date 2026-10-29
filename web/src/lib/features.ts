@@ -1,12 +1,13 @@
 import { DEFAULT_GROUP_ID, GroupSport, groupSportOf, groupKindOf } from "@/lib/groups";
 
-export type FeatureKey = "teamPropose" | "scoring" | "liveNotes" | "ratings";
+export type FeatureKey = "teamPropose" | "scoring" | "liveNotes" | "ratings" | "elo";
 export type FeatureDef = { sports: readonly GroupSport[]; enabled: boolean; onlyGroups?: readonly string[] };
 export const FEATURES: Record<FeatureKey, FeatureDef> = {
   teamPropose: { sports: ["football"], enabled: true, onlyGroups: [DEFAULT_GROUP_ID] },
   scoring: { sports: ["football"], enabled: true, onlyGroups: [DEFAULT_GROUP_ID] },
   liveNotes: { sports: ["football"], enabled: true, onlyGroups: [DEFAULT_GROUP_ID] },
   ratings: { sports: ["football"], enabled: true, onlyGroups: [DEFAULT_GROUP_ID] },
+  elo: { sports: ["football"], enabled: true, onlyGroups: [DEFAULT_GROUP_ID] },
 };
 export function hasFeature(groupId: string, group: { sport?: string; kind?: string } | null | undefined, key: FeatureKey,
   registry: Record<FeatureKey, FeatureDef> = FEATURES): boolean {

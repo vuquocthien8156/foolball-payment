@@ -1,6 +1,8 @@
 import { useGroup } from "@/contexts/GroupContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { groupIdOf } from "@/lib/groups";
+import { hasFeature } from "@/lib/features";
+import { apiRequest } from "@/lib/api";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +45,7 @@ import {
   Square,
   Repeat,
   X,
+  Trophy,
   ChevronDown,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
@@ -102,6 +105,15 @@ interface Member {
   isPriority?: boolean;
   autoCoverWhenPayer?: boolean;
   accountUid?: string | null;
+  elo?: number;
+  eloRank?: number;
+  eloTier?: string;
+  matchesPlayed?: number;
+  wins?: number;
+  draws?: number;
+  losses?: number;
+  winRate?: number;
+  recentForm?: string[];
 }
 
 interface MemberStats {
@@ -282,7 +294,28 @@ const Members = () => {
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [claimingId, setClaimingId] = useState<string | null>(null);
+  const [isSyncingElo, setIsSyncingElo] = useState(false);
   const { toast } = useToast();
+
+  const handleSyncElo = async () => {
+    setIsSyncingElo(true);
+    try {
+      await apiRequest("POST", `/groups/${groupId}/elo/sync`);
+      toast({
+        title: "Đã đồng bộ ELO thành công",
+        description: "Bảng xếp hạng và điểm ELO toàn bộ thành viên đã được cập nhật.",
+      });
+      await fetchMembersAndStats();
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi đồng bộ ELO",
+        description: err.message || "Không thể đồng bộ ELO",
+      });
+    } finally {
+      setIsSyncingElo(false);
+    }
+  };
 
   const handleClaimSelf = async (memberId: string) => {
     if (!user) {
@@ -771,9 +804,25 @@ const Members = () => {
         <Card className="shadow-card">
           <CardHeader className="space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <CardTitle>
-                Danh sách thành viên ({filteredMembers.length})
-              </CardTitle>
+              <div className="flex items-center gap-3">
+                <CardTitle>
+                  Danh sách thành viên ({filteredMembers.length})
+                </CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSyncElo}
+                  disabled={isSyncingElo}
+                  className="h-7 px-2.5 text-xs text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/10 gap-1.5"
+                >
+                  {isSyncingElo ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trophy className="h-3.5 w-3.5 text-amber-500" />
+                  )}
+                  Đồng bộ ELO
+                </Button>
+              </div>
               {filteredMembers.length > 0 && (
                 <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
                   <Checkbox
@@ -926,6 +975,11 @@ const Members = () => {
                                 </Badge>
                               )}
                               <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                {typeof member.elo === "number" && !member.inactive && (
+                                  <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 text-[11px] font-bold">
+                                    {member.eloRank ? `#${member.eloRank} • ` : ""}{member.elo} ELO
+                                  </Badge>
+                                )}
                                 {member.accountUid === user?.uid && (
                                   <div className="flex items-center gap-1">
                                     <Tooltip>

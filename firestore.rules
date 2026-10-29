@@ -79,6 +79,10 @@ service cloud.firestore {
       allow write: if false;
     }
     match /groupSecrets/{gid} { allow read, write: if false; }
+    match /eloLeaderboards/{gid} {
+      allow read: if true;
+      allow write: if isStaff(gid);
+    }
     match /groups/{gid} {
       allow read: if true;
       allow write: if false;
@@ -88,6 +92,10 @@ service cloud.firestore {
       match /settings/{name} {
         allow read: if name in ['lastMatch', 'slack'] && isStaff(gid);
         allow write: if name == 'lastMatch' && isStaff(gid);
+      }
+      match /stats/{name} {
+        allow read: if true;
+        allow write: if isStaff(gid);
       }
     }
   }

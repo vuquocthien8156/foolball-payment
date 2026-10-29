@@ -37,7 +37,7 @@ function setup(page, gid) {
 }
 for (const [page, section, core] of [
   ["Attendance", "Chia đội kéo thả", "Không tìm thấy thành viên"],
-  ["PublicPortal", "Vinh danh trận gần nhất", "Thanh toán"],
+  ["PublicPortal", "Bảng xếp hạng ELO", "Thanh toán"],
   ["Matches", "Công khai đánh giá", "Danh sách trận đấu"],
   ["Config", "Passcode gửi đội hình", "Cấu hình hệ thống"],
 ]) test(`${page}: Football section shown for Zigvy, hidden for badminton; core content still renders`, () => {

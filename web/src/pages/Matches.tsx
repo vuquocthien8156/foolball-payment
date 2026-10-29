@@ -1439,6 +1439,10 @@ const Matches = () => {
             console.error("Failed to send match-published notification", err),
           );
         }
+
+        if (newStatus === "PUBLISHED" && typeof apiRequest === "function") {
+          void apiRequest("POST", `/groups/${groupId}/elo/sync`).catch(() => {});
+        }
       } catch (error) {
         console.error("Error updating match status:", error);
         toast({

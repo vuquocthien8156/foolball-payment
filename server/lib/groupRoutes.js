@@ -248,6 +248,12 @@ function createGroupRouter({ db, auth, FieldValue, slack, env = process.env }) {
     res.status(201).json({ ok: true, matchId: result.matchId, date: result.date });
   }));
 
+  router.post("/:groupId/elo/sync", ...manager, wrap(async (req, res) => {
+    const { runMigration } = require("../scripts/migrate-elo");
+    const result = await runMigration({ groupId: req.params.groupId, apply: true });
+    res.json({ ok: true, totalMatches: result.totalMatches, activeMembers: result.rankings.length });
+  }));
+
   return router;
 }
 module.exports = { createGroupRouter };

@@ -1947,6 +1947,9 @@ const SetupMatch = () => {
       }
       if (publish) {
         setWasPublished(true);
+        if (typeof apiRequest === "function") {
+          void apiRequest("POST", `/groups/${groupId}/elo/sync`).catch(() => {});
+        }
       }
       setExistingStatus(nextStatus);
       toast({
@@ -2857,8 +2860,8 @@ const SetupMatch = () => {
                       </p>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
+                    <div>
+                      <div className="space-y-2 max-w-md">
                         <Label htmlFor={`expense-target-subsidy-${expense.id}`}>
                           Người thanh toán khoản hỗ trợ <span className="text-destructive">*</span>
                         </Label>
@@ -2935,25 +2938,6 @@ const SetupMatch = () => {
                             </Command>
                           </PopoverContent>
                         </Popover>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor={`expense-note-${expense.id}`}>
-                          Ghi chú chi tiết (Tùy chọn)
-                        </Label>
-                        <Input
-                          id={`expense-note-${expense.id}`}
-                          placeholder="VD: Công ty tài trợ tháng 10, Quỹ nhóm..."
-                          value={expense.note || ""}
-                          onChange={(e) =>
-                            handleUpdateExpense(
-                              expense.id,
-                              "note",
-                              e.target.value,
-                            )
-                          }
-                          className="bg-background"
-                        />
                       </div>
                     </div>
                   </div>

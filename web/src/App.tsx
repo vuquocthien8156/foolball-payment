@@ -28,6 +28,7 @@ const Attendance = React.lazy(() => import("./pages/Attendance"));
 const TeamLocked = React.lazy(() => import("./pages/TeamLocked"));
 const PublicPortal = React.lazy(() => import("./pages/PublicPortal"));
 const PublicRatings = React.lazy(() => import("./pages/PublicRatings"));
+const PublicElo = React.lazy(() => import("./pages/PublicElo"));
 const ScoringMatches = React.lazy(() => import("./pages/ScoringMatches"));
 const LiveNotes = React.lazy(() => import("./pages/LiveNotes"));
 const Config = React.lazy(() => import("./pages/Config"));
@@ -201,6 +202,7 @@ const App = () => {
                   <Route path="attendance" element={<SportsOnlyRoute><Attendance /></SportsOnlyRoute>} />
                   <Route path="team-locked" element={<RequireFeature feature="teamPropose"><TeamLocked /></RequireFeature>} />
                   <Route path="ratings" element={<RequireFeature feature="ratings"><PublicRatings /></RequireFeature>} />
+                  <Route path="elo" element={<SportsOnlyRoute><PublicElo /></SportsOnlyRoute>} />
                 </Route>
 
                 {/* Protected Admin Routes */}

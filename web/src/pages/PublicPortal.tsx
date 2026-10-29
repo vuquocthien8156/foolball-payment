@@ -5,6 +5,7 @@ import { PublicGroupSwitcher } from "@/components/PublicGroupSwitcher";
 import { getApiBaseUrl } from "@/lib/api";
 import { PayOSCheckoutDialog } from "@/components/PayOSCheckoutDialog";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
+import { EloLeaderboardCard } from "@/components/elo/EloLeaderboardCard";
 import {
   Card,
   CardContent,
@@ -842,7 +843,8 @@ const PublicPortal = () => {
         {/* PWA Install Banner */}
         <PWAInstallPrompt variant="banner" />
 
-        {hasFeature(groupId, group, "ratings") && (
+        {/* TẠM ẨN THEO YÊU CẦU: Vinh danh gần nhất & Bảng tỉ số */}
+        {false && hasFeature(groupId, group, "ratings") && (
           <Card className="shadow-card overflow-hidden">
             <div className="bg-gradient-to-r from-amber-500 via-orange-400 to-yellow-400 p-4 text-white">
               <CardTitle className="text-lg">Vinh danh trận gần nhất</CardTitle>
@@ -913,7 +915,8 @@ const PublicPortal = () => {
           </Card>
         )}
 
-        {hasFeature(groupId, group, "scoring") && (
+        {/* TẠM ẨN THEO YÊU CẦU: Bảng tỉ số */}
+        {false && hasFeature(groupId, group, "scoring") && (
           <Card className="shadow-card">
             <CardHeader>
               <CardTitle>Bảng tỉ số</CardTitle>
@@ -999,7 +1002,31 @@ const PublicPortal = () => {
           </Card>
         )}
 
+        {/* BẢNG XẾP HẠNG ELO (CHO TẤT CẢ THÀNH VIÊN ACTIVE) */}
+        {hasFeature(groupId, group, "elo") && (
+          <EloLeaderboardCard maxDisplay={8} />
+        )}
+
         <div className="space-y-6">
+          {/* Quick Action Link for Elo Leaderboard */}
+          {hasFeature(groupId, group, "elo") && (
+            <Link to={groupPath("public/elo")} className="block">
+              <Card className="shadow-card hover:shadow-card-hover transition-all cursor-pointer group border-amber-500/20 hover:border-amber-500/40">
+                <CardHeader className="flex flex-row items-center gap-4">
+                  <div className="h-12 w-12 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-500 to-yellow-400 flex items-center justify-center group-hover:scale-110 transition-transform shadow-card text-white">
+                    <Trophy className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-xl">Bảng xếp hạng ELO</CardTitle>
+                    <CardDescription>
+                      Xem chi tiết thứ hạng, điểm ELO, tỉ lệ thắng và phong độ của từng cầu thủ.
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
           <Link to={groupPath("public/attendance")} className="block">
             <Card className="shadow-card hover:shadow-card-hover transition-all cursor-pointer group">
               <CardHeader className="flex flex-row items-center gap-4">
