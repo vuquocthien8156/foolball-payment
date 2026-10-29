@@ -1026,7 +1026,7 @@ const Attendance = () => {
                     closingTime && (
                       <div className={`border-t px-5 py-2 text-center text-xs ${countdownToneClass}`}>
                         {isReminderOnly ? (
-                          now > closingDate ? (
+                          now > closingTime ? (
                             <span>
                               Đã qua mốc nhắc chốt sân (
                               <span className="font-bold tabular-nums">

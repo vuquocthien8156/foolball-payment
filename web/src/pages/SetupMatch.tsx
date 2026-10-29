@@ -1535,7 +1535,7 @@ const SetupMatch = () => {
     if (totalSubsidyAmount > totalSharedExpenses) {
       toast({
         title: "Lỗi trợ giá",
-        description: `Tổng số tiền trợ giá (${formatCurrency(totalSubsidyAmount)}) không được vượt quá tổng chi phí chung (${formatCurrency(totalSharedExpenses)})`,
+        description: `Tổng số tiền trợ giá (${totalSubsidyAmount.toLocaleString()}đ) không được vượt quá tổng chi phí chung (${totalSharedExpenses.toLocaleString()}đ)`,
         variant: "destructive",
       });
       return;
