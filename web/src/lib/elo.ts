@@ -106,3 +106,4 @@ export function calculateEloDelta(
   const deltaB = Math.round(k * ((1 - scoreA) - expectedB));
   return { deltaA, deltaB, expectedA, expectedB };
 }
+

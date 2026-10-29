@@ -620,3 +620,4 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
     </>
   );
 };
+
