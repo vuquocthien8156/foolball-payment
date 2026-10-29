@@ -83,3 +83,4 @@ test("balanceTeamsByElo handles empty members or 0 teams gracefully", () => {
   const zeroTeams = eloLib.balanceTeamsByElo([{ id: "p1", elo: 1000 }], 0);
   assert.equal(zeroTeams.teams.length, 0);
 });
+

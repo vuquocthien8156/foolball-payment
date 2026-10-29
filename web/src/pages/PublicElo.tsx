@@ -425,40 +425,42 @@ const PublicElo: React.FC = () => {
                     <div
                       key={member.memberId}
                       onClick={() => handleOpenMember(member)}
-                      className="p-3.5 sm:px-5 flex items-center justify-between gap-3 hover:bg-muted/40 cursor-pointer transition-colors"
+                      className="p-3 sm:px-4 flex items-center gap-3 hover:bg-muted/40 cursor-pointer transition-colors"
                     >
-                      {/* Left: Rank, Avatar & Name */}
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span
-                          className={cn(
-                            "w-7 text-center font-extrabold text-sm sm:text-base",
-                            member.rank === 1 && "text-amber-500 font-black",
-                            member.rank === 2 && "text-slate-500 font-black",
-                            member.rank === 3 && "text-amber-700 font-black",
-                            member.rank > 3 && "text-muted-foreground font-bold"
-                          )}
-                        >
-                          #{member.rank}
-                        </span>
+                      {/* Left: Rank & Avatar */}
+                      <span
+                        className={cn(
+                          "w-7 shrink-0 text-center font-extrabold text-sm sm:text-base",
+                          member.rank === 1 && "text-amber-500 font-black",
+                          member.rank === 2 && "text-slate-500 font-black",
+                          member.rank === 3 && "text-amber-700 font-black",
+                          member.rank > 3 && "text-muted-foreground font-bold"
+                        )}
+                      >
+                        #{member.rank}
+                      </span>
 
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-muted-foreground/20 to-muted flex items-center justify-center font-bold text-sm text-foreground shrink-0 shadow-inner">
-                          {member.name.charAt(0)}
-                        </div>
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-muted-foreground/20 to-muted flex items-center justify-center font-bold text-xs text-foreground shrink-0 shadow-inner">
+                        {member.name.charAt(0)}
+                      </div>
 
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-sm sm:text-base text-foreground break-words">
+                      {/* Middle & Full Width: 2 Balanced Rows */}
+                      <div className="flex-1 min-w-0 space-y-1">
+                        {/* Row 1: Name, Nickname & Tier on left | Elo & Delta on right */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-bold text-sm sm:text-base text-foreground truncate">
                               {member.name}
                             </span>
                             {member.nickname && (
-                              <span className="text-xs text-muted-foreground">
+                              <span className="text-xs text-muted-foreground truncate hidden xs:inline sm:inline">
                                 ({member.nickname})
                               </span>
                             )}
                             <Badge
                               variant="outline"
                               className={cn(
-                                "text-[10px] px-1.5 py-0 h-4 font-normal",
+                                "text-[10px] px-1.5 py-0 h-4 font-normal shrink-0",
                                 tier.bgBadge
                               )}
                             >
@@ -466,27 +468,8 @@ const PublicElo: React.FC = () => {
                             </Badge>
                           </div>
 
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                            <span>{member.matchesPlayed} trận</span>
-                            <span>•</span>
-                            <span className="text-emerald-600 font-semibold">{member.wins}T</span>
-                            <span>{member.draws}H</span>
-                            <span className="text-rose-500">{member.losses}B</span>
-                            <span>•</span>
-                            <span className="font-medium text-foreground">{member.winRate}% WR</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Right: Elo, Last Delta & Form */}
-                      <div className="flex items-center gap-4 shrink-0">
-                        <div className="hidden md:flex items-center gap-1">
-                          {member.recentForm.slice(-5).map((f, i) => renderFormBadge(f, i))}
-                        </div>
-
-                        <div className="text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <span className="font-black text-lg text-foreground">
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="font-black text-base sm:text-lg text-foreground">
                               {member.elo}
                             </span>
                             {member.lastDelta !== undefined && member.lastDelta !== 0 && (
@@ -502,10 +485,24 @@ const PublicElo: React.FC = () => {
                               </span>
                             )}
                           </div>
-                          <p className="text-[10px] text-muted-foreground font-medium">ĐIỂM ELO</p>
                         </div>
 
-                        <ChevronRight className="h-4 w-4 text-muted-foreground/60 hidden sm:block" />
+                        {/* Row 2: Match stats on left | Form badges on right */}
+                        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                          <div className="flex items-center gap-1.5 min-w-0 text-[11px] sm:text-xs">
+                            <span className="whitespace-nowrap font-medium">{member.matchesPlayed} trận</span>
+                            <span>•</span>
+                            <span className="whitespace-nowrap text-emerald-600 font-semibold">{member.wins}T</span>
+                            <span className="whitespace-nowrap">{member.draws}H</span>
+                            <span className="whitespace-nowrap text-rose-500">{member.losses}B</span>
+                            <span>•</span>
+                            <span className="whitespace-nowrap font-medium text-foreground">{member.winRate}% WR</span>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            {member.recentForm.slice(-4).map((f, i) => renderFormBadge(f, i))}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );

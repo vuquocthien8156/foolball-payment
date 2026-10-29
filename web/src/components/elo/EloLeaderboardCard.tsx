@@ -362,36 +362,38 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                     <div
                       key={member.memberId}
                       onClick={() => handleOpenMember(member)}
-                      className="pt-2 first:pt-0 pb-1.5 px-2 rounded-xl flex items-center justify-between gap-3 hover:bg-muted/50 cursor-pointer transition-colors"
+                      className="py-2 px-2 rounded-xl flex items-center gap-3 hover:bg-muted/50 cursor-pointer transition-colors"
                     >
-                      {/* Left: Rank & Name */}
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span
-                          className={cn(
-                            "w-6 text-center font-bold text-sm",
-                            member.rank === 1 && "text-amber-500 font-extrabold",
-                            member.rank === 2 && "text-slate-500 font-extrabold",
-                            member.rank === 3 && "text-amber-700 font-extrabold",
-                            member.rank > 3 && "text-muted-foreground"
-                          )}
-                        >
-                          #{member.rank}
-                        </span>
+                      {/* Left: Fixed Rank */}
+                      <span
+                        className={cn(
+                          "w-6 shrink-0 text-center font-bold text-sm",
+                          member.rank === 1 && "text-amber-500 font-extrabold",
+                          member.rank === 2 && "text-slate-500 font-extrabold",
+                          member.rank === 3 && "text-amber-700 font-extrabold",
+                          member.rank > 3 && "text-muted-foreground"
+                        )}
+                      >
+                        #{member.rank}
+                      </span>
 
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-semibold text-sm text-foreground break-words">
+                      {/* Middle & Full Width: 2 Balanced Rows */}
+                      <div className="flex-1 min-w-0 space-y-1">
+                        {/* Row 1: Name, Nickname & Tier on left | Elo score & Delta on right */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-semibold text-sm text-foreground truncate">
                               {member.name}
                             </span>
                             {member.nickname && (
-                              <span className="text-xs text-muted-foreground">
+                              <span className="text-xs text-muted-foreground truncate hidden xs:inline sm:inline">
                                 ({member.nickname})
                               </span>
                             )}
                             <Badge
                               variant="outline"
                               className={cn(
-                                "text-[10px] px-1.5 py-0 h-4 font-normal",
+                                "text-[10px] px-1.5 py-0 h-4 font-normal shrink-0",
                                 tier.bgBadge
                               )}
                             >
@@ -399,33 +401,8 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                             </Badge>
                           </div>
 
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                            <span>{member.matchesPlayed} trận</span>
-                            <span>•</span>
-                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                              {member.wins}T
-                            </span>
-                            <span>{member.draws}H</span>
-                            <span className="text-rose-500">{member.losses}B</span>
-                            <span>•</span>
-                            <span>{member.winRate}% WR</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Right: Elo & Form */}
-                      <div className="flex items-center gap-3 shrink-0">
-                        {/* Recent Form Badges */}
-                        <div className="hidden sm:flex items-center gap-1">
-                          {member.recentForm.slice(-3).map((f, i) =>
-                            renderFormBadge(f, i)
-                          )}
-                        </div>
-
-                        {/* Elo Badge */}
-                        <div className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <span className="font-extrabold text-base text-foreground">
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className="font-extrabold text-sm sm:text-base text-foreground">
                               {member.elo}
                             </span>
                             {member.lastDelta !== undefined && member.lastDelta !== 0 && (
@@ -440,11 +417,32 @@ export const EloLeaderboardCard: React.FC<EloLeaderboardCardProps> = ({
                                 {member.lastDelta > 0 ? `+${member.lastDelta}` : member.lastDelta}
                               </span>
                             )}
+                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40 ml-0.5" />
                           </div>
-                          <p className="text-[10px] text-muted-foreground">ELO</p>
                         </div>
 
-                        <ChevronRight className="h-4 w-4 text-muted-foreground/60 hidden sm:block" />
+                        {/* Row 2: Match stats on left | Recent Form badges on right */}
+                        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                          <div className="flex items-center gap-1.5 min-w-0 text-[11px] sm:text-xs">
+                            <span className="whitespace-nowrap font-medium">{member.matchesPlayed} trận</span>
+                            <span>•</span>
+                            <span className="whitespace-nowrap text-emerald-600 dark:text-emerald-400 font-semibold">
+                              {member.wins}T
+                            </span>
+                            <span className="whitespace-nowrap">{member.draws}H</span>
+                            <span className="whitespace-nowrap text-rose-500">{member.losses}B</span>
+                            <span>•</span>
+                            <span className="whitespace-nowrap font-medium text-foreground">
+                              {member.winRate}% WR
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            {member.recentForm.slice(-3).map((f, i) =>
+                              renderFormBadge(f, i)
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
