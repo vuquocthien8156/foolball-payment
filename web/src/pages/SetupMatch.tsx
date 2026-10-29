@@ -663,7 +663,12 @@ const SetupMatch = () => {
                 return member
                   ? {
                       ...member,
-                      percent: savedMember.percent,
+                      percent:
+                        typeof savedMember.percent === "number" &&
+                        savedMember.percent > 0 &&
+                        savedMember.percent !== 100
+                          ? savedMember.percent
+                          : undefined,
                       reason: savedMember.reason,
                     }
                   : null;
@@ -902,12 +907,14 @@ const SetupMatch = () => {
                       ...m,
                       percent:
                         percent === undefined ||
+                        percent === null ||
                         isNaN(percent) ||
                         percent === 100
                           ? undefined
                           : Math.max(1, percent),
                       reason:
                         percent === undefined ||
+                        percent === null ||
                         isNaN(percent) ||
                         percent === 100
                           ? undefined
@@ -3653,193 +3660,198 @@ const SetupMatch = () => {
                           )}
                         </div>
 
-                        {/* Quick preset chips */}
-                        <div className="grid grid-cols-4 gap-1">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={
-                              (!member.percent || member.percent === 100) &&
-                              !customPercentMemberIds.has(member.id)
-                                ? "secondary"
-                                : "ghost"
-                            }
-                            className={cn(
-                              "h-7 text-xs px-1",
-                              (!member.percent || member.percent === 100) &&
-                                !customPercentMemberIds.has(member.id) &&
-                                "font-semibold border shadow-xs",
-                            )}
-                            onClick={() => {
-                              setCustomPercentMemberIds((prev) => {
-                                const next = new Set(prev);
-                                next.delete(member.id);
-                                return next;
-                              });
-                              handleMemberPercentChange(
-                                team.id,
-                                member.id,
-                                undefined,
-                              );
-                            }}
-                          >
-                            1 suất
-                          </Button>
+                        {(() => {
+                          const isCustom =
+                            customPercentMemberIds.has(member.id) ||
+                            (typeof member.percent === "number" &&
+                              member.percent > 0 &&
+                              member.percent !== 50 &&
+                              member.percent !== 75 &&
+                              member.percent !== 100);
 
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={
-                              member.percent === 50 ? "default" : "outline"
-                            }
-                            className={cn(
-                              "h-7 text-xs px-1",
-                              member.percent === 50 &&
-                                "bg-amber-500 hover:bg-amber-600 text-white font-semibold border-amber-500",
-                            )}
-                            onClick={() => {
-                              setCustomPercentMemberIds((prev) => {
-                                const next = new Set(prev);
-                                next.delete(member.id);
-                                return next;
-                              });
-                              handleMemberPercentChange(team.id, member.id, 50);
-                              if (!member.reason) {
-                                handleMemberReasonChange(
-                                  team.id,
-                                  member.id,
-                                  "Về sớm (½ suất)",
-                                );
-                              }
-                            }}
-                          >
-                            ½ suất
-                          </Button>
+                          const isOneSuat =
+                            !isCustom &&
+                            (!member.percent || member.percent === 100);
 
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={
-                              member.percent === 75 ? "default" : "outline"
-                            }
-                            className={cn(
-                              "h-7 text-xs px-1",
-                              member.percent === 75 &&
-                                "bg-amber-500 hover:bg-amber-600 text-white font-semibold border-amber-500",
-                            )}
-                            onClick={() => {
-                              setCustomPercentMemberIds((prev) => {
-                                const next = new Set(prev);
-                                next.delete(member.id);
-                                return next;
-                              });
-                              handleMemberPercentChange(team.id, member.id, 75);
-                              if (!member.reason) {
-                                handleMemberReasonChange(
-                                  team.id,
-                                  member.id,
-                                  "Về sớm (¾ suất)",
-                                );
-                              }
-                            }}
-                          >
-                            ¾ suất
-                          </Button>
+                          const isHalfSuat =
+                            !isCustom && member.percent === 50;
+                          const isThreeQuarterSuat =
+                            !isCustom && member.percent === 75;
 
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={
-                              customPercentMemberIds.has(member.id) ||
-                              (member.percent !== undefined &&
-                                member.percent !== 50 &&
-                                member.percent !== 75 &&
-                                member.percent !== 100)
-                                ? "default"
-                                : "outline"
-                            }
-                            className={cn(
-                              "h-7 text-xs px-1",
-                              (customPercentMemberIds.has(member.id) ||
-                                (member.percent !== undefined &&
-                                  member.percent !== 50 &&
-                                  member.percent !== 75 &&
-                                  member.percent !== 100)) &&
-                                "bg-amber-500 hover:bg-amber-600 text-white font-semibold border-amber-500",
-                            )}
-                            onClick={() => {
-                              setCustomPercentMemberIds((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(member.id)) {
-                                  next.delete(member.id);
-                                } else {
-                                  next.add(member.id);
-                                }
-                                return next;
-                              });
-                            }}
-                          >
-                            Khác %
-                          </Button>
-                        </div>
+                          return (
+                            <>
+                              {/* Quick preset chips */}
+                              <div className="grid grid-cols-4 gap-1">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={isOneSuat ? "default" : "outline"}
+                                  className={cn(
+                                    "h-7 text-xs px-1",
+                                    isOneSuat &&
+                                      "bg-emerald-600 hover:bg-emerald-700 text-white font-semibold border-emerald-600 shadow-xs",
+                                  )}
+                                  onClick={() => {
+                                    setCustomPercentMemberIds((prev) => {
+                                      const next = new Set(prev);
+                                      next.delete(member.id);
+                                      return next;
+                                    });
+                                    handleMemberPercentChange(
+                                      team.id,
+                                      member.id,
+                                      undefined,
+                                    );
+                                  }}
+                                >
+                                  1 suất
+                                </Button>
 
-                        {/* Custom % input */}
-                        {(customPercentMemberIds.has(member.id) ||
-                          (member.percent !== undefined &&
-                            member.percent !== 50 &&
-                            member.percent !== 75 &&
-                            member.percent !== 100)) && (
-                          <div className="relative">
-                            <Percent className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                            <Input
-                              type="number"
-                              min={1}
-                              max={300}
-                              placeholder="Nhập % (vd: 40 hoặc 150)"
-                              value={member.percent ?? ""}
-                              onChange={(e) => {
-                                const val =
-                                  e.target.value === ""
-                                    ? undefined
-                                    : parseInt(e.target.value, 10);
-                                handleMemberPercentChange(
-                                  team.id,
-                                  member.id,
-                                  val,
-                                );
-                              }}
-                              className="pl-8 pr-8 h-8 text-xs"
-                            />
-                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium">
-                              %
-                            </span>
-                          </div>
-                        )}
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={isHalfSuat ? "default" : "outline"}
+                                  className={cn(
+                                    "h-7 text-xs px-1",
+                                    isHalfSuat &&
+                                      "bg-amber-500 hover:bg-amber-600 text-white font-semibold border-amber-500",
+                                  )}
+                                  onClick={() => {
+                                    setCustomPercentMemberIds((prev) => {
+                                      const next = new Set(prev);
+                                      next.delete(member.id);
+                                      return next;
+                                    });
+                                    handleMemberPercentChange(team.id, member.id, 50);
+                                    if (!member.reason) {
+                                      handleMemberReasonChange(
+                                        team.id,
+                                        member.id,
+                                        "Về sớm (½ suất)",
+                                      );
+                                    }
+                                  }}
+                                >
+                                  ½ suất
+                                </Button>
 
-                        {/* Reason input when reduced or custom */}
-                        {((member.percent && member.percent !== 100) ||
-                          customPercentMemberIds.has(member.id)) && (
-                          <div className="relative">
-                            <MessageSquarePlus className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                            <Input
-                              type="text"
-                              placeholder={
-                                usesTeams
-                                  ? "Lý do (vd: đá 1 hiệp, về sớm)"
-                                  : "Lý do (vd: về sớm, chơi nửa buổi)"
-                              }
-                              value={member.reason || ""}
-                              onChange={(e) =>
-                                handleMemberReasonChange(
-                                  team.id,
-                                  member.id,
-                                  e.target.value,
-                                )
-                              }
-                              className="pl-8 h-8 text-xs"
-                            />
-                          </div>
-                        )}
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={isThreeQuarterSuat ? "default" : "outline"}
+                                  className={cn(
+                                    "h-7 text-xs px-1",
+                                    isThreeQuarterSuat &&
+                                      "bg-amber-500 hover:bg-amber-600 text-white font-semibold border-amber-500",
+                                  )}
+                                  onClick={() => {
+                                    setCustomPercentMemberIds((prev) => {
+                                      const next = new Set(prev);
+                                      next.delete(member.id);
+                                      return next;
+                                    });
+                                    handleMemberPercentChange(team.id, member.id, 75);
+                                    if (!member.reason) {
+                                      handleMemberReasonChange(
+                                        team.id,
+                                        member.id,
+                                        "Về sớm (¾ suất)",
+                                      );
+                                    }
+                                  }}
+                                >
+                                  ¾ suất
+                                </Button>
+
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={isCustom ? "default" : "outline"}
+                                  className={cn(
+                                    "h-7 text-xs px-1",
+                                    isCustom &&
+                                      "bg-amber-500 hover:bg-amber-600 text-white font-semibold border-amber-500",
+                                  )}
+                                  onClick={() => {
+                                    setCustomPercentMemberIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(member.id)) {
+                                        next.delete(member.id);
+                                        if (member.percent !== 50 && member.percent !== 75) {
+                                          handleMemberPercentChange(
+                                            team.id,
+                                            member.id,
+                                            undefined,
+                                          );
+                                        }
+                                      } else {
+                                        next.add(member.id);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                >
+                                  Khác %
+                                </Button>
+                              </div>
+
+                              {/* Custom % input */}
+                              {isCustom && (
+                                <div className="relative">
+                                  <Percent className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                  <Input
+                                    type="number"
+                                    min={1}
+                                    max={300}
+                                    placeholder="Nhập % (vd: 40 hoặc 150)"
+                                    value={member.percent ?? ""}
+                                    onChange={(e) => {
+                                      const val =
+                                        e.target.value === ""
+                                          ? undefined
+                                          : parseInt(e.target.value, 10);
+                                      handleMemberPercentChange(
+                                        team.id,
+                                        member.id,
+                                        val,
+                                      );
+                                    }}
+                                    className="pl-8 pr-8 h-8 text-xs"
+                                  />
+                                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-medium">
+                                    %
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Reason input when reduced or custom */}
+                              {((typeof member.percent === "number" &&
+                                member.percent !== 100) ||
+                                isCustom) && (
+                                <div className="relative">
+                                  <MessageSquarePlus className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                  <Input
+                                    type="text"
+                                    placeholder={
+                                      usesTeams
+                                        ? "Lý do (vd: đá 1 hiệp, về sớm)"
+                                        : "Lý do (vd: về sớm, chơi nửa buổi)"
+                                    }
+                                    value={member.reason || ""}
+                                    onChange={(e) =>
+                                      handleMemberReasonChange(
+                                        team.id,
+                                        member.id,
+                                        e.target.value,
+                                      )
+                                    }
+                                    className="pl-8 h-8 text-xs"
+                                  />
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
