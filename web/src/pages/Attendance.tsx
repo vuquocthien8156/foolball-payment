@@ -160,6 +160,24 @@ function getAssociatedMemberId(groupId: string): string | null {
   }
 }
 
+function maskIp(ip?: string): string {
+  if (!ip) return "";
+  const trimmed = ip.trim();
+  if (trimmed.includes(".")) {
+    const parts = trimmed.split(".");
+    if (parts.length === 4) {
+      return `${parts[0]}.${parts[1]}.*.*`;
+    }
+  }
+  if (trimmed.includes(":")) {
+    const parts = trimmed.split(":");
+    if (parts.length >= 2) {
+      return `${parts[0]}:${parts[1]}:****`;
+    }
+  }
+  return "***";
+}
+
 function setAssociatedMemberId(groupId: string, memberId: string) {
   try {
     if (typeof localStorage === "undefined") return;
@@ -1167,7 +1185,7 @@ const Attendance = () => {
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                                   {entry.clientIp && (
-                                    <span>IP: {entry.clientIp}</span>
+                                    <span>IP: {maskIp(entry.clientIp)}</span>
                                   )}
                                   {sameDeviceCount > 1 && (
                                     <Badge variant="outline" className="text-[10px] px-1 py-0 border-amber-500/50 text-amber-600 dark:text-amber-400">
