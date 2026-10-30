@@ -133,7 +133,13 @@ const PublicElo: React.FC = () => {
     return () => unsubscribe();
   }, [groupId]);
 
-  const rawRankings = useMemo(() => snapshot?.rankings || [], [snapshot]);
+  const rawRankings = useMemo(
+    () =>
+      (snapshot?.rankings || []).filter(
+        (m) => !m.inactive && m.matchesPlayed > 0,
+      ),
+    [snapshot],
+  );
 
   // Highlight Stats
   const topPlayer = useMemo(() => rawRankings[0] || null, [rawRankings]);
