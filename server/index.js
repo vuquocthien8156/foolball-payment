@@ -22,7 +22,15 @@ const { createTelegramClient } = require("./lib/telegram");
 const { deliverBillNotifications } = require("./lib/billNotifications");
 const { createAuthMiddleware, resolveGroupRole } = require("./lib/auth");
 const { createGroupTargets } = require("./lib/groupTargets");
-const { DEFAULT_GROUP_ID, groupIdOf, isValidGroupId, publicUrlFor } = require("./lib/groups");
+const {
+  DEFAULT_GROUP_ID,
+  groupIdOf,
+  isValidGroupId,
+  publicUrlFor,
+  getGroupEmoji,
+  getSportEmoji,
+  getMatchNoun,
+} = require("./lib/groups");
 
 // --- Firebase Admin SDK Initialization ---
 // Ensure you have the service account key file in the `server` directory
@@ -1004,6 +1012,11 @@ apiRoutes.post("/notify/attendance-created", triggerAuth.requireUser, requireTri
     }
     // -----------------------------
 
+    const groupSnap = await db.collection("groups").doc(groupId).get();
+    const groupData = groupSnap.exists ? groupSnap.data() : null;
+    const sportEmoji = getGroupEmoji(groupData);
+    const matchNoun = getMatchNoun(groupData?.sport);
+
     const tokens = await collectGroupTokens(groupId);
     if (tokens.length === 0) {
       return res.status(200).json({ message: "No subscribers" });
@@ -1011,8 +1024,8 @@ apiRoutes.post("/notify/attendance-created", triggerAuth.requireUser, requireTri
 
     const result = await sendPushToTokens(tokens, {
       notification: {
-        title: "Đã mở điểm danh!",
-        body: `Trận ngày ${dateLabel} đã mở điểm danh. Vào ứng dụng để xác nhận.`,
+        title: `${sportEmoji} Đã mở điểm danh ${matchNoun.single}!`,
+        body: `${matchNoun.capitalized} ngày ${dateLabel} đã mở điểm danh. Vào ứng dụng để xác nhận.`,
       },
       data: {
         matchId,
@@ -1035,7 +1048,7 @@ apiRoutes.post("/notify/attendance-created", triggerAuth.requireUser, requireTri
       if (target) {
         slack
           .sendBlock({
-            headerText: "⚽ Đã mở điểm danh trận mới",
+            headerText: `${sportEmoji} Đã mở điểm danh ${matchNoun.single} mới`,
             bodyMarkdown: `<!here>\n📅 *${slack.formatMatchDate(match.date)}*${
               match.venueName ? `\n📍 ${match.venueName}` : ""
             }${autoAttendSection}`,
@@ -1062,7 +1075,7 @@ apiRoutes.post("/notify/attendance-created", triggerAuth.requireUser, requireTri
               url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/attendance`,
               style: "primary",
             },
-            fallbackText: `Trận mới ${dateLabel} đã mở điểm danh`,
+            fallbackText: `${sportEmoji} ${matchNoun.capitalized} mới ${dateLabel} đã mở điểm danh`,
           }, target)
           .catch((e) => console.error("[slack] A1 failed", e));
       }
@@ -1095,9 +1108,14 @@ apiRoutes.post("/notify/attendance-deleted", triggerAuth.requireUser, requireTri
       return res.status(200).json({ success: false, skipped: true, reason: "MATCH_DATE_PASSED" });
     }
 
+    const groupSnap = await db.collection("groups").doc(groupId).get();
+    const groupData = groupSnap.exists ? groupSnap.data() : null;
+    const sportEmoji = getGroupEmoji(groupData);
+    const matchNoun = getMatchNoun(groupData?.sport);
+
     const dateLabel = match?.date
       ? slack.formatMatchDateOnly(match.date)
-      : "trận điểm danh";
+      : `${matchNoun.single} điểm danh`;
 
     const tokens = await collectGroupTokens(groupId);
     if (tokens.length === 0) {
@@ -1105,8 +1123,8 @@ apiRoutes.post("/notify/attendance-deleted", triggerAuth.requireUser, requireTri
     }
     const result = await sendPushToTokens(tokens, {
       notification: {
-        title: "Trận điểm danh đã hủy",
-        body: `Điểm danh trận ${dateLabel} đã bị hủy. Vui lòng chờ thông báo mới.`,
+        title: `${matchNoun.capitalized} điểm danh đã hủy`,
+        body: `Điểm danh ${matchNoun.single} ${dateLabel} đã bị hủy. Vui lòng chờ thông báo mới.`,
       },
       data: {
         matchId,
@@ -1120,11 +1138,11 @@ apiRoutes.post("/notify/attendance-deleted", triggerAuth.requireUser, requireTri
       if (target) {
         slack
           .sendBlock({
-            headerText: "❌ Đã hủy trận điểm danh",
-            bodyMarkdown: `📅 Trận *${slack.formatMatchDate(match?.date)}* đã bị hủy.${
+            headerText: `❌ Đã hủy ${matchNoun.single} điểm danh`,
+            bodyMarkdown: `📅 ${matchNoun.capitalized} *${slack.formatMatchDate(match?.date)}* đã bị hủy.${
               match?.venueName ? `\n📍 ${match.venueName}` : ""
-            }\n\n😢 Hẹn anh em trận sau nhé!`,
-            fallbackText: `Trận ${dateLabel} đã hủy điểm danh`,
+            }\n\n😢 Hẹn anh em ${matchNoun.single} sau nhé!`,
+            fallbackText: `${matchNoun.capitalized} ${dateLabel} đã hủy điểm danh`,
           }, target)
           .catch((e) => console.error("[slack] A2 failed", e));
       }
@@ -1271,14 +1289,19 @@ apiRoutes.post("/notify/match-published", triggerAuth.requireUser, requireTrigge
       0
     );
 
+    const groupSnap = await db.collection("groups").doc(groupId).get();
+    const groupData = groupSnap.exists ? groupSnap.data() : null;
+    const sportEmoji = getGroupEmoji(groupData);
+    const matchNoun = getMatchNoun(groupData?.sport);
+
     // Push to FCM subscribers
     const tokens = await collectGroupTokens(groupId);
     let pushResult = { successCount: 0, failureCount: 0 };
     if (tokens.length > 0) {
       pushResult = await sendPushToTokens(tokens, {
         notification: {
-          title: "Bill trận đã công khai!",
-          body: `Bill trận ${slack.formatMatchDate(
+          title: `${sportEmoji} Bill ${matchNoun.single} đã công khai!`,
+          body: `Bill ${matchNoun.single} ${slack.formatMatchDate(
             match.date
           )} đã công khai. Vào để thanh toán.`,
         },
@@ -1304,7 +1327,7 @@ apiRoutes.post("/notify/match-published", triggerAuth.requireUser, requireTrigge
       if (target) {
         slack
           .sendBlock({
-            headerText: "📢 Bill trận đã công khai",
+            headerText: `${sportEmoji} Bill ${matchNoun.single} đã công khai`,
             bodyMarkdown: `<!here>\n📅 *${slack.formatMatchDate(match.date)}*${
               match.venueName ? `\n📍 ${match.venueName}` : ""
             }${paidByName ? `\n💸 Người ứng tiền sân: *${paidByName}*` : ""}\n\n💳 Anh em vào thanh toán nhé!`,
@@ -1323,7 +1346,7 @@ apiRoutes.post("/notify/match-published", triggerAuth.requireUser, requireTrigge
               url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/pay`,
               style: "primary",
             },
-            fallbackText: `Bill trận ${slack.formatMatchDate(
+            fallbackText: `${sportEmoji} Bill ${matchNoun.single} ${slack.formatMatchDate(
               match.date
             )} đã công khai`,
           }, target)
@@ -1788,12 +1811,22 @@ exports.checkAttendanceClose = onSchedule(
       .where("status", "==", "PENDING")
       .get();
 
+    const groupMap = new Map();
     for (const docSnap of pendingSnap.docs) {
       const data = docSnap.data();
       const groupId = groupIdOf(data);
       if (data.isDeleted) continue;
       const closing = computeClosingTime(data.date, data.attendanceCloseHours);
       if (!closing) continue;
+
+      let groupData = groupMap.get(groupId);
+      if (!groupData) {
+        const gSnap = await db.collection("groups").doc(groupId).get();
+        groupData = gSnap.exists ? gSnap.data() : {};
+        groupMap.set(groupId, groupData);
+      }
+      const sportEmoji = getGroupEmoji(groupData);
+      const matchNoun = getMatchNoun(groupData?.sport);
 
       const matchId = docSnap.id;
 
@@ -1831,10 +1864,10 @@ exports.checkAttendanceClose = onSchedule(
                   ? "⏰ Sắp đến mốc nhắc chốt điểm danh"
                   : "⏰ Sắp đóng cổng điểm danh",
                 bodyMarkdown: isReminderOnly
-                  ? `<!channel>\n📅 Trận *${slack.formatMatchDate(data.date)}*${
+                  ? `<!channel>\n📅 ${matchNoun.capitalized} *${slack.formatMatchDate(data.date)}*${
                       data.venueName ? `\n📍 ${data.venueName}` : ""
                     }\n\n📋 Mốc nhắc chốt lúc *${slack.formatTimestamp(closing)}* — ⏳ còn *${remainingLabel}*\n👥 Hiện đã có *${attCount} người* điểm danh.\n\n🏃 Ai chưa điểm danh vào cập nhật sớm để chốt số lượng sân nhé! (Cổng điểm danh vẫn mở sau mốc này)`
-                  : `<!channel>\n📅 Trận *${slack.formatMatchDate(data.date)}*${
+                  : `<!channel>\n📅 ${matchNoun.capitalized} *${slack.formatMatchDate(data.date)}*${
                       data.venueName ? `\n📍 ${data.venueName}` : ""
                     }\n\n🚪 Cổng đóng lúc *${slack.formatTimestamp(closing)}* — ⏳ còn *${remainingLabel}*\n👥 Hiện đã có *${attCount} người* điểm danh.\n\n🏃 Ai chưa điểm danh thì vào nhanh nhé!`,
                 cta: {
@@ -1883,20 +1916,20 @@ exports.checkAttendanceClose = onSchedule(
                   ? "📋 Tình hình điểm danh (Mốc chốt sân)"
                   : "🔒 Đã chốt danh sách điểm danh",
                 bodyMarkdown: isReminderOnly
-                  ? `📅 Trận *${slack.formatMatchDate(data.date)}*${
+                  ? `📅 ${matchNoun.capitalized} *${slack.formatMatchDate(data.date)}*${
                       data.venueName ? `\n📍 ${data.venueName}` : ""
                     }\n\n👥 *${attSnap.size} người tham gia*${
                       attendees.length > 0
                         ? `:\n${attendees.map((n) => `   👤 ${n}`).join("\n")}`
                         : ""
-                    }${notAttSnap.size > 0 ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_` : ""}\n\n💡 Cổng điểm danh vẫn tiếp tục mở để anh em đăng ký thêm.\n⚽ Hẹn anh em ra sân!`
-                  : `📅 Trận *${slack.formatMatchDate(data.date)}*${
+                    }${notAttSnap.size > 0 ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_` : ""}\n\n💡 Cổng điểm danh vẫn tiếp tục mở để anh em đăng ký thêm.\n${sportEmoji} Hẹn anh em ra sân!`
+                  : `📅 ${matchNoun.capitalized} *${slack.formatMatchDate(data.date)}*${
                       data.venueName ? `\n📍 ${data.venueName}` : ""
                     }\n\n👥 *${attSnap.size} người tham gia*${
                       attendees.length > 0
                         ? `:\n${attendees.map((n) => `   👤 ${n}`).join("\n")}`
                         : ""
-                    }${notAttSnap.size > 0 ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_` : ""}\n\n⚽ Hẹn anh em ra sân!`,
+                    }${notAttSnap.size > 0 ? `\n\n🚫 _Báo vắng: ${notAttSnap.size} người_` : ""}\n\n${sportEmoji} Hẹn anh em ra sân!`,
                 fallbackText: isReminderOnly
                   ? `Mốc chốt sân: ${attSnap.size} người tham gia`
                   : `Chốt ${attSnap.size} người tham gia`,
@@ -2444,11 +2477,21 @@ exports.dailyAttendanceReminder = onSchedule(
       return;
     }
 
+    const groupMap = new Map();
     for (const docSnap of pendingSnap.docs) {
       const data = docSnap.data();
       const groupId = groupIdOf(data);
       if (data.isDeleted) continue;
       if (!data.date?.toDate) continue;
+
+      let groupData = groupMap.get(groupId);
+      if (!groupData) {
+        const gSnap = await db.collection("groups").doc(groupId).get();
+        groupData = gSnap.exists ? gSnap.data() : {};
+        groupMap.set(groupId, groupData);
+      }
+      const sportEmoji = getGroupEmoji(groupData);
+      const matchNoun = getMatchNoun(groupData?.sport);
 
       const matchDate = data.date.toDate();
       const closing = computeClosingTime(matchDate, data.attendanceCloseHours);
@@ -2542,16 +2585,16 @@ exports.dailyAttendanceReminder = onSchedule(
         if (target) {
           await slack
             .sendBlock({
-              headerText: "🔔 Nhắc nhở điểm danh",
-              bodyMarkdown: `${mention}📅 Trận *${slack.formatMatchDate(data.date)}*${
+              headerText: `${sportEmoji} Nhắc nhở điểm danh`,
+              bodyMarkdown: `${mention}📅 ${matchNoun.capitalized} *${slack.formatMatchDate(data.date)}*${
                 data.venueName ? `\n📍 ${data.venueName}` : ""
-              }\n\n${daysLabel} đến trận.${attendeesSection}${absentSection}\n\n🏃 Anh em check nhanh giúp nhé!`,
+              }\n\n${daysLabel} đến ${matchNoun.single}.${attendeesSection}${absentSection}\n\n🏃 Anh em check nhanh giúp nhé!`,
               cta: {
                 label: "Điểm danh ngay",
                 url: `${publicUrlFor(groupId, slack.PUBLIC_WEB_URL)}/attendance`,
                 style: "primary",
               },
-              fallbackText: "Nhắc nhở điểm danh",
+              fallbackText: `${sportEmoji} Nhắc nhở điểm danh ${matchNoun.single}`,
             }, target)
             .catch((e) => console.error("[slack] daily-reminder failed", e));
         }

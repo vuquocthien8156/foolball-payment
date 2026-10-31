@@ -1,4 +1,11 @@
-const { isValidGroupId, publicUrlFor, groupKindOf } = require("./groups");
+const {
+  isValidGroupId,
+  publicUrlFor,
+  groupKindOf,
+  getGroupEmoji,
+  getSportEmoji,
+  getMatchNoun,
+} = require("./groups");
 
 /**
  * Calculates next date for a target day of the week (0=Sun, 1=Mon, ..., 6=Sat) and time (HH:mm)
@@ -201,16 +208,19 @@ async function checkAndRunScheduledMatches({ db, FieldValue, slack = null, targe
             try {
               const target = await targets.getSlackTarget(groupId);
               if (target) {
+                const groupData = groupDoc.data() || {};
+                const sportEmoji = getGroupEmoji(groupData);
+                const matchNoun = getMatchNoun(groupData.sport);
                 const webBaseUrl = slack.PUBLIC_WEB_URL || "https://thienbun-payment.web.app";
                 await slack.sendBlock({
-                  headerText: "⚽ Đã mở điểm danh trận mới (Tự động)",
-                  bodyMarkdown: `<!here>\n📅 Trận *${slack.formatMatchDate ? slack.formatMatchDate(result.date) : result.date.toISOString().slice(0, 10)}*${result.matchData.venueName ? `\n📍 ${result.matchData.venueName}` : ""}\n\n🏃 Hệ thống đã tự động tạo trận và mở điểm danh!`,
+                  headerText: `${sportEmoji} Đã mở điểm danh ${matchNoun.single} mới (Tự động)`,
+                  bodyMarkdown: `<!here>\n📅 ${matchNoun.capitalized} *${slack.formatMatchDate ? slack.formatMatchDate(result.date) : result.date.toISOString().slice(0, 10)}*${result.matchData.venueName ? `\n📍 ${result.matchData.venueName}` : ""}\n\n🏃 Hệ thống đã tự động tạo ${matchNoun.single} và mở điểm danh!`,
                   cta: {
                     label: "Điểm danh ngay",
                     url: `${publicUrlFor(groupId, webBaseUrl)}/attendance`,
                     style: "primary",
                   },
-                  fallbackText: "Đã mở điểm danh trận mới",
+                  fallbackText: `${sportEmoji} Đã mở điểm danh ${matchNoun.single} mới`,
                 }, target);
               }
             } catch (slackErr) {

@@ -5,7 +5,17 @@ import { auth, db } from "@/lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiRequest } from "@/lib/api";
-import { GROUP_SPORTS, SPORT_LABELS, GroupSport, GroupKind, groupKindOf, groupPath } from "@/lib/groups";
+import {
+  GROUP_SPORTS,
+  SPORT_LABELS,
+  SPORT_ICONS,
+  GroupSport,
+  GroupKind,
+  groupKindOf,
+  groupPath,
+  getSportEmoji,
+  getGroupEmoji,
+} from "@/lib/groups";
 import { usePlatformAccount } from "@/hooks/usePlatformAccount";
 import { toast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -796,8 +806,9 @@ const Groups = () => {
                   Thử nghiệm
                 </Badge>
               )}
-              <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
-                {groupKindOf(group) === "shared_bills" ? "Chia tiền" : SPORT_LABELS[group.sport || "other"]}
+              <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium flex items-center gap-1">
+                <span>{getGroupEmoji(group)}</span>
+                <span>{groupKindOf(group) === "shared_bills" ? "Chia tiền" : SPORT_LABELS[group.sport || "other"]}</span>
               </span>
               {isOwnerOrSuper && (
                 <DropdownMenu>
@@ -1084,8 +1095,9 @@ const Groups = () => {
                               Test
                             </Badge>
                           )}
-                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                            {isShared ? "Chia tiền" : g.sport ? SPORT_LABELS[g.sport as GroupSport] || g.sport : "Thể thao"}
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 flex items-center gap-1">
+                            <span>{getGroupEmoji(g)}</span>
+                            <span>{isShared ? "Chia tiền" : g.sport ? SPORT_LABELS[g.sport as GroupSport] || g.sport : "Thể thao"}</span>
                           </Badge>
                         </div>
                       </button>
@@ -1491,7 +1503,10 @@ const Groups = () => {
                 <SelectContent>
                   {GROUP_SPORTS.map((value) => (
                     <SelectItem key={value} value={value}>
-                      {SPORT_LABELS[value]}
+                      <span className="flex items-center gap-1.5">
+                        <span>{SPORT_ICONS[value]}</span>
+                        <span>{SPORT_LABELS[value]}</span>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1672,7 +1687,10 @@ const Groups = () => {
                 <SelectContent>
                   {GROUP_SPORTS.map((s) => (
                     <SelectItem key={s} value={s}>
-                      {SPORT_LABELS[s] || s}
+                      <span className="flex items-center gap-1.5">
+                        <span>{SPORT_ICONS[s]}</span>
+                        <span>{SPORT_LABELS[s] || s}</span>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>

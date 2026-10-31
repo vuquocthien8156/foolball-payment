@@ -52,3 +52,40 @@ test("group paths, scoped storage, settings path and mismatching item", () => {
   assert.equal(server.assertSameGroup("football-zigvy", [{}, other]), other);
   assert.equal(server.assertSameGroup("football-zigvy", [{}, { groupId: "football-zigvy" }]), null);
 });
+
+test("SPORT_ICONS and GROUP_KIND_ICONS equal in web and server", () => {
+  assert.deepEqual({ ...web.SPORT_ICONS }, { ...server.SPORT_ICONS });
+  assert.deepEqual({ ...web.GROUP_KIND_ICONS }, { ...server.GROUP_KIND_ICONS });
+});
+
+test("getSportEmoji returns expected icons with fallback", () => {
+  for (const helper of [web.getSportEmoji, server.getSportEmoji]) {
+    assert.equal(helper("football"), "⚽");
+    assert.equal(helper("badminton"), "🏸");
+    assert.equal(helper("pickleball"), "🏓");
+    assert.equal(helper("other"), "🏆");
+    assert.equal(helper(null), "🏆");
+    assert.equal(helper("unknown"), "🏆");
+  }
+});
+
+test("getGroupEmoji resolves group kinds and sports", () => {
+  for (const helper of [web.getGroupEmoji, server.getGroupEmoji]) {
+    assert.equal(helper(null), "🏆");
+    assert.equal(helper({ kind: "shared_bills" }), "🧾");
+    assert.equal(helper({ sport: "badminton" }), "🏸");
+    assert.equal(helper({ sport: "football" }), "⚽");
+    assert.equal(helper({ sport: "pickleball" }), "🏓");
+    assert.equal(helper({ id: "football-zigvy" }), "⚽");
+    assert.equal(helper({}), "🏆");
+  }
+});
+
+test("getMatchNoun returns sport-appropriate terminology", () => {
+  for (const helper of [web.getMatchNoun, server.getMatchNoun]) {
+    assert.deepEqual({ ...helper("badminton") }, { single: "buổi cầu", capitalized: "Buổi cầu", venue: "sân cầu lông" });
+    assert.deepEqual({ ...helper("pickleball") }, { single: "buổi pickleball", capitalized: "Buổi pickleball", venue: "sân pickleball" });
+    assert.deepEqual({ ...helper("football") }, { single: "trận", capitalized: "Trận", venue: "sân bóng" });
+    assert.deepEqual({ ...helper("other") }, { single: "trận", capitalized: "Trận", venue: "sân bóng" });
+  }
+});

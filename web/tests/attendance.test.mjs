@@ -23,6 +23,7 @@ function setup(matches, delayAttendance) {
     "@/lib/utils": utils,
     "@/lib/firebase": { db: {} },
     "@/contexts/GroupContext": { useGroup: () => ({ groupId: "football-zigvy", group: { sport: "football" } }), useGroupPath: () => (sub = "") => `/g/football-zigvy/${sub}` },
+    "@/lib/groups": groups,
     "@/lib/features": features,
     "@/lib/notifications": { ensureNotificationToken: async () => null },
     "@/lib/api": { postApiJson: async (path, payload) => { requests.push({ path, payload }); return {}; } },

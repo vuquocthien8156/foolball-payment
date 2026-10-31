@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useGroup, useGroupPath } from "@/contexts/GroupContext";
+import { getGroupEmoji, getMatchNoun } from "@/lib/groups";
 import {
   MemberEloStats,
   GroupEloSnapshot,
@@ -237,9 +238,10 @@ const PublicElo: React.FC = () => {
 
           <Badge
             variant="outline"
-            className="text-xs py-1 px-2.5 bg-background shadow-xs"
+            className="text-xs py-1 px-2.5 bg-background shadow-xs gap-1.5"
           >
-            {group?.name || "Bóng đá"}
+            <span>{getGroupEmoji(group)}</span>
+            <span>{group?.name || "Bóng đá"}</span>
           </Badge>
         </div>
 
@@ -253,7 +255,7 @@ const PublicElo: React.FC = () => {
           </h1>
           <p className="text-sm sm:text-base text-muted-foreground max-w-lg mx-auto">
             Hệ thống tính điểm ELO tự động dựa trên kết quả Thắng, Thua, Hoà của
-            từng trận đấu bóng đá.
+            từng {getMatchNoun(group?.sport).single}.
           </p>
         </div>
 

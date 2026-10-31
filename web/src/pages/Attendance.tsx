@@ -1,5 +1,6 @@
 import { hasFeature } from "@/lib/features";
 import { useGroup, useGroupPath } from "@/contexts/GroupContext";
+import { getGroupEmoji, getMatchNoun } from "@/lib/groups";
 import { useState, useEffect, useCallback, useMemo, useRef, DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -899,9 +900,9 @@ const Attendance = () => {
                   {/* Vùng 1: Status pill + title nhỏ */}
                   <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3">
                     <div className="flex items-center gap-2 text-muted-foreground">
-                      <Users className="h-4 w-4" />
+                      <span className="text-base leading-none">{getGroupEmoji(group)}</span>
                       <span className="text-xs font-semibold uppercase tracking-wider">
-                        Điểm danh ra sân
+                        Điểm danh ra {getMatchNoun(group?.sport).venue.includes("cầu lông") ? "sân cầu" : "sân"}
                       </span>
                     </div>
                     {isAttendanceClosed ? (

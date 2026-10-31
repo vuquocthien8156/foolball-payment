@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useGroup } from "@/contexts/GroupContext";
-import { groupPath, groupKindOf, isValidGroupId, scopedKey } from "@/lib/groups";
+import { groupPath, groupKindOf, isValidGroupId, scopedKey, getGroupEmoji } from "@/lib/groups";
 import {
   Sheet,
   SheetContent,
@@ -83,15 +83,6 @@ export function removeStoredVisitedGroup(groupId: string) {
   } catch {}
 }
 
-function getSportEmoji(g?: { sport?: string; kind?: string } | null): string {
-  if (!g) return "🏆";
-  if (g.kind === "shared_bills") return "🧾";
-  if (g.sport === "badminton") return "🏸";
-  if (g.sport === "football") return "⚽";
-  if (g.sport === "pickleball") return "🏓";
-  return "🏆";
-}
-
 interface PublicGroupSwitcherProps {
   currentSubPath?: string; // e.g. "public" or "public/pay"
   className?: string;
@@ -145,7 +136,7 @@ export const PublicGroupSwitcher: React.FC<PublicGroupSwitcherProps> = ({
   };
 
   const otherGroupsCount = visitedGroups.filter((g) => g.id !== groupId).length;
-  const currentEmoji = getSportEmoji(group);
+  const currentEmoji = getGroupEmoji(group);
 
   return (
     <>
@@ -215,7 +206,7 @@ export const PublicGroupSwitcher: React.FC<PublicGroupSwitcherProps> = ({
             ) : (
               visitedGroups.map((g) => {
                 const isCurrent = g.id === groupId;
-                const emoji = getSportEmoji(g);
+                const emoji = getGroupEmoji(g);
                 const savedMemberName =
                   typeof localStorage !== "undefined"
                     ? localStorage.getItem(scopedKey("lastSelectedMemberName", g.id))

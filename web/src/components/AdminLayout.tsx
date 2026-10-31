@@ -37,7 +37,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
-import { SPORT_LABELS, GroupSport } from "@/lib/groups";
+import { SPORT_LABELS, GroupSport, getGroupEmoji } from "@/lib/groups";
 import { apiRequest } from "@/lib/api";
 import {
   Card,
@@ -488,7 +488,7 @@ const AdminLayout = () => {
                       className="h-9 px-2.5 sm:px-3 text-xs sm:text-sm font-medium justify-between min-w-[150px] max-w-[210px] sm:max-w-[300px] bg-background hover:bg-accent/60 border-muted-foreground/20 shadow-sm"
                     >
                       <div className="flex items-center gap-1.5 sm:gap-2 truncate min-w-0">
-                        <Building2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-muted-foreground" />
+                        <span className="shrink-0 text-sm">{getGroupEmoji(currentGroupInfo)}</span>
                         <span className="truncate">{currentGroupInfo.name}</span>
                         {(typeof currentGroupInfo.isTest === "boolean"
                           ? currentGroupInfo.isTest
@@ -559,6 +559,7 @@ const AdminLayout = () => {
                                         isCurrent ? "opacity-100" : "opacity-0",
                                       )}
                                     />
+                                    <span className="shrink-0 text-base">{getGroupEmoji(g)}</span>
                                     <div className="flex flex-col min-w-0">
                                       <span
                                         className={cn(
@@ -623,6 +624,7 @@ const AdminLayout = () => {
                                           isCurrent ? "opacity-100" : "opacity-0",
                                         )}
                                       />
+                                      <span className="shrink-0 text-base">{getGroupEmoji(g)}</span>
                                       <div className="flex flex-col min-w-0">
                                         <span
                                           className={cn(
