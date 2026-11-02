@@ -1808,12 +1808,18 @@ const SetupMatch = () => {
               ),
             )
           : undefined;
+        const isLinkedPayer = Boolean(
+          paidByMemberId &&
+          memberShare.memberId === paidByMemberId &&
+          (memberObj?.accountUid || memberObj?.isPlatformOwner)
+        );
         shares.push({
           matchId: matchRef.id,
           memberId: memberShare.memberId,
           teamId: memberShare.teamId,
           amount: memberShare.totalAmount,
-          status: "PENDING",
+          status: isLinkedPayer ? "PAID" : "PENDING",
+          ...(isLinkedPayer ? { channel: "MANUAL", paidAt: new Date().toISOString() } : {}),
           orderCode: "",
           expenseBreakdown: memberShare.expenseBreakdown,
           ...(calcDetails && Object.keys(calcDetails).length > 0
@@ -1915,8 +1921,9 @@ const SetupMatch = () => {
         const finalPaidAt =
           existing?.data?.status === "PAID"
             ? existing.data.paidAt || new Date().toISOString()
-            : undefined;
-        const finalChannel = existing?.data?.channel || undefined;
+            : (finalStatus === "PAID" ? share.paidAt || new Date().toISOString() : undefined);
+        const finalChannel =
+          existing?.data?.channel || (finalStatus === "PAID" ? share.channel || "MANUAL" : undefined);
         const finalOrderCode = existing?.data?.orderCode || share.orderCode;
 
         const shareData: Record<string, any> = {

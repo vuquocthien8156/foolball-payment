@@ -222,3 +222,60 @@ test("Automated Net Offset: deducts payer unpaid share and supports history retr
   const otherMatch = mgrHistory.find((h) => h.id === "match-super-other");
   assert.equal(otherMatch, undefined, "Manager must NOT see other members' matches in foreign groups");
 });
+
+test("Advance payer with linked account marked PAID (channel: MANUAL) has their share deducted upon settlement", async (t) => {
+  const host = await setup(t);
+
+  // Add match where linked payer's share was auto-marked PAID with channel MANUAL
+  host.records.set("matches/match-linked-auto", {
+    groupId: "club",
+    totalAmount: 500000,
+    paidByMemberId: "club_adv",
+    paidByMemberName: "Thien Bong (Advance Payer)",
+    status: "PUBLISHED",
+    date: new Date().toISOString(),
+  });
+  host.records.set("matches/match-linked-auto/shares/share-adv", {
+    groupId: "club",
+    matchId: "match-linked-auto",
+    memberId: "club_adv",
+    amount: 100000,
+    status: "PAID",
+    channel: "MANUAL",
+  });
+  host.records.set("matches/match-linked-auto/shares/share-other-1", {
+    groupId: "club",
+    matchId: "match-linked-auto",
+    memberId: "club_other",
+    amount: 100000,
+    status: "PAID",
+    channel: "PAYOS",
+  });
+
+  const overviewRes = await host.request("GET", "/settlement/overview", null, "owner");
+  assert.equal(overviewRes.status, 200);
+
+  const groupItem = overviewRes.data.groups.find((g) => g.groupId === "club");
+  assert.ok(groupItem);
+  const match = groupItem.pendingMatches.find((m) => m.id === "match-linked-auto");
+  assert.ok(match);
+  assert.equal(match.grossAmount, 500000);
+  assert.equal(match.payerShareAmount, 100000);
+  assert.equal(match.payerSharePaid, false, "Manual/auto-offset share is not paid via PayOS");
+  assert.equal(match.netPayoutAmount, 400000, "Net refund must ignore/deduct the 100,000 payer share (500k - 100k = 400k)");
+
+  // Batch settle and check recorded payout snapshot
+  const settleRes = await host.request(
+    "POST",
+    "/settlement/batch-settle",
+    { groupId: "club", matchIds: ["match-linked-auto"], note: "Auto-deducted payer share" },
+    "owner"
+  );
+  assert.equal(settleRes.status, 200);
+
+  const settledMatch = host.records.get("matches/match-linked-auto");
+  assert.equal(settledMatch.payoutStatus, "PAID_OUT");
+  assert.equal(settledMatch.payoutGrossAmount, 500000);
+  assert.equal(settledMatch.payoutPayerShareAmount, 100000);
+  assert.equal(settledMatch.payoutNetAmount, 400000);
+});
