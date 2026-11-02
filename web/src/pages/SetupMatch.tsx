@@ -132,6 +132,20 @@ interface Share {
   amount: number;
   status: "PENDING" | "PAID" | "CANCELLED";
   orderCode: string;
+  paidAt?: string;
+  channel?: string;
+  paidMethod?: "SYSTEM_AUTO" | "MANUAL" | "PAYOS";
+  paidReason?: string;
+  paidByName?: string;
+  paidByUid?: string;
+  paymentHistory?: {
+    status: string;
+    method?: string;
+    reason?: string;
+    actorName?: string;
+    actorUid?: string;
+    timestamp: string;
+  }[];
   calculationDetails?: {
     memberPercent?: number;
     reason?: string;
@@ -1813,13 +1827,34 @@ const SetupMatch = () => {
           memberShare.memberId === paidByMemberId &&
           (memberObj?.accountUid || memberObj?.isPlatformOwner)
         );
+        const autoReason = "Hệ thống tự động khấu trừ (Thành viên ứng tiền có liên kết tài khoản)";
+        const nowIso = new Date().toISOString();
         shares.push({
           matchId: matchRef.id,
           memberId: memberShare.memberId,
           teamId: memberShare.teamId,
           amount: memberShare.totalAmount,
           status: isLinkedPayer ? "PAID" : "PENDING",
-          ...(isLinkedPayer ? { channel: "MANUAL", paidAt: new Date().toISOString() } : {}),
+          ...(isLinkedPayer
+            ? {
+                channel: "MANUAL",
+                paidMethod: "SYSTEM_AUTO",
+                paidReason: autoReason,
+                paidByName: "Hệ thống (System)",
+                paidByUid: "system",
+                paidAt: nowIso,
+                paymentHistory: [
+                  {
+                    status: "PAID",
+                    method: "SYSTEM_AUTO",
+                    reason: autoReason,
+                    actorName: "Hệ thống",
+                    actorUid: "system",
+                    timestamp: nowIso,
+                  },
+                ],
+              }
+            : {}),
           orderCode: "",
           expenseBreakdown: memberShare.expenseBreakdown,
           ...(calcDetails && Object.keys(calcDetails).length > 0
@@ -1924,6 +1959,16 @@ const SetupMatch = () => {
             : (finalStatus === "PAID" ? share.paidAt || new Date().toISOString() : undefined);
         const finalChannel =
           existing?.data?.channel || (finalStatus === "PAID" ? share.channel || "MANUAL" : undefined);
+        const finalPaidMethod =
+          existing?.data?.paidMethod || (finalStatus === "PAID" ? share.paidMethod || "MANUAL" : undefined);
+        const finalPaidReason =
+          existing?.data?.paidReason || (finalStatus === "PAID" ? share.paidReason || "" : undefined);
+        const finalPaidByName =
+          existing?.data?.paidByName || (finalStatus === "PAID" ? share.paidByName || "" : undefined);
+        const finalPaidByUid =
+          existing?.data?.paidByUid || (finalStatus === "PAID" ? share.paidByUid || "" : undefined);
+        const finalPaymentHistory =
+          existing?.data?.paymentHistory || (finalStatus === "PAID" && share.paymentHistory ? share.paymentHistory : []);
         const finalOrderCode = existing?.data?.orderCode || share.orderCode;
 
         const shareData: Record<string, any> = {
@@ -1931,6 +1976,11 @@ const SetupMatch = () => {
           status: finalStatus,
           ...(finalPaidAt ? { paidAt: finalPaidAt } : {}),
           ...(finalChannel ? { channel: finalChannel } : {}),
+          ...(finalPaidMethod ? { paidMethod: finalPaidMethod } : {}),
+          ...(finalPaidReason ? { paidReason: finalPaidReason } : {}),
+          ...(finalPaidByName ? { paidByName: finalPaidByName } : {}),
+          ...(finalPaidByUid ? { paidByUid: finalPaidByUid } : {}),
+          ...(finalPaymentHistory?.length ? { paymentHistory: finalPaymentHistory } : {}),
           ...(finalOrderCode ? { orderCode: finalOrderCode } : {}),
           groupId,
           updatedAt: serverTimestamp(),

@@ -566,10 +566,23 @@ const payosWebhookHandler = async (req, res) => {
         shareDocs.forEach((doc) => {
           const shareData = doc.data();
           if (shareData.status !== "PAID") {
+            const nowIso = new Date().toISOString();
             transaction.update(doc.ref, {
               status: "PAID",
-              paidAt: new Date().toISOString(),
+              paidAt: nowIso,
               channel: "PAYOS",
+              paidMethod: "PAYOS",
+              paidReason: "Thanh toán thành công qua PayOS",
+              paidByName: "PayOS Gateway",
+              ...(typeof FieldValue?.arrayUnion === "function" ? {
+                paymentHistory: FieldValue.arrayUnion({
+                  status: "PAID",
+                  method: "PAYOS",
+                  reason: "Thanh toán thành công qua PayOS",
+                  actorName: "PayOS Gateway",
+                  timestamp: nowIso,
+                }),
+              } : {}),
               meta: { webhook: webhookData },
             });
 
@@ -756,10 +769,23 @@ const verifyPaymentHandler = async (req, res) => {
         shareDocs.forEach((doc) => {
           const shareData = doc.data();
           if (shareData.status !== "PAID") {
+            const nowIso = new Date().toISOString();
             transaction.update(doc.ref, {
               status: "PAID",
-              paidAt: new Date().toISOString(),
+              paidAt: nowIso,
               channel: "PAYOS",
+              paidMethod: "PAYOS",
+              paidReason: "Xác thực thanh toán PayOS thành công",
+              paidByName: "PayOS Gateway",
+              ...(typeof FieldValue?.arrayUnion === "function" ? {
+                paymentHistory: FieldValue.arrayUnion({
+                  status: "PAID",
+                  method: "PAYOS",
+                  reason: "Xác thực thanh toán PayOS thành công",
+                  actorName: "PayOS Gateway",
+                  timestamp: nowIso,
+                }),
+              } : {}),
               meta: { source: "verify", paymentInfo },
             });
 

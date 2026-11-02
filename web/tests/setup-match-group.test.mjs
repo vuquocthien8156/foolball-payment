@@ -131,3 +131,33 @@ test("new badminton setup replaces stale football defaults before editing", asyn
   assert.equal(host.states.get("teams")[0].percent, 100);
   assert.equal(host.states.get("teams")[0].name, "Người tham gia");
 });
+
+test("linked advance payer share is auto-marked PAID with SYSTEM_AUTO reason and history", async () => {
+  const { host, log } = setup("badm-1", {
+    "members/a": { name: "A", groupId: "badm-1", accountUid: "uid-a" },
+    "members/b": { name: "B", groupId: "badm-1" },
+  });
+  await host.page.fetchData();
+  host.states.set("paidByMemberId", "a");
+  host.render();
+  await host.page.handleSave(true);
+
+  const writes = log.filter((entry) => entry.op);
+  const shares = writes.filter((entry) => entry.path.includes("/shares/"));
+  const payerShare = shares.find((s) => s.data.memberId === "a");
+  const regularShare = shares.find((s) => s.data.memberId === "b");
+
+  assert.ok(payerShare, "Payer share must exist");
+  assert.equal(payerShare.data.status, "PAID");
+  assert.equal(payerShare.data.channel, "MANUAL");
+  assert.equal(payerShare.data.paidMethod, "SYSTEM_AUTO");
+  assert.equal(payerShare.data.paidReason, "Hệ thống tự động khấu trừ (Thành viên ứng tiền có liên kết tài khoản)");
+  assert.equal(payerShare.data.paidByName, "Hệ thống (System)");
+  assert.equal(payerShare.data.paidByUid, "system");
+  assert.ok(Array.isArray(payerShare.data.paymentHistory));
+  assert.equal(payerShare.data.paymentHistory[0].method, "SYSTEM_AUTO");
+
+  assert.ok(regularShare, "Regular share must exist");
+  assert.equal(regularShare.data.status, "PENDING");
+  assert.equal(regularShare.data.paidMethod, undefined);
+});

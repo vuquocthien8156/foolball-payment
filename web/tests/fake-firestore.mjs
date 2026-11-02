@@ -16,7 +16,11 @@ export class Timestamp {
 }
 
 const SERVER_TIME = Timestamp.fromDate(new Date("2026-10-20T00:00:00Z"));
-export const FieldValue = { serverTimestamp: () => Timestamp.fromMillis(SERVER_TIME.toMillis()) };
+export const FieldValue = {
+  serverTimestamp: () => Timestamp.fromMillis(SERVER_TIME.toMillis()),
+  delete: () => ({ _method: "delete" }),
+  arrayUnion: (...elements) => ({ _method: "arrayUnion", elements }),
+};
 
 const clone = (value) => {
   if (value instanceof Timestamp) return new Timestamp(value.seconds, value.nanoseconds);
@@ -30,7 +34,14 @@ const plainObject = (value) => value && Object.getPrototypeOf(value) === Object.
 const merge = (current, data) => {
   const result = clone(current ?? {});
   for (const [key, value] of Object.entries(data)) {
-    result[key] = plainObject(value) ? merge(result[key], value) : clone(value);
+    if (value && typeof value === "object" && value._method === "arrayUnion") {
+      const existing = Array.isArray(result[key]) ? result[key] : [];
+      result[key] = [...existing, ...value.elements.map(clone)];
+    } else if (value && typeof value === "object" && value._method === "delete") {
+      delete result[key];
+    } else {
+      result[key] = plainObject(value) ? merge(result[key], value) : clone(value);
+    }
   }
   return result;
 };

@@ -57,8 +57,10 @@ import {
   ExternalLink,
   QrCode,
   CreditCard,
+  History,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -104,6 +106,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   collection,
   collectionGroup,
@@ -121,6 +124,7 @@ import {
   deleteDoc,
   setDoc,
   serverTimestamp,
+  arrayUnion,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { cn, MATCH_TZ, formatMatchDateTime } from "@/lib/utils";
@@ -160,6 +164,15 @@ interface Match {
   }[];
 }
 
+export interface PaymentHistoryEntry {
+  status: "PAID" | "PENDING" | "CANCELLED";
+  method?: "SYSTEM_AUTO" | "MANUAL" | "MANUAL_REVERT" | "PAYOS";
+  reason?: string;
+  actorUid?: string;
+  actorName?: string;
+  timestamp: string;
+}
+
 interface Share {
   id: string;
   memberId: string;
@@ -168,6 +181,12 @@ interface Share {
   amount: number;
   status: "PENDING" | "PAID" | "CANCELLED";
   paidAt?: string;
+  channel?: string;
+  paidMethod?: "SYSTEM_AUTO" | "MANUAL" | "PAYOS";
+  paidReason?: string;
+  paidByUid?: string;
+  paidByName?: string;
+  paymentHistory?: PaymentHistoryEntry[];
   createdAt?: Timestamp;
   expenseBreakdown?: {
     expenseId: string;
@@ -430,6 +449,7 @@ const MatchListItem = ({
 };
 
 const Matches = () => {
+  const { user } = useAuth();
   const { groupId, group } = useGroup();
   const groupPath = useGroupPath();
   const [matches, setMatches] = useState<Match[]>([]);
@@ -444,6 +464,17 @@ const Matches = () => {
   const [isLoadingShares, setIsLoadingShares] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [matchIdToDelete, setMatchIdToDelete] = useState<string | null>(null);
+
+  // Manual payment & history modals
+  const [manualPayShare, setManualPayShare] = useState<Share | null>(null);
+  const [manualPayReason, setManualPayReason] = useState("");
+  const [isSubmittingManualPay, setIsSubmittingManualPay] = useState(false);
+
+  const [manualUnpayShare, setManualUnpayShare] = useState<Share | null>(null);
+  const [manualUnpayReason, setManualUnpayReason] = useState("");
+  const [isSubmittingManualUnpay, setIsSubmittingManualUnpay] = useState(false);
+
+  const [historyShare, setHistoryShare] = useState<Share | null>(null);
   const [sendNotificationOnDelete, setSendNotificationOnDelete] =
     useState(false);
   const [highlightedShareId, setHighlightedShareId] = useState<string | null>(
@@ -1021,45 +1052,109 @@ const Matches = () => {
     }
   };
 
-  const handleMarkAsPaid = async (shareId: string) => {
-    if (!selectedMatchId) return;
-    try {
-      await updateDoc(doc(db, "matches", selectedMatchId, "shares", shareId), {
-        status: "PAID",
-        paidAt: new Date().toISOString(),
-        channel: "MANUAL",
+  const openManualPayModal = (share: Share) => {
+    setManualPayShare(share);
+    setManualPayReason("Đã nhận tiền mặt");
+  };
+
+  const handleConfirmManualPay = async () => {
+    if (!selectedMatchId || !manualPayShare) return;
+    if (!manualPayReason.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Thiếu lý do",
+        description: "Vui lòng nhập lý do đánh dấu đã trả.",
       });
+      return;
+    }
+    setIsSubmittingManualPay(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const actorName = user?.displayName || user?.email || "Admin";
+      const actorUid = user?.uid || "unknown";
+      const reason = manualPayReason.trim();
+
+      await updateDoc(doc(db, "matches", selectedMatchId, "shares", manualPayShare.id), {
+        status: "PAID",
+        paidAt: nowIso,
+        channel: "MANUAL",
+        paidMethod: "MANUAL",
+        paidReason: reason,
+        paidByUid: actorUid,
+        paidByName: actorName,
+        paymentHistory: arrayUnion({
+          status: "PAID",
+          method: "MANUAL",
+          reason,
+          actorUid,
+          actorName,
+          timestamp: nowIso,
+        }),
+      });
+
       toast({
         title: "Thành công",
-        description: "Đã cập nhật trạng thái thanh toán.",
+        description: `Đã xác nhận thanh toán thủ công cho ${members.get(manualPayShare.memberId) || "thành viên"}.`,
       });
+      setManualPayShare(null);
+      setManualPayReason("");
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Lỗi",
         description: "Không thể cập nhật trạng thái.",
       });
+    } finally {
+      setIsSubmittingManualPay(false);
     }
   };
 
-  const handleMarkAsUnpaid = async (shareId: string) => {
-    if (!selectedMatchId) return;
+  const openManualUnpayModal = (share: Share) => {
+    setManualUnpayShare(share);
+    setManualUnpayReason("");
+  };
+
+  const handleConfirmManualUnpay = async () => {
+    if (!selectedMatchId || !manualUnpayShare) return;
+    setIsSubmittingManualUnpay(true);
     try {
-      await updateDoc(doc(db, "matches", selectedMatchId, "shares", shareId), {
+      const nowIso = new Date().toISOString();
+      const actorName = user?.displayName || user?.email || "Admin";
+      const actorUid = user?.uid || "unknown";
+      const reason = manualUnpayReason.trim() || "Chuyển về trạng thái Chưa trả";
+
+      await updateDoc(doc(db, "matches", selectedMatchId, "shares", manualUnpayShare.id), {
         status: "PENDING",
         paidAt: deleteField(),
         channel: deleteField(),
+        paidMethod: deleteField(),
+        paidReason: deleteField(),
+        paidByUid: deleteField(),
+        paidByName: deleteField(),
+        paymentHistory: arrayUnion({
+          status: "PENDING",
+          method: "MANUAL_REVERT",
+          reason,
+          actorUid,
+          actorName,
+          timestamp: nowIso,
+        }),
       });
+
       toast({
         title: "Thành công",
         description: "Đã cập nhật trạng thái thành Chưa trả.",
       });
+      setManualUnpayShare(null);
+      setManualUnpayReason("");
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Lỗi",
         description: "Không thể cập nhật trạng thái.",
       });
+    } finally {
+      setIsSubmittingManualUnpay(false);
     }
   };
 
@@ -3164,22 +3259,72 @@ const Matches = () => {
                                 </div>
                               </TableCell>
                               <TableCell>
-                                <Badge
-                                  variant={
-                                    share.status === "PAID"
-                                      ? "default"
-                                      : "secondary"
-                                  }
-                                >
-                                  {share.status}
-                                </Badge>
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <Badge
+                                      variant={
+                                        share.status === "PAID"
+                                          ? "default"
+                                          : "secondary"
+                                      }
+                                      className={cn(
+                                        share.status === "PAID"
+                                          ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                          : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+                                      )}
+                                    >
+                                      {share.status === "PAID" ? "Đã trả" : "Chưa trả"}
+                                    </Badge>
+                                    {share.status === "PAID" && (
+                                      <>
+                                        {share.paidMethod === "SYSTEM_AUTO" ? (
+                                          <Badge
+                                            variant="outline"
+                                            className="text-[10px] px-1.5 py-0 border-indigo-300 text-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 dark:text-indigo-300 font-normal"
+                                          >
+                                            🤖 System Auto
+                                          </Badge>
+                                        ) : share.paidMethod === "MANUAL" || share.channel === "MANUAL" ? (
+                                          <Badge
+                                            variant="outline"
+                                            className="text-[10px] px-1.5 py-0 border-amber-300 text-amber-700 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-300 font-normal"
+                                          >
+                                            👤 {share.paidByName ? `Thủ công (${share.paidByName})` : "Thủ công"}
+                                          </Badge>
+                                        ) : (
+                                          <Badge
+                                            variant="outline"
+                                            className="text-[10px] px-1.5 py-0 border-purple-300 text-purple-700 bg-purple-50 dark:bg-purple-950/40 dark:text-purple-300 font-normal"
+                                          >
+                                            💳 PayOS
+                                          </Badge>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                  {share.status === "PAID" && share.paidReason && (
+                                    <p className="text-[11px] text-muted-foreground italic truncate max-w-[200px]" title={share.paidReason}>
+                                      "{share.paidReason}"
+                                    </p>
+                                  )}
+                                  {(share.paymentHistory?.length || share.status === "PAID") ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setHistoryShare(share)}
+                                      className="text-[10px] text-primary hover:underline inline-flex items-center gap-1 font-medium"
+                                    >
+                                      <History className="h-3 w-3" />
+                                      Lịch sử ({share.paymentHistory?.length || 1})
+                                    </button>
+                                  ) : null}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right">
                                 {share.status === "PENDING" && (
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    onClick={() => handleMarkAsPaid(share.id)}
+                                    onClick={() => openManualPayModal(share)}
                                   >
                                     Đã trả
                                   </Button>
@@ -3188,7 +3333,7 @@ const Matches = () => {
                                   <Button
                                     variant="secondary"
                                     size="sm"
-                                    onClick={() => handleMarkAsUnpaid(share.id)}
+                                    onClick={() => openManualUnpayModal(share)}
                                   >
                                     Chưa trả
                                   </Button>
@@ -3313,6 +3458,239 @@ const Matches = () => {
                 </div>
               )}
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Manual Pay Confirmation Modal with Reason */}
+        <Dialog open={!!manualPayShare} onOpenChange={(open) => !open && setManualPayShare(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                Xác nhận thanh toán thủ công
+              </DialogTitle>
+              <DialogDescription>
+                Đánh dấu đã thanh toán cho{" "}
+                <strong>{manualPayShare ? members.get(manualPayShare.memberId) || "thành viên" : ""}</strong>
+                {" "}với số tiền{" "}
+                <strong className="text-emerald-600">{manualPayShare?.amount.toLocaleString()} VND</strong>.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2 text-xs">
+              <div className="rounded-md border p-2.5 bg-muted/30 space-y-1 text-muted-foreground">
+                <p>
+                  👤 Người thực hiện: <strong className="text-foreground">{user?.displayName || user?.email || "Admin"}</strong>
+                </p>
+                <p className="text-[11px]">
+                  Hệ thống sẽ ghi nhận người thực hiện và lý do vào lịch sử thanh toán của thành viên.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="manual-pay-reason" className="text-xs font-semibold">
+                  Lý do thanh toán <span className="text-destructive">*</span>
+                </Label>
+                <div className="flex flex-wrap gap-1.5 pb-1">
+                  {["Đã nhận tiền mặt", "Chuyển khoản ngoài", "Admin bù trừ công nợ", "Đã thanh toán trước"].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setManualPayReason(tag)}
+                      className={cn(
+                        "text-[11px] px-2 py-0.5 rounded border transition-colors",
+                        manualPayReason === tag
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background hover:bg-muted text-muted-foreground border-muted-foreground/30"
+                      )}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+                <Textarea
+                  id="manual-pay-reason"
+                  placeholder="Nhập lý do chi tiết..."
+                  rows={2}
+                  value={manualPayReason}
+                  onChange={(e) => setManualPayReason(e.target.value)}
+                  className="text-xs"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setManualPayShare(null)}
+                disabled={isSubmittingManualPay}
+              >
+                Hủy
+              </Button>
+              <Button
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={handleConfirmManualPay}
+                disabled={isSubmittingManualPay || !manualPayReason.trim()}
+              >
+                {isSubmittingManualPay ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Check className="h-4 w-4 mr-1.5" />}
+                Xác nhận đã trả
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Manual Unpay Modal */}
+        <Dialog open={!!manualUnpayShare} onOpenChange={(open) => !open && setManualUnpayShare(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base text-amber-600">
+                <Clock className="h-5 w-5" />
+                Hoàn tác về Chưa trả
+              </DialogTitle>
+              <DialogDescription>
+                Bạn có chắc chắn muốn chuyển trạng thái khoản đóng của{" "}
+                <strong>{manualUnpayShare ? members.get(manualUnpayShare.memberId) || "thành viên" : ""}</strong>
+                {" "}về <strong>Chưa trả</strong>?
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2 text-xs">
+              <div className="space-y-1.5">
+                <Label htmlFor="manual-unpay-reason" className="text-xs">
+                  Lý do hoàn tác (tùy chọn):
+                </Label>
+                <Input
+                  id="manual-unpay-reason"
+                  placeholder="Ví dụ: Bấm nhầm, chưa nhận được tiền..."
+                  value={manualUnpayReason}
+                  onChange={(e) => setManualUnpayReason(e.target.value)}
+                  className="text-xs"
+                />
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setManualUnpayShare(null)}
+                disabled={isSubmittingManualUnpay}
+              >
+                Hủy
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleConfirmManualUnpay}
+                disabled={isSubmittingManualUnpay}
+              >
+                {isSubmittingManualUnpay ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+                Xác nhận chuyển Chưa trả
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Payment History Modal */}
+        <Dialog open={!!historyShare} onOpenChange={(open) => !open && setHistoryShare(null)}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <History className="h-5 w-5 text-primary" />
+                Lịch sử thanh toán phần đóng
+              </DialogTitle>
+              <DialogDescription>
+                Thành viên: <strong>{historyShare ? members.get(historyShare.memberId) || "Thành viên" : ""}</strong>
+                {" "}• Số tiền: <strong>{historyShare?.amount.toLocaleString()} VND</strong>
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="max-h-[60vh] overflow-y-auto space-y-3 py-2 pr-1 text-xs">
+              {historyShare?.paymentHistory && historyShare.paymentHistory.length > 0 ? (
+                <div className="relative border-l-2 border-muted-foreground/20 ml-3 pl-4 space-y-4">
+                  {historyShare.paymentHistory.map((item, idx) => (
+                    <div key={idx} className="relative space-y-1">
+                      <div className={cn(
+                        "absolute -left-[23px] top-0.5 h-3 w-3 rounded-full border-2 bg-background",
+                        item.status === "PAID" ? "border-emerald-500 bg-emerald-500" : "border-amber-500 bg-amber-500"
+                      )} />
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <Badge
+                            variant={item.status === "PAID" ? "default" : "secondary"}
+                            className={cn("text-[10px] px-1.5 py-0", item.status === "PAID" ? "bg-emerald-600 text-white" : "")}
+                          >
+                            {item.status === "PAID" ? "ĐÃ THANH TOÁN" : "CHƯA TRẢ"}
+                          </Badge>
+                          <span className="font-semibold text-foreground">
+                            {item.method === "SYSTEM_AUTO"
+                              ? "🤖 Hệ thống tự động"
+                              : item.method === "PAYOS"
+                              ? "💳 Cổng PayOS"
+                              : item.method === "MANUAL_REVERT"
+                              ? "↩️ Hoàn tác"
+                              : "👤 Thủ công"}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground font-mono">
+                          {item.timestamp ? new Date(item.timestamp).toLocaleString("vi-VN") : ""}
+                        </span>
+                      </div>
+
+                      {item.reason && (
+                        <p className="text-foreground bg-muted/40 p-2 rounded text-xs border">
+                          💬 Lý do: <strong>{item.reason}</strong>
+                        </p>
+                      )}
+
+                      {item.actorName && (
+                        <p className="text-[11px] text-muted-foreground">
+                          Thực hiện bởi: <span className="font-medium text-foreground">{item.actorName}</span>
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border p-3 bg-muted/20 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Badge variant={historyShare?.status === "PAID" ? "default" : "secondary"}>
+                      {historyShare?.status === "PAID" ? "ĐÃ THANH TOÁN" : "CHƯA TRẢ"}
+                    </Badge>
+                    <span className="text-muted-foreground font-mono">
+                      {historyShare?.paidAt ? new Date(historyShare.paidAt).toLocaleString("vi-VN") : "Chưa có ngày"}
+                    </span>
+                  </div>
+                  <p className="text-muted-foreground">
+                    Phương thức: <strong className="text-foreground">
+                      {historyShare?.paidMethod === "SYSTEM_AUTO"
+                        ? "🤖 Hệ thống tự động"
+                        : historyShare?.channel === "PAYOS"
+                        ? "💳 PayOS"
+                        : "👤 Thủ công (Legacy)"}
+                    </strong>
+                  </p>
+                  {historyShare?.paidReason && (
+                    <p className="text-muted-foreground">
+                      Lý do: <strong className="text-foreground">{historyShare.paidReason}</strong>
+                    </p>
+                  )}
+                  {historyShare?.paidByName && (
+                    <p className="text-muted-foreground">
+                      Người thực hiện: <strong className="text-foreground">{historyShare.paidByName}</strong>
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button size="sm" variant="outline" onClick={() => setHistoryShare(null)}>
+                Đóng
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
