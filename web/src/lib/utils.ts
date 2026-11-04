@@ -80,3 +80,16 @@ export const formatMatchDateTime = (input: DateLike): string => {
   });
   return `${dateLabel} · ${timeLabel}`;
 };
+
+export const getMatchTotalAmount = (match?: {
+  totalAmount?: number;
+  expenseItems?: Array<{ amount?: number; type?: string }>;
+} | null): number => {
+  if (!match) return 0;
+  if (Array.isArray(match.expenseItems) && match.expenseItems.length > 0) {
+    return match.expenseItems
+      .filter((e) => e.type !== "SUBSIDY")
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }
+  return Number(match.totalAmount) || 0;
+};

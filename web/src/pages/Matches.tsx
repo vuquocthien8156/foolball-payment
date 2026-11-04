@@ -127,7 +127,7 @@ import {
   arrayUnion,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { cn, MATCH_TZ, formatMatchDateTime } from "@/lib/utils";
+import { cn, MATCH_TZ, formatMatchDateTime, getMatchTotalAmount } from "@/lib/utils";
 import { aggregateLiveStats, AggregatedStat } from "@/lib/liveStats";
 import { useActionConfigs } from "@/hooks/useActionConfigs";
 import { postApiJson, apiRequest } from "@/lib/api";
@@ -288,10 +288,11 @@ const MatchListItem = ({
     stats.paidCount === stats.totalShares;
 
   const isPaidOut = match.payoutStatus === "PAID_OUT";
+  const matchTotal = getMatchTotalAmount(match);
   const isReadyForPayout =
     !isPaidOut &&
     (isFullyPaid ||
-      stats.paidAmount >= match.totalAmount ||
+      stats.paidAmount >= matchTotal ||
       match.payoutStatus === "READY_FOR_PAYOUT");
 
   return (
@@ -330,7 +331,7 @@ const MatchListItem = ({
           )}
         </div>
         <p className="text-sm opacity-80">
-          Tổng: {match.totalAmount.toLocaleString()} VND
+          Tổng: {matchTotal.toLocaleString()} VND
         </p>
         {!stats.isLoading && (
           <>
@@ -1327,6 +1328,11 @@ const Matches = () => {
   }, [shares]);
 
   const selectedMatch = matches.find((m) => m.id === selectedMatchId);
+
+  const selectedMatchTotal = useMemo(
+    () => getMatchTotalAmount(selectedMatch),
+    [selectedMatch],
+  );
 
   const matchDateString = useMemo(() => {
     if (!selectedMatch?.date) return "";
@@ -2844,7 +2850,7 @@ const Matches = () => {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">
-                        {(selectedMatch?.totalAmount || 0).toLocaleString()} VND
+                        {selectedMatchTotal.toLocaleString()} VND
                       </div>
                     </CardContent>
                   </Card>
@@ -2881,7 +2887,7 @@ const Matches = () => {
                       </div>
                       {selectedMatch?.status === "PENDING" && (
                         <p className="text-xs text-muted-foreground">
-                          Dự kiến: {(selectedMatch?.totalAmount || 0).toLocaleString()} VND
+                          Dự kiến: {selectedMatchTotal.toLocaleString()} VND
                         </p>
                       )}
                     </CardContent>
@@ -3002,7 +3008,7 @@ const Matches = () => {
                             Tiền sân cần hoàn:
                           </span>
                           <span className="font-bold text-base text-primary">
-                            {selectedMatch?.totalAmount.toLocaleString()} VND
+                            {selectedMatchTotal.toLocaleString()} VND
                           </span>
                         </div>
                         <div className="flex justify-between">
@@ -3026,7 +3032,7 @@ const Matches = () => {
                             src={
                               payoutSettings.qrCodeUrl ||
                               `https://img.vietqr.io/image/${payoutSettings.bankBin}-${payoutSettings.accountNumber}-compact.png?amount=${
-                                selectedMatch?.totalAmount || 0
+                                selectedMatchTotal
                               }&addInfo=${encodeURIComponent(
                                 `HOAN TIEN SAN ${selectedMatch?.id.slice(0, 8)}`,
                               )}&accountName=${encodeURIComponent(payoutSettings.accountHolder || "")}`

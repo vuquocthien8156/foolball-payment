@@ -70,8 +70,10 @@ async function createMatchFromTemplate({ db, FieldValue, groupId, templateId, cr
   const matchRef = db.collection("matches").doc();
   const matchId = matchRef.id;
 
-  const totalAmount = Array.isArray(templateData.expenseItems)
-    ? templateData.expenseItems.reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+  const totalAmount = Array.isArray(templateData.expenseItems) && templateData.expenseItems.length > 0
+    ? templateData.expenseItems
+        .filter((e) => e.type !== "SUBSIDY")
+        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
     : (Number(templateData.totalAmount) || 0);
 
   const newMatch = {

@@ -5,6 +5,14 @@ const { createAuthMiddleware } = require("./auth");
 const validPassword = (value) => typeof value === "string" && value.length >= 8 && value.length <= 128;
 const validName = (value) => typeof value === "string" && value.trim().length >= 1 && value.trim().length <= 60;
 const wrap = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(() => res.status(500).json({ error: "INTERNAL_ERROR" }));
+const getMatchGrossAmount = (m) => {
+  if (Array.isArray(m?.expenseItems) && m.expenseItems.length > 0) {
+    return m.expenseItems
+      .filter((e) => e.type !== "SUBSIDY")
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }
+  return Number(m?.totalAmount) || 0;
+};
 function createPlatformRouter({ db, auth, FieldValue }) {
   const router = express.Router();
   const { requireUser, requirePlatform, requireOwner, requireGroupRole } = createAuthMiddleware({ db, auth });
@@ -560,7 +568,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         });
 
         const isFullyCollected = totalShareAmount > 0 ? (pendingSharesCount === 0) : false;
-        const grossAmount = Number(m.totalAmount) || 0;
+        const grossAmount = getMatchGrossAmount(m);
 
         let paidByName = "";
         let isManagerPayer = false;
@@ -941,16 +949,17 @@ function createPlatformRouter({ db, auth, FieldValue }) {
           }
         }
 
+        const baseGross = getMatchGrossAmount(m);
         history.push({
           id: d.id,
           groupId: gid,
           groupName: gName,
           date: dateIso,
           venueName: m.venueName || null,
-          totalAmount: m.totalAmount || 0,
-          grossAmount: m.payoutGrossAmount !== undefined ? m.payoutGrossAmount : (m.totalAmount || 0),
+          totalAmount: baseGross,
+          grossAmount: m.payoutGrossAmount !== undefined ? m.payoutGrossAmount : baseGross,
           payerShareAmount: m.payoutPayerShareAmount || 0,
-          netPayoutAmount: m.payoutNetAmount !== undefined ? m.payoutNetAmount : (m.totalAmount || 0),
+          netPayoutAmount: m.payoutNetAmount !== undefined ? m.payoutNetAmount : baseGross,
           paidByMemberId: m.paidByMemberId || null,
           paidByMemberName: payerName,
           paidByName: payerName,
