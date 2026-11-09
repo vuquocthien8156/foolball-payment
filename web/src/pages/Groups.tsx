@@ -3981,9 +3981,20 @@ const Groups = () => {
                     </div>
                   </div>
 
+                  {/* Cảnh báo: Tiền người khác ứng, bắt buộc chuyển khoản */}
+                  <div className="w-full p-2.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-500/10 text-xs space-y-1 text-left">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-200">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                      <span>CẢNH BÁO: ĐÂY LÀ TIỀN NGƯỜI KHÁC ỨNG SÂN</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
+                      Trận này do <strong>{settlementQr.recipient?.accountHolder || "người khác"}</strong> tự bỏ tiền túi ứng trước. Bạn phải <strong>mở App Ngân Hàng quét QR và chuyển tiền thực tế vào tài khoản của họ</strong> trước khi bấm nút xác nhận bên dưới!
+                    </p>
+                  </div>
+
                   {/* Nút xác nhận hoàn tiền sau khi chuyển */}
                   <Button
-                    className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                    className="w-full mt-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
                     disabled={batchSettlingGid === settlementQr.groupId}
                     onClick={() => handleConfirmSettleFromQr()}
                   >
@@ -4009,6 +4020,15 @@ const Groups = () => {
                     </em>{" "}
                     để tạo mã QR tự động.
                   </p>
+                  <div className="p-2.5 rounded-lg border border-rose-300 dark:border-rose-800 bg-rose-500/10 text-xs text-left space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-rose-900 dark:text-rose-200">
+                      <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+                      <span>CẢNH BÁO: CHƯA CHUYỂN KHOẢN VÀO TÀI KHOẢN</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-rose-800 dark:text-rose-300">
+                      Khoản tiền này là của người khác ứng. Bạn <strong>không được xác nhận hoàn tiền</strong> nếu chưa chuyển khoản trực tiếp ngoài app hoặc chưa đưa tiền mặt cho người nhận!
+                    </p>
+                  </div>
                   <Button
                     variant="outline"
                     className="w-full text-xs"
@@ -4020,8 +4040,8 @@ const Groups = () => {
                     ) : (
                       <Check className="h-3.5 w-3.5 mr-1" />
                     )}
-                    Vẫn xác nhận đã hoàn tiền thủ công (
-                    {settlementQr.amount.toLocaleString()} VND)
+                    Tôi xác nhận đã chuyển khoản ngoài · Đã hoàn tiền thủ công (
+                    {Math.round(settlementQr.amount).toLocaleString()} VND)
                   </Button>
                 </div>
               )}
