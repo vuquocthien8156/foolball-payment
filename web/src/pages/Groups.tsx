@@ -76,6 +76,7 @@ import {
   Menu,
   Globe,
   CalendarCheck,
+  AlertTriangle,
 } from "lucide-react";
 
 type Group = {
@@ -576,22 +577,6 @@ const Groups = () => {
 
   const handleConfirmSettleMatches = async (groupId: string, matches: any[], note?: string) => {
     if (!matches.length) return;
-    const uncollectedCount = matches.filter((m: any) => !m.isFullyCollected).length;
-    if (uncollectedCount > 0) {
-      const confirmed = window.confirm(
-        `Cảnh báo: Có ${uncollectedCount} / ${matches.length} trận chưa thu đủ tiền từ thành viên.\n\nBạn có chắc chắn muốn xác nhận đã chuyển khoản và hoàn tiền cho ${matches.length} trận này không?`
-      );
-      if (!confirmed) return;
-    } else {
-      const totalAmt = matches.reduce(
-        (sum: number, m: any) => sum + (Number(m.netPayoutAmount ?? m.totalAmount) || 0),
-        0
-      );
-      const confirmed = window.confirm(
-        `Xác nhận đã chuyển khoản và hoàn tiền cho ${matches.length} trận đấu (Tổng tiền: ${totalAmt.toLocaleString()} VND)?`
-      );
-      if (!confirmed) return;
-    }
 
     setBatchSettlingGid(groupId);
     try {
@@ -2151,6 +2136,11 @@ const Groups = () => {
                           {/* Group Header */}
                           {(() => {
                             const regularMatchesInGroup = (item.pendingMatches || []).filter((m: any) => !m.isOwnerPayer);
+                            const fullyCollectedMatchesInGroup = regularMatchesInGroup.filter((m: any) => m.isFullyCollected);
+                            const fullyCollectedAmountInGroup = fullyCollectedMatchesInGroup.reduce(
+                              (sum: number, m: any) => sum + (Number(m.netPayoutAmount ?? m.totalAmount) || 0),
+                              0
+                            );
                             const selectedMatchesInGroup = regularMatchesInGroup.filter((m: any) => selectedMatchIds.has(m.id));
                             const selectedAmountInGroup = selectedMatchesInGroup.reduce(
                               (sum: number, m: any) => sum + (Number(m.netPayoutAmount ?? m.totalAmount) || 0),
@@ -2186,13 +2176,24 @@ const Groups = () => {
                                         {isAllGroupSelected ? "Bỏ chọn nhóm" : "Chọn cả nhóm"}
                                       </Button>
                                     )}
+                                    {fullyCollectedMatchesInGroup.length > 0 && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-400 bg-emerald-500/10 gap-1 font-semibold"
+                                        onClick={() => openSelectedMatchesQr(item, fullyCollectedMatchesInGroup)}
+                                        title={`Mở QR hoàn tiền cho ${fullyCollectedMatchesInGroup.length} trận đã thu đủ 100% tiền`}
+                                      >
+                                        ⚡ Hoàn {fullyCollectedMatchesInGroup.length} trận đã thu đủ ({fullyCollectedAmountInGroup.toLocaleString()}đ)
+                                      </Button>
+                                    )}
                                     {payerGroups.filter((pg: any) => !pg.isOwner).length > 0 && (
                                       <Button
                                         size="sm"
                                         variant="outline"
                                         className="h-7 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1"
                                         disabled={batchSettlingGid === item.groupId}
-                                        onClick={() => handleBatchSettleGroup(item)}
+                                        onClick={() => openGroupQr(item)}
                                       >
                                         {batchSettlingGid === item.groupId ? (
                                           <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
@@ -2215,29 +2216,13 @@ const Groups = () => {
                                       </span>
                                     </div>
                                     <div className="flex items-center gap-2 flex-wrap">
-                                      {item.payoutRecipient?.accountNumber && (
-                                        <Button
-                                          size="sm"
-                                          className="h-7 text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 shadow-xs font-semibold"
-                                          onClick={() => openSelectedMatchesQr(item, selectedMatchesInGroup)}
-                                        >
-                                          <QrCode className="h-3.5 w-3.5" />
-                                          Quét QR gộp ({selectedMatchesInGroup.length} trận)
-                                        </Button>
-                                      )}
                                       <Button
                                         size="sm"
-                                        variant="outline"
-                                        className="h-7 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1 font-medium"
-                                        disabled={batchSettlingGid === item.groupId}
-                                        onClick={() => handleConfirmSettleMatches(item.groupId, selectedMatchesInGroup)}
+                                        className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-xs font-semibold"
+                                        onClick={() => openSelectedMatchesQr(item, selectedMatchesInGroup)}
                                       >
-                                        {batchSettlingGid === item.groupId ? (
-                                          <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                                        ) : (
-                                          <Check className="h-3.5 w-3.5 mr-1" />
-                                        )}
-                                        Xác nhận đã hoàn ({selectedMatchesInGroup.length} trận)
+                                        <QrCode className="h-3.5 w-3.5" />
+                                        Quét QR & Xác nhận ({selectedMatchesInGroup.length} trận)
                                       </Button>
                                       <Button
                                         size="sm"
@@ -2318,14 +2303,10 @@ const Groups = () => {
                                             size="sm"
                                             variant="outline"
                                             className="h-6 text-[11px] px-2 text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1 font-medium"
-                                            disabled={settlingPayerKey === `${item.groupId}_${payerGroup.payerName}`}
-                                            onClick={() => handleSettlePayerMatches(item.groupId, payerGroup.payerName, payerGroup.matches)}
+                                            disabled={batchSettlingGid === item.groupId}
+                                            onClick={() => openSelectedMatchesQr(item, payerMatches)}
                                           >
-                                            {settlingPayerKey === `${item.groupId}_${payerGroup.payerName}` ? (
-                                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                            ) : (
-                                              <Check className="h-3 w-3 mr-1" />
-                                            )}
+                                            <QrCode className="h-3 w-3 mr-0.5 text-emerald-600" />
                                             Đã hoàn tất cả ({payerGroup.matches?.length || 0} trận)
                                           </Button>
                                         </div>
@@ -2427,21 +2408,11 @@ const Groups = () => {
                                                   <Button
                                                     size="sm"
                                                     variant="outline"
-                                                    className="h-6 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800"
-                                                    disabled={settlingMatchId === match.id}
-                                                    onClick={() =>
-                                                      handleSettleSingleMatch(
-                                                        match,
-                                                        item.groupId,
-                                                        payerGroup.payerName
-                                                      )
-                                                    }
+                                                    className="h-6 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 font-medium"
+                                                    disabled={batchSettlingGid === item.groupId}
+                                                    onClick={() => openSingleMatchQr(item, match)}
                                                   >
-                                                    {settlingMatchId === match.id ? (
-                                                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                                    ) : (
-                                                      <Check className="h-3 w-3 mr-1" />
-                                                    )}
+                                                    <Check className="h-3 w-3 mr-1" />
                                                     Đã hoàn ({(match.netPayoutAmount ?? match.totalAmount)?.toLocaleString()}đ)
                                                   </Button>
                                                 </div>
@@ -2649,7 +2620,7 @@ const Groups = () => {
                                 variant="default"
                                 className="h-7 text-xs"
                                 disabled={batchSettlingGid === item.groupId || item.pendingCount === 0}
-                                onClick={() => handleBatchSettleGroup(item)}
+                                onClick={() => openGroupQr(item)}
                               >
                                 {batchSettlingGid === item.groupId ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
@@ -2786,6 +2757,21 @@ const Groups = () => {
                     ✨ Quét bằng App Ngân Hàng: Tự động điền đúng người nhận, số tiền & nội dung (không cần nhập tay).
                   </div>
 
+                  {/* Cảnh báo nếu có trận chưa thu đủ 100% tiền */}
+                  {settlementQr.matches.some((m: any) => !m.isFullyCollected) && (
+                    <div className="w-full p-2.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+                      <div className="flex items-center gap-1.5 font-semibold">
+                        <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                        <span>
+                          Lưu ý: Có {settlementQr.matches.filter((m: any) => !m.isFullyCollected).length} / {settlementQr.matches.length} trận chưa thu đủ 100% tiền từ thành viên.
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                        Hệ thống vẫn cho phép hoàn ứng trước nếu bạn đồng ý. Vui lòng kiểm tra kỹ trước khi xác nhận.
+                      </p>
+                    </div>
+                  )}
+
                   {/* VietQR Image */}
                   <div className="relative group">
                     <img
@@ -2878,18 +2864,29 @@ const Groups = () => {
                     <p className="text-[11px] font-semibold text-muted-foreground">
                       Bao gồm {settlementQr.matches.length} trận:
                     </p>
-                    <div className="max-h-32 overflow-y-auto divide-y border rounded bg-background p-1.5 text-[11px]">
+                    <div className="max-h-36 overflow-y-auto divide-y border rounded bg-background p-1.5 text-[11px]">
                       {settlementQr.matches.map((m: any) => {
                         const mDate = m.date ? new Date(m.date) : null;
                         const dateLabel = mDate && !isNaN(mDate.getTime())
                           ? mDate.toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" })
                           : "Trận đấu";
                         return (
-                          <div key={m.id} className="py-1 flex items-center justify-between gap-1">
-                            <span className="text-foreground">
-                              📅 {dateLabel} {m.venueName ? `• ${m.venueName}` : ""}
-                            </span>
-                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                          <div key={m.id} className="py-1.5 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-foreground">
+                                📅 {dateLabel} {m.venueName ? `• ${m.venueName}` : ""}
+                              </span>
+                              {m.isFullyCollected ? (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                                  ✓ Đã thu đủ
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                                  ⚠️ Chưa đủ ({m.collectedAmount?.toLocaleString() || 0}đ)
+                                </span>
+                              )}
+                            </div>
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
                               {(m.netPayoutAmount ?? m.totalAmount)?.toLocaleString()}đ
                             </span>
                           </div>
@@ -2913,13 +2910,26 @@ const Groups = () => {
                   </Button>
                 </div>
               ) : (
-                <div className="p-4 border border-dashed rounded-lg bg-amber-50/30 text-center space-y-2">
+                <div className="p-4 border border-dashed rounded-lg bg-amber-50/30 text-center space-y-3">
                   <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
                     ⚠️ Nhóm chưa cấu hình thông tin nhận hoàn tiền
                   </p>
                   <p className="text-xs text-muted-foreground">
                     Vui lòng vào mục Cài đặt của nhóm <strong>{settlementQr.groupName}</strong> và nhập thông tin tại <em>"Thông tin nhận hoàn tiền ứng sân (VietQR / Ngân hàng)"</em> để tạo mã QR tự động.
                   </p>
+                  <Button
+                    variant="outline"
+                    className="w-full text-xs"
+                    disabled={batchSettlingGid === settlementQr.groupId}
+                    onClick={() => handleConfirmSettleFromQr()}
+                  >
+                    {batchSettlingGid === settlementQr.groupId ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5 mr-1" />
+                    )}
+                    Vẫn xác nhận đã hoàn tiền thủ công ({settlementQr.amount.toLocaleString()} VND)
+                  </Button>
                 </div>
               )}
             </div>
