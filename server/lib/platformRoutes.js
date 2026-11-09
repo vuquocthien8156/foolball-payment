@@ -480,6 +480,10 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     const groupsData = [];
     const waitingForSuperAdmin = [];
     let totalPendingAmount = 0;
+    let totalGrossAmount = 0;
+    let totalCollectedAmount = 0;
+    let totalShareAmount = 0;
+    let totalUncollectedAmount = 0;
     let pendingGroupsCount = 0;
     let pendingMatchesCount = 0;
 
@@ -685,6 +689,12 @@ function createPlatformRouter({ db, auth, FieldValue }) {
         pendingGroupsCount++;
         pendingMatchesCount += pendingMatchesNeedingReimbursement.length;
         totalPendingAmount += groupPendingAmount;
+        pendingMatchesNeedingReimbursement.forEach((pm) => {
+          totalGrossAmount += (pm.grossAmount || 0);
+          totalCollectedAmount += (pm.collectedAmount || 0);
+          totalShareAmount += (pm.totalShareAmount || 0);
+          totalUncollectedAmount += Math.max(0, (pm.totalShareAmount || pm.grossAmount || 0) - (pm.collectedAmount || 0));
+        });
       }
 
       groupsData.push({
@@ -713,6 +723,10 @@ function createPlatformRouter({ db, auth, FieldValue }) {
       isSuperAdmin,
       summary: {
         totalPendingAmount,
+        totalGrossAmount,
+        totalCollectedAmount,
+        totalShareAmount,
+        totalUncollectedAmount,
         pendingGroupsCount,
         pendingMatchesCount,
         waitingForSuperAdminAmount: waitingForSuperAdmin.reduce((sum, m) => sum + m.totalAmount, 0),

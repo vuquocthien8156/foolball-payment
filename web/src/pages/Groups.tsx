@@ -96,6 +96,7 @@ import {
   Globe,
   CalendarCheck,
   AlertTriangle,
+  Wallet,
 } from "lucide-react";
 
 type Group = {
@@ -218,6 +219,20 @@ const Groups = () => {
   const [settlingMatchId, setSettlingMatchId] = useState<string | null>(null);
   const [linkingMemberId, setLinkingMemberId] = useState<string | null>(null);
   const [showOwnerMatches, setShowOwnerMatches] = useState(false);
+  const [actualBankBalance, setActualBankBalance] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("super_admin_actual_bank_balance") || "";
+    }
+    return "";
+  });
+
+  const handleActualBalanceChange = (val: string) => {
+    const numeric = val.replace(/\D/g, "");
+    setActualBankBalance(numeric);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("super_admin_actual_bank_balance", numeric);
+    }
+  };
 
   // Delete Group State
   const [groupToDelete, setGroupToDelete] = useState<Group | null>(null);
@@ -2391,81 +2406,242 @@ const Groups = () => {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="pending" className="space-y-6 py-1 mt-0">
-                {/* Summary Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {settlementData.isSuperAdmin ? (
-                    <>
-                      <Card className="p-3 bg-emerald-500/10 border-emerald-500/20 shadow-xs">
-                        <p className="text-xs text-muted-foreground">
-                          Tổng tiền cần hoàn:
-                        </p>
-                        <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
-                          {settlementData.summary?.totalPendingAmount?.toLocaleString() ||
-                            0}{" "}
-                          VND
-                        </p>
-                      </Card>
-                      <Card className="p-3 bg-muted/40 shadow-xs">
-                        <p className="text-xs text-muted-foreground">
-                          Nhóm chờ hoàn tiền:
-                        </p>
-                        <p className="text-xl font-bold text-foreground">
-                          {settlementData.summary?.pendingGroupsCount || 0} nhóm
-                        </p>
-                      </Card>
-                      <Card className="p-3 bg-muted/40 shadow-xs">
-                        <p className="text-xs text-muted-foreground">
-                          Tổng số trận chờ hoàn:
-                        </p>
-                        <p className="text-xl font-bold text-foreground">
-                          {settlementData.summary?.pendingMatchesCount || 0}{" "}
-                          trận
-                        </p>
-                      </Card>
-                    </>
-                  ) : (
-                    <>
-                      <Card className="p-3 bg-amber-500/10 border-amber-500/20 shadow-xs">
-                        <p className="text-xs text-muted-foreground">
-                          Tiền đợi Super Admin hoàn lại:
-                        </p>
-                        <p className="text-xl font-bold text-amber-700 dark:text-amber-400">
-                          {settlementData.summary?.waitingForSuperAdminAmount?.toLocaleString() ||
-                            0}{" "}
-                          VND
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          {settlementData.summary?.waitingForSuperAdminCount ||
-                            0}{" "}
-                          trận bạn tự ứng
-                        </p>
-                      </Card>
-                      <Card className="p-3 bg-emerald-500/10 border-emerald-500/20 shadow-xs">
-                        <p className="text-xs text-muted-foreground">
-                          Tiền cần hoàn cho thành viên:
-                        </p>
-                        <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
-                          {settlementData.summary?.totalPendingAmount?.toLocaleString() ||
-                            0}{" "}
-                          VND
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          {settlementData.summary?.pendingMatchesCount || 0}{" "}
-                          trận trong nhóm bạn quản lý
-                        </p>
-                      </Card>
-                      <Card className="p-3 bg-muted/40 shadow-xs">
-                        <p className="text-xs text-muted-foreground">
-                          Nhóm bạn quản lý:
-                        </p>
-                        <p className="text-xl font-bold text-foreground">
-                          {settlementData.groups?.length || 0} nhóm
-                        </p>
-                      </Card>
-                    </>
-                  )}
-                </div>
+              <TabsContent value="pending" className="space-y-4 py-1 mt-0">
+                {/* Summary & Liquidity Reconciliation */}
+                {settlementData.isSuperAdmin ? (
+                  (() => {
+                    const pendingMatchesAll = (settlementData.groups || []).flatMap((g: any) =>
+                      (g.pendingMatches || []).filter((m: any) => !m.isOwnerPayer)
+                    );
+
+                    const totalGrossAmount = typeof settlementData.summary?.totalGrossAmount === "number"
+                      ? settlementData.summary.totalGrossAmount
+                      : pendingMatchesAll.reduce((s: number, m: any) => s + (Number(m.grossAmount ?? m.totalAmount) || 0), 0);
+
+                    const totalCollectedAmount = typeof settlementData.summary?.totalCollectedAmount === "number"
+                      ? settlementData.summary.totalCollectedAmount
+                      : pendingMatchesAll.reduce((s: number, m: any) => s + (Number(m.collectedAmount) || 0), 0);
+
+                    const totalUncollectedAmount = typeof settlementData.summary?.totalUncollectedAmount === "number"
+                      ? settlementData.summary.totalUncollectedAmount
+                      : pendingMatchesAll.reduce(
+                          (s: number, m: any) => s + Math.max(0, (Number(m.totalShareAmount ?? m.grossAmount ?? m.totalAmount) || 0) - (Number(m.collectedAmount) || 0)),
+                          0
+                        );
+
+                    const totalPendingAmount = settlementData.summary?.totalPendingAmount || 0;
+                    const uncollectedMatchesCount = pendingMatchesAll.filter((m: any) => !m.isFullyCollected).length;
+
+                    const numericBankBalance = Number(actualBankBalance) || 0;
+                    const hasEnteredBalance = actualBankBalance.trim().length > 0;
+                    const balanceDiff = numericBankBalance - totalPendingAmount;
+                    const isSufficient = balanceDiff >= 0;
+
+                    return (
+                      <div className="space-y-3">
+                        {/* 4 Summary Cards */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                          <Card className="p-3 bg-muted/30 border shadow-xs space-y-1">
+                            <p className="text-[11px] font-medium text-muted-foreground">
+                              Tổng chi phí sân:
+                            </p>
+                            <p className="text-base sm:text-lg font-bold text-foreground truncate">
+                              {totalGrossAmount.toLocaleString()} VND
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {settlementData.summary?.pendingMatchesCount || 0} trận chờ hoàn
+                            </p>
+                          </Card>
+
+                          <Card className="p-3 bg-emerald-500/10 border-emerald-500/20 shadow-xs space-y-1">
+                            <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">
+                              Đã thu PayOS:
+                            </p>
+                            <p className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400 truncate">
+                              {totalCollectedAmount.toLocaleString()} VND
+                            </p>
+                            <p className="text-[10px] text-emerald-700/80 dark:text-emerald-400/80">
+                              Đã vào tài khoản
+                            </p>
+                          </Card>
+
+                          <Card className="p-3 bg-amber-500/10 border-amber-500/20 shadow-xs space-y-1">
+                            <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                              Tổng chưa thu:
+                            </p>
+                            <p className="text-base sm:text-lg font-bold text-amber-700 dark:text-amber-400 truncate">
+                              {totalUncollectedAmount.toLocaleString()} VND
+                            </p>
+                            <p className="text-[10px] text-amber-700/80 dark:text-amber-400/80">
+                              {uncollectedMatchesCount} trận chưa thu đủ
+                            </p>
+                          </Card>
+
+                          <Card className="p-3 bg-blue-500/10 border-blue-500/20 shadow-xs space-y-1">
+                            <p className="text-[11px] font-medium text-blue-800 dark:text-blue-300">
+                              Cần hoàn ứng sân:
+                            </p>
+                            <p className="text-base sm:text-lg font-bold text-blue-700 dark:text-blue-400 truncate">
+                              {totalPendingAmount.toLocaleString()} VND
+                            </p>
+                            <p className="text-[10px] text-blue-700/80 dark:text-blue-400/80">
+                              {settlementData.summary?.pendingGroupsCount || 0} nhóm chờ hoàn
+                            </p>
+                          </Card>
+                        </div>
+
+                        {/* Bank Reconciliation & Liquidity Check Card */}
+                        <Card className="p-3.5 border rounded-xl bg-gradient-to-br from-background to-muted/30 shadow-xs space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-2.5">
+                            <div className="flex items-center gap-2">
+                              <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                                <Wallet className="h-4 w-4" />
+                              </div>
+                              <div>
+                                <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                                  Đối soát số dư thực tế trong App Ngân Hàng
+                                </h4>
+                                <p className="text-[11px] text-muted-foreground">
+                                  Nhập số dư hiện có trong app để kiểm tra xem có đủ tiền hoàn ứng sân hay không.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 w-full sm:w-auto">
+                              <div className="relative flex-1 sm:w-56">
+                                <Input
+                                  type="text"
+                                  inputMode="numeric"
+                                  placeholder="Nhập số dư ngân hàng..."
+                                  value={
+                                    actualBankBalance
+                                      ? Number(actualBankBalance).toLocaleString("vi-VN")
+                                      : ""
+                                  }
+                                  onChange={(e) => handleActualBalanceChange(e.target.value)}
+                                  className="h-8 text-xs pr-7 font-mono font-semibold"
+                                />
+                                {actualBankBalance && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleActualBalanceChange("")}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                    title="Xóa"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Live Liquidity Status Banner */}
+                          {hasEnteredBalance ? (
+                            <div
+                              className={`p-3 rounded-lg border text-xs space-y-1.5 animate-in fade-in ${
+                                isSufficient
+                                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-100"
+                                  : "bg-rose-500/10 border-rose-500/30 text-rose-950 dark:text-rose-100"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2 flex-wrap font-semibold">
+                                <div className="flex items-center gap-1.5">
+                                  {isSufficient ? (
+                                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                                  ) : (
+                                    <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+                                  )}
+                                  <span>
+                                    {isSufficient
+                                      ? "🟢 ĐỦ TIỀN HOÀN ỨNG (THANH KHOẢN AN TOÀN)"
+                                      : "🔴 CẢNH BÁO: THIẾU TIỀN HOÀN ỨNG SÂN"}
+                                  </span>
+                                </div>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[11px] font-bold ${
+                                    isSufficient
+                                      ? "border-emerald-500/50 text-emerald-700 bg-emerald-50 dark:bg-emerald-950/50"
+                                      : "border-rose-500/50 text-rose-700 bg-rose-50 dark:bg-rose-950/50"
+                                  }`}
+                                >
+                                  {isSufficient
+                                    ? `Dư an toàn: +${balanceDiff.toLocaleString()} VND`
+                                    : `Thiếu hụt: -${Math.abs(balanceDiff).toLocaleString()} VND`}
+                                </Badge>
+                              </div>
+
+                              <p className="text-[11px] leading-relaxed opacity-90">
+                                {isSufficient ? (
+                                  <>
+                                    Số dư ngân hàng hiện tại (<strong>{numericBankBalance.toLocaleString()} VND</strong>) lớn hơn tổng số tiền cần chuyển hoàn ứng sân (<strong>{totalPendingAmount.toLocaleString()} VND</strong>). Bạn hoàn toàn có thể yên tâm quét QR chuyển khoản hoàn tiền.
+                                  </>
+                                ) : (
+                                  <>
+                                    Số dư ngân hàng hiện tại (<strong>{numericBankBalance.toLocaleString()} VND</strong>) <strong>không đủ</strong> để hoàn tiền ứng sân (<strong>{totalPendingAmount.toLocaleString()} VND</strong>).
+                                    {totalUncollectedAmount > 0 ? (
+                                      <span className="block mt-1 text-amber-800 dark:text-amber-200">
+                                        💡 <strong>Nguyên nhân chính:</strong> Hiện vẫn còn <strong>{totalUncollectedAmount.toLocaleString()} VND</strong> tiền sân từ thành viên chưa thanh toán qua PayOS ({uncollectedMatchesCount} trận chưa thu đủ). Hãy nhắc thành viên thanh toán trước khi hoàn tiền.
+                                      </span>
+                                    ) : (
+                                      <span className="block mt-1 text-rose-800 dark:text-rose-200">
+                                        💡 Vui lòng nạp thêm tiền vào tài khoản ngân hàng trước khi xác nhận chuyển khoản hoàn ứng.
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="p-2.5 rounded-lg border border-dashed bg-muted/20 text-center text-xs text-muted-foreground">
+                              💡 <em>Mẹo: Hãy mở app ngân hàng, nhập số dư hiện tại vào ô trên để kiểm tra đối soát tự động.</em>
+                            </div>
+                          )}
+                        </Card>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <Card className="p-3 bg-amber-500/10 border-amber-500/20 shadow-xs">
+                      <p className="text-xs text-muted-foreground">
+                        Tiền đợi Super Admin hoàn lại:
+                      </p>
+                      <p className="text-xl font-bold text-amber-700 dark:text-amber-400">
+                        {settlementData.summary?.waitingForSuperAdminAmount?.toLocaleString() ||
+                          0}{" "}
+                        VND
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {settlementData.summary?.waitingForSuperAdminCount ||
+                          0}{" "}
+                        trận bạn tự ứng
+                      </p>
+                    </Card>
+                    <Card className="p-3 bg-emerald-500/10 border-emerald-500/20 shadow-xs">
+                      <p className="text-xs text-muted-foreground">
+                        Tiền cần hoàn cho thành viên:
+                      </p>
+                      <p className="text-xl font-bold text-emerald-700 dark:text-emerald-400">
+                        {settlementData.summary?.totalPendingAmount?.toLocaleString() ||
+                          0}{" "}
+                        VND
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {settlementData.summary?.pendingMatchesCount || 0}{" "}
+                        trận trong nhóm bạn quản lý
+                      </p>
+                    </Card>
+                    <Card className="p-3 bg-muted/40 shadow-xs">
+                      <p className="text-xs text-muted-foreground">
+                        Nhóm bạn quản lý:
+                      </p>
+                      <p className="text-xl font-bold text-foreground">
+                        {settlementData.groups?.length || 0} nhóm
+                      </p>
+                    </Card>
+                  </div>
+                )}
 
                 {/* Action: Clear Historical Backlog (Super Admin only) */}
                 {settlementData.isSuperAdmin && (
