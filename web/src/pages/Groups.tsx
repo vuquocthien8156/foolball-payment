@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
@@ -225,6 +225,25 @@ const Groups = () => {
     }
     return "";
   });
+  const [savingBalance, setSavingBalance] = useState(false);
+  const [balanceSavedAt, setBalanceSavedAt] = useState<string | null>(null);
+  const balanceSaveTimeoutRef = useRef<any>(null);
+
+  const saveBalanceToDb = async (val: string) => {
+    try {
+      setSavingBalance(true);
+      const res = await apiRequest("POST", "/platform/settlement/bank-balance", {
+        balance: val ? Number(val) : null,
+      });
+      if (res?.updatedAt) {
+        setBalanceSavedAt(res.updatedAt);
+      }
+    } catch (err) {
+      console.warn("Failed to save bank balance to DB:", err);
+    } finally {
+      setSavingBalance(false);
+    }
+  };
 
   const handleActualBalanceChange = (val: string) => {
     const numeric = val.replace(/\D/g, "");
@@ -232,6 +251,12 @@ const Groups = () => {
     if (typeof window !== "undefined") {
       localStorage.setItem("super_admin_actual_bank_balance", numeric);
     }
+    if (balanceSaveTimeoutRef.current) {
+      clearTimeout(balanceSaveTimeoutRef.current);
+    }
+    balanceSaveTimeoutRef.current = setTimeout(() => {
+      saveBalanceToDb(numeric);
+    }, 600);
   };
 
   // Delete Group State
@@ -529,6 +554,16 @@ const Groups = () => {
     try {
       const data = await apiRequest("GET", "/platform/settlement/overview");
       setSettlementData(data);
+      if (data?.actualBankBalance != null) {
+        const valStr = String(data.actualBankBalance);
+        setActualBankBalance(valStr);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("super_admin_actual_bank_balance", valStr);
+        }
+      }
+      if (data?.actualBankBalanceUpdatedAt) {
+        setBalanceSavedAt(data.actualBankBalanceUpdatedAt);
+      }
     } catch (e) {
       toast({
         variant: "destructive",
@@ -2414,27 +2449,33 @@ const Groups = () => {
                       (g.pendingMatches || []).filter((m: any) => !m.isOwnerPayer)
                     );
 
-                    const totalGrossAmount = typeof settlementData.summary?.totalGrossAmount === "number"
-                      ? settlementData.summary.totalGrossAmount
-                      : pendingMatchesAll.reduce((s: number, m: any) => s + (Number(m.grossAmount ?? m.totalAmount) || 0), 0);
+                    const totalGrossAmount = Math.round(
+                      typeof settlementData.summary?.totalGrossAmount === "number"
+                        ? settlementData.summary.totalGrossAmount
+                        : pendingMatchesAll.reduce((s: number, m: any) => s + (Number(m.grossAmount ?? m.totalAmount) || 0), 0)
+                    );
 
-                    const totalCollectedAmount = typeof settlementData.summary?.totalCollectedAmount === "number"
-                      ? settlementData.summary.totalCollectedAmount
-                      : pendingMatchesAll.reduce((s: number, m: any) => s + (Number(m.collectedAmount) || 0), 0);
+                    const totalCollectedAmount = Math.round(
+                      typeof settlementData.summary?.totalCollectedAmount === "number"
+                        ? settlementData.summary.totalCollectedAmount
+                        : pendingMatchesAll.reduce((s: number, m: any) => s + (Number(m.collectedAmount) || 0), 0)
+                    );
 
-                    const totalUncollectedAmount = typeof settlementData.summary?.totalUncollectedAmount === "number"
-                      ? settlementData.summary.totalUncollectedAmount
-                      : pendingMatchesAll.reduce(
-                          (s: number, m: any) => s + Math.max(0, (Number(m.totalShareAmount ?? m.grossAmount ?? m.totalAmount) || 0) - (Number(m.collectedAmount) || 0)),
-                          0
-                        );
+                    const totalUncollectedAmount = Math.round(
+                      typeof settlementData.summary?.totalUncollectedAmount === "number"
+                        ? settlementData.summary.totalUncollectedAmount
+                        : pendingMatchesAll.reduce(
+                            (s: number, m: any) => s + Math.max(0, (Number(m.totalShareAmount ?? m.grossAmount ?? m.totalAmount) || 0) - (Number(m.collectedAmount) || 0)),
+                            0
+                          )
+                    );
 
-                    const totalPendingAmount = settlementData.summary?.totalPendingAmount || 0;
+                    const totalPendingAmount = Math.round(settlementData.summary?.totalPendingAmount || 0);
                     const uncollectedMatchesCount = pendingMatchesAll.filter((m: any) => !m.isFullyCollected).length;
 
-                    const numericBankBalance = Number(actualBankBalance) || 0;
+                    const numericBankBalance = Math.round(Number(actualBankBalance) || 0);
                     const hasEnteredBalance = actualBankBalance.trim().length > 0;
-                    const balanceDiff = numericBankBalance - totalPendingAmount;
+                    const balanceDiff = Math.round(numericBankBalance - totalPendingAmount);
                     const isSufficient = balanceDiff >= 0;
 
                     return (
@@ -2445,7 +2486,7 @@ const Groups = () => {
                             <p className="text-[11px] font-medium text-muted-foreground">
                               Tổng chi phí sân:
                             </p>
-                            <p className="text-base sm:text-lg font-bold text-foreground truncate">
+                            <p className="text-base sm:text-lg font-bold text-foreground">
                               {totalGrossAmount.toLocaleString()} VND
                             </p>
                             <p className="text-[10px] text-muted-foreground">
@@ -2457,7 +2498,7 @@ const Groups = () => {
                             <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">
                               Đã thu PayOS:
                             </p>
-                            <p className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400 truncate">
+                            <p className="text-base sm:text-lg font-bold text-emerald-700 dark:text-emerald-400">
                               {totalCollectedAmount.toLocaleString()} VND
                             </p>
                             <p className="text-[10px] text-emerald-700/80 dark:text-emerald-400/80">
@@ -2469,7 +2510,7 @@ const Groups = () => {
                             <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
                               Tổng chưa thu:
                             </p>
-                            <p className="text-base sm:text-lg font-bold text-amber-700 dark:text-amber-400 truncate">
+                            <p className="text-base sm:text-lg font-bold text-amber-700 dark:text-amber-400">
                               {totalUncollectedAmount.toLocaleString()} VND
                             </p>
                             <p className="text-[10px] text-amber-700/80 dark:text-amber-400/80">
@@ -2481,7 +2522,7 @@ const Groups = () => {
                             <p className="text-[11px] font-medium text-blue-800 dark:text-blue-300">
                               Cần hoàn ứng sân:
                             </p>
-                            <p className="text-base sm:text-lg font-bold text-blue-700 dark:text-blue-400 truncate">
+                            <p className="text-base sm:text-lg font-bold text-blue-700 dark:text-blue-400">
                               {totalPendingAmount.toLocaleString()} VND
                             </p>
                             <p className="text-[10px] text-blue-700/80 dark:text-blue-400/80">
@@ -2498,9 +2539,22 @@ const Groups = () => {
                                 <Wallet className="h-4 w-4" />
                               </div>
                               <div>
-                                <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                                  Đối soát số dư thực tế trong App Ngân Hàng
-                                </h4>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="text-xs font-bold text-foreground">
+                                    Đối soát số dư thực tế trong App Ngân Hàng
+                                  </h4>
+                                  {savingBalance ? (
+                                    <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                      <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                                      Đang lưu DB...
+                                    </span>
+                                  ) : balanceSavedAt ? (
+                                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5 font-medium">
+                                      <Check className="h-3 w-3" />
+                                      Đã lưu Cloud DB
+                                    </span>
+                                  ) : null}
+                                </div>
                                 <p className="text-[11px] text-muted-foreground">
                                   Nhập số dư hiện có trong app để kiểm tra xem có đủ tiền hoàn ứng sân hay không.
                                 </p>
@@ -2524,7 +2578,10 @@ const Groups = () => {
                                 {actualBankBalance && (
                                   <button
                                     type="button"
-                                    onClick={() => handleActualBalanceChange("")}
+                                    onClick={() => {
+                                      handleActualBalanceChange("");
+                                      saveBalanceToDb("");
+                                    }}
                                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                                     title="Xóa"
                                   >

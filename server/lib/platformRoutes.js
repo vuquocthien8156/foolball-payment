@@ -719,21 +719,54 @@ function createPlatformRouter({ db, auth, FieldValue }) {
 
     groupsData.sort((a, b) => b.pendingAmount - a.pendingAmount);
 
+    let actualBankBalance = null;
+    let actualBankBalanceUpdatedAt = null;
+    if (isSuperAdmin) {
+      try {
+        const sSnap = await db.collection("platformSettings").doc("settlement").get();
+        if (sSnap.exists) {
+          const s = sSnap.data();
+          actualBankBalance = s.actualBankBalance != null ? Math.round(Number(s.actualBankBalance)) : null;
+          actualBankBalanceUpdatedAt = s.updatedAt?.toDate ? s.updatedAt.toDate().toISOString() : (s.updatedAt || null);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch settlement settings:", err?.message);
+      }
+    }
+
     res.json({
       isSuperAdmin,
+      actualBankBalance,
+      actualBankBalanceUpdatedAt,
       summary: {
-        totalPendingAmount,
-        totalGrossAmount,
-        totalCollectedAmount,
-        totalShareAmount,
-        totalUncollectedAmount,
+        totalPendingAmount: Math.round(totalPendingAmount),
+        totalGrossAmount: Math.round(totalGrossAmount),
+        totalCollectedAmount: Math.round(totalCollectedAmount),
+        totalShareAmount: Math.round(totalShareAmount),
+        totalUncollectedAmount: Math.round(totalUncollectedAmount),
         pendingGroupsCount,
         pendingMatchesCount,
-        waitingForSuperAdminAmount: waitingForSuperAdmin.reduce((sum, m) => sum + m.totalAmount, 0),
+        waitingForSuperAdminAmount: Math.round(waitingForSuperAdmin.reduce((sum, m) => sum + m.totalAmount, 0)),
         waitingForSuperAdminCount: waitingForSuperAdmin.length,
       },
       waitingForSuperAdmin,
       groups: groupsData,
+    });
+  }));
+
+  // Save actual bank balance for Super Admin reconciliation
+  router.post("/settlement/bank-balance", requireOwner, wrap(async (req, res) => {
+    const { balance } = req.body || {};
+    const numeric = (balance === null || balance === "" || isNaN(Number(balance))) ? null : Math.round(Number(balance));
+    await db.collection("platformSettings").doc("settlement").set({
+      actualBankBalance: numeric,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: req.uid,
+    }, { merge: true });
+    res.json({
+      success: true,
+      actualBankBalance: numeric,
+      updatedAt: new Date().toISOString(),
     });
   }));
 
