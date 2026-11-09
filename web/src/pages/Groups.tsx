@@ -124,6 +124,24 @@ function slugifyName(text: string) {
     .slice(0, 32);
 }
 
+function sanitizeTransferMemo(text: string) {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "D")
+    .replace(/[^a-zA-Z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+function getMatchDateShort(dateVal: any) {
+  if (!dateVal) return "";
+  const d = dateVal?.toDate ? dateVal.toDate() : new Date(dateVal);
+  if (isNaN(d.getTime())) return "";
+  return `${String(d.getDate()).padStart(2, "0")}${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 const Groups = () => {
   const navigate = useNavigate();
   const { account } = usePlatformAccount();
@@ -158,6 +176,15 @@ const Groups = () => {
   const [settlementHistory, setSettlementHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedGroupQr, setSelectedGroupQr] = useState<any>(null);
+  const [selectedMatchIds, setSelectedMatchIds] = useState<Set<string>>(new Set());
+  const [settlementQr, setSettlementQr] = useState<{
+    groupId: string;
+    groupName: string;
+    recipient: any;
+    matches: any[];
+    amount: number;
+    memo: string;
+  } | null>(null);
   const [batchSettlingGid, setBatchSettlingGid] = useState<string | null>(null);
   const [settlingAllPast, setSettlingAllPast] = useState(false);
   const [settlingMatchId, setSettlingMatchId] = useState<string | null>(null);
@@ -442,6 +469,169 @@ const Groups = () => {
     setSettlementTab("pending");
     setSettlementOpen(true);
     fetchSettlementOverview();
+  };
+
+  const getVietQrUrl = (recipient: any, amount: number, memo: string) => {
+    if (!recipient?.bankBin || !recipient?.accountNumber) return "";
+    const bankBin = encodeURIComponent(recipient.bankBin);
+    const accNum = encodeURIComponent(recipient.accountNumber);
+    const amt = Math.max(0, Math.round(amount));
+    const addInfo = encodeURIComponent(memo);
+    const accName = encodeURIComponent(recipient.accountHolder || "");
+    return `https://img.vietqr.io/image/${bankBin}-${accNum}-compact2.png?amount=${amt}&addInfo=${addInfo}&accountName=${accName}`;
+  };
+
+  const toggleMatchSelection = (matchId: string) => {
+    setSelectedMatchIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(matchId)) {
+        next.delete(matchId);
+      } else {
+        next.add(matchId);
+      }
+      return next;
+    });
+  };
+
+  const togglePayerMatchesSelection = (matches: any[]) => {
+    const regularMatches = matches.filter((m) => !m.isOwnerPayer);
+    if (!regularMatches.length) return;
+    const allSelected = regularMatches.every((m) => selectedMatchIds.has(m.id));
+    setSelectedMatchIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        regularMatches.forEach((m) => next.delete(m.id));
+      } else {
+        regularMatches.forEach((m) => next.add(m.id));
+      }
+      return next;
+    });
+  };
+
+  const toggleGroupMatchesSelection = (item: any) => {
+    const regularMatches = (item.pendingMatches || []).filter((m: any) => !m.isOwnerPayer);
+    if (!regularMatches.length) return;
+    const allSelected = regularMatches.every((m: any) => selectedMatchIds.has(m.id));
+    setSelectedMatchIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        regularMatches.forEach((m: any) => next.delete(m.id));
+      } else {
+        regularMatches.forEach((m: any) => next.add(m.id));
+      }
+      return next;
+    });
+  };
+
+  const openSingleMatchQr = (item: any, match: any) => {
+    const dateFormatted = getMatchDateShort(match.date);
+    const matchIdShort = match.id ? match.id.slice(0, 6).toUpperCase() : "";
+    const memo = sanitizeTransferMemo(`HT SAN ${dateFormatted} ${matchIdShort}`).slice(0, 25);
+    const amount = Number(match.netPayoutAmount ?? match.totalAmount) || 0;
+
+    setSettlementQr({
+      groupId: item.groupId,
+      groupName: item.groupName,
+      recipient: item.payoutRecipient,
+      matches: [match],
+      amount,
+      memo,
+    });
+  };
+
+  const openSelectedMatchesQr = (item: any, matches: any[]) => {
+    if (!matches.length) return;
+    const totalAmount = matches.reduce(
+      (sum: number, m: any) => sum + (Number(m.netPayoutAmount ?? m.totalAmount) || 0),
+      0
+    );
+    const cleanGroup = sanitizeTransferMemo(item.groupName).replace(/\s+/g, "").slice(0, 8);
+    let memo = "";
+    if (matches.length === 1) {
+      const dStr = getMatchDateShort(matches[0].date);
+      const mId = matches[0].id ? matches[0].id.slice(0, 6).toUpperCase() : "";
+      memo = sanitizeTransferMemo(`HT SAN ${dStr} ${mId}`).slice(0, 25);
+    } else if (matches.length <= 3) {
+      const dates = matches.map((m) => getMatchDateShort(m.date)).filter(Boolean).join(" ");
+      const memoCandidate = sanitizeTransferMemo(`HT SAN ${cleanGroup} ${dates}`);
+      memo = memoCandidate.length <= 25 ? memoCandidate : sanitizeTransferMemo(`HT SAN ${cleanGroup} ${matches.length}TR`).slice(0, 25);
+    } else {
+      memo = sanitizeTransferMemo(`HT SAN ${cleanGroup} ${matches.length}TR`).slice(0, 25);
+    }
+
+    setSettlementQr({
+      groupId: item.groupId,
+      groupName: item.groupName,
+      recipient: item.payoutRecipient,
+      matches,
+      amount: totalAmount,
+      memo,
+    });
+  };
+
+  const openGroupQr = (item: any) => {
+    const regularMatches = (item.pendingMatches || []).filter((m: any) => !m.isOwnerPayer);
+    openSelectedMatchesQr(item, regularMatches);
+  };
+
+  const handleConfirmSettleMatches = async (groupId: string, matches: any[], note?: string) => {
+    if (!matches.length) return;
+    const uncollectedCount = matches.filter((m: any) => !m.isFullyCollected).length;
+    if (uncollectedCount > 0) {
+      const confirmed = window.confirm(
+        `Cảnh báo: Có ${uncollectedCount} / ${matches.length} trận chưa thu đủ tiền từ thành viên.\n\nBạn có chắc chắn muốn xác nhận đã chuyển khoản và hoàn tiền cho ${matches.length} trận này không?`
+      );
+      if (!confirmed) return;
+    } else {
+      const totalAmt = matches.reduce(
+        (sum: number, m: any) => sum + (Number(m.netPayoutAmount ?? m.totalAmount) || 0),
+        0
+      );
+      const confirmed = window.confirm(
+        `Xác nhận đã chuyển khoản và hoàn tiền cho ${matches.length} trận đấu (Tổng tiền: ${totalAmt.toLocaleString()} VND)?`
+      );
+      if (!confirmed) return;
+    }
+
+    setBatchSettlingGid(groupId);
+    try {
+      const matchIds = matches.map((m: any) => m.id);
+      await apiRequest("POST", "/platform/settlement/batch-settle", {
+        groupId,
+        matchIds,
+        note: note || `Đã chuyển khoản hoàn tiền qua VietQR (${matches.length} trận)`,
+      });
+      toast({
+        title: "Hoàn tất đối soát",
+        description: `Đã xác nhận hoàn tiền thành công cho ${matches.length} trận.`,
+      });
+      setSelectedMatchIds((prev) => {
+        const next = new Set(prev);
+        matchIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      setSettlementQr(null);
+      setSelectedGroupQr(null);
+      await fetchSettlementOverview();
+      if (settlementTab === "history") await fetchSettlementHistory();
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Lỗi hoàn tiền",
+        description: err?.message || "Không thể cập nhật trạng thái đối soát",
+      });
+    } finally {
+      setBatchSettlingGid(null);
+    }
+  };
+
+  const handleConfirmSettleFromQr = async () => {
+    if (!settlementQr) return;
+    await handleConfirmSettleMatches(
+      settlementQr.groupId,
+      settlementQr.matches,
+      `Đã chuyển khoản VietQR: ${settlementQr.memo} (${settlementQr.amount.toLocaleString()}đ)`
+    );
   };
 
   const handleBatchSettleGroup = async (groupItem: any) => {
@@ -1959,40 +2149,116 @@ const Groups = () => {
                       return (
                         <Card key={item.groupId} className="p-4 space-y-3.5 shadow-xs">
                           {/* Group Header */}
-                          <div className="flex flex-wrap items-start justify-between gap-2 border-b pb-2">
-                            <div>
-                              <h4 className="font-bold text-base text-foreground">{item.groupName}</h4>
-                              <p className="text-xs text-muted-foreground">
-                                Quản lý nhóm: <strong>{item.managerName}</strong> {item.managerEmail ? `(${item.managerEmail})` : ""}
-                              </p>
-                            </div>
-                            <div className="text-right flex items-center gap-2.5">
-                              <div>
-                                <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 block">
-                                  {item.pendingAmount?.toLocaleString()} VND
-                                </span>
-                                <span className="text-xs text-muted-foreground">
-                                  {item.pendingCount} trận chờ hoàn
-                                </span>
-                              </div>
-                              {payerGroups.filter((pg: any) => !pg.isOwner).length > 0 && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1"
-                                  disabled={batchSettlingGid === item.groupId}
-                                  onClick={() => handleBatchSettleGroup(item)}
-                                >
-                                  {batchSettlingGid === item.groupId ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                                  ) : (
-                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                                  )}
-                                  Hoàn tất cả nhóm
-                                </Button>
-                              )}
-                            </div>
-                          </div>
+                          {(() => {
+                            const regularMatchesInGroup = (item.pendingMatches || []).filter((m: any) => !m.isOwnerPayer);
+                            const selectedMatchesInGroup = regularMatchesInGroup.filter((m: any) => selectedMatchIds.has(m.id));
+                            const selectedAmountInGroup = selectedMatchesInGroup.reduce(
+                              (sum: number, m: any) => sum + (Number(m.netPayoutAmount ?? m.totalAmount) || 0),
+                              0
+                            );
+                            const isAllGroupSelected = regularMatchesInGroup.length > 0 && regularMatchesInGroup.every((m: any) => selectedMatchIds.has(m.id));
+
+                            return (
+                              <>
+                                <div className="flex flex-wrap items-start justify-between gap-2 border-b pb-2">
+                                  <div>
+                                    <h4 className="font-bold text-base text-foreground">{item.groupName}</h4>
+                                    <p className="text-xs text-muted-foreground">
+                                      Quản lý nhóm: <strong>{item.managerName}</strong> {item.managerEmail ? `(${item.managerEmail})` : ""}
+                                    </p>
+                                  </div>
+                                  <div className="text-right flex items-center gap-2 flex-wrap">
+                                    <div className="text-right">
+                                      <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400 block">
+                                        {item.pendingAmount?.toLocaleString()} VND
+                                      </span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {item.pendingCount} trận chờ hoàn
+                                      </span>
+                                    </div>
+                                    {regularMatchesInGroup.length > 0 && (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 text-xs text-muted-foreground hover:text-foreground px-2"
+                                        onClick={() => toggleGroupMatchesSelection(item)}
+                                      >
+                                        {isAllGroupSelected ? "Bỏ chọn nhóm" : "Chọn cả nhóm"}
+                                      </Button>
+                                    )}
+                                    {payerGroups.filter((pg: any) => !pg.isOwner).length > 0 && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1"
+                                        disabled={batchSettlingGid === item.groupId}
+                                        onClick={() => handleBatchSettleGroup(item)}
+                                      >
+                                        {batchSettlingGid === item.groupId ? (
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                                        ) : (
+                                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                                        )}
+                                        Hoàn tất cả nhóm
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Floating / Sticky Selection Action Toolbar */}
+                                {selectedMatchesInGroup.length > 0 && (
+                                  <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-primary/10 border border-primary/30 rounded-lg animate-in fade-in">
+                                    <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+                                      <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+                                      <span>
+                                        Đã chọn <strong>{selectedMatchesInGroup.length}</strong> trận · Tổng cần hoàn: <strong>{selectedAmountInGroup.toLocaleString()} VND</strong>
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {item.payoutRecipient?.accountNumber && (
+                                        <Button
+                                          size="sm"
+                                          className="h-7 text-xs bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 shadow-xs font-semibold"
+                                          onClick={() => openSelectedMatchesQr(item, selectedMatchesInGroup)}
+                                        >
+                                          <QrCode className="h-3.5 w-3.5" />
+                                          Quét QR gộp ({selectedMatchesInGroup.length} trận)
+                                        </Button>
+                                      )}
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1 font-medium"
+                                        disabled={batchSettlingGid === item.groupId}
+                                        onClick={() => handleConfirmSettleMatches(item.groupId, selectedMatchesInGroup)}
+                                      >
+                                        {batchSettlingGid === item.groupId ? (
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
+                                        ) : (
+                                          <Check className="h-3.5 w-3.5 mr-1" />
+                                        )}
+                                        Xác nhận đã hoàn ({selectedMatchesInGroup.length} trận)
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 text-xs text-muted-foreground hover:text-foreground px-2"
+                                        onClick={() => {
+                                          setSelectedMatchIds((prev) => {
+                                            const next = new Set(prev);
+                                            selectedMatchesInGroup.forEach((m: any) => next.delete(m.id));
+                                            return next;
+                                          });
+                                        }}
+                                      >
+                                        Bỏ chọn
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
 
                           {/* Grouped by Member / Payer */}
                           {(() => {
@@ -2009,150 +2275,184 @@ const Groups = () => {
                                 ) : null}
 
                                 {/* 1. Regular Payers needing reimbursement */}
-                                {regularPayerGroups.map((payerGroup: any, pIdx: number) => (
-                                  <div
-                                    key={pIdx}
-                                    className="rounded-lg border border-border/70 bg-muted/20 overflow-hidden"
-                                  >
-                                    {/* Payer Header */}
-                                    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-muted/40 border-b">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <Badge
-                                          variant="outline"
-                                          className={`text-xs px-2 py-0.5 font-medium ${
-                                            payerGroup.isManager
-                                              ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
-                                              : "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
-                                          }`}
-                                        >
-                                          👤 Người ứng: {payerGroup.payerName}
-                                          {payerGroup.isManager ? " (Quản lý nhóm)" : " (Thành viên)"}
-                                        </Badge>
-                                      </div>
+                                {regularPayerGroups.map((payerGroup: any, pIdx: number) => {
+                                  const payerMatches = payerGroup.matches?.filter((m: any) => !m.isOwnerPayer) || [];
+                                  const allPayerSelected = payerMatches.length > 0 && payerMatches.every((m: any) => selectedMatchIds.has(m.id));
+                                  const somePayerSelected = payerMatches.some((m: any) => selectedMatchIds.has(m.id)) && !allPayerSelected;
 
-                                      <div className="flex items-center gap-2 text-xs">
-                                        <span className="text-muted-foreground">
-                                          {payerGroup.matches?.length || 0} trận:
-                                        </span>
-                                        <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
-                                          {payerGroup.totalAmount?.toLocaleString()} VND
-                                        </strong>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="h-6 text-[11px] px-2 text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1 font-medium"
-                                          disabled={settlingPayerKey === `${item.groupId}_${payerGroup.payerName}`}
-                                          onClick={() => handleSettlePayerMatches(item.groupId, payerGroup.payerName, payerGroup.matches)}
-                                        >
-                                          {settlingPayerKey === `${item.groupId}_${payerGroup.payerName}` ? (
-                                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                          ) : (
-                                            <Check className="h-3 w-3 mr-1" />
-                                          )}
-                                          Đã hoàn tất cả ({payerGroup.matches?.length || 0} trận)
-                                        </Button>
-                                      </div>
-                                    </div>
-
-                                    {/* Matches List for this Payer */}
-                                    <div className="divide-y divide-border/50">
-                                      {payerGroup.matches?.map((match: any) => {
-                                        const matchDate = match.date ? new Date(match.date) : null;
-                                        const dateFormatted = matchDate && !isNaN(matchDate.getTime())
-                                          ? matchDate.toLocaleDateString("vi-VN", {
-                                              weekday: "short",
-                                              day: "2-digit",
-                                              month: "2-digit",
-                                              year: "numeric",
-                                              hour: "2-digit",
-                                              minute: "2-digit",
-                                            })
-                                          : (match.date || "Trận đấu");
-
-                                        return (
-                                          <div
-                                            key={match.id}
-                                            className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-muted/30 transition-colors"
+                                  return (
+                                    <div
+                                      key={pIdx}
+                                      className="rounded-lg border border-border/70 bg-muted/20 overflow-hidden"
+                                    >
+                                      {/* Payer Header */}
+                                      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-muted/40 border-b">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <Checkbox
+                                            checked={allPayerSelected ? true : somePayerSelected ? "indeterminate" : false}
+                                            onCheckedChange={() => togglePayerMatchesSelection(payerMatches)}
+                                            aria-label={`Chọn tất cả trận của ${payerGroup.payerName}`}
+                                            className="h-4 w-4 rounded"
+                                          />
+                                          <Badge
+                                            variant="outline"
+                                            className={`text-xs px-2 py-0.5 font-medium ${
+                                              payerGroup.isManager
+                                                ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800"
+                                                : "bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
+                                            }`}
                                           >
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                              <span className="font-semibold text-foreground">
-                                                📅 {dateFormatted}
-                                              </span>
-                                              {match.venueName && (
-                                                <span className="text-muted-foreground">
-                                                  • {match.venueName}
-                                                </span>
-                                              )}
-                                              {/* Collection Progress Badge */}
-                                              {match.isFullyCollected ? (
-                                                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
-                                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                                  Đã thu đủ ({match.collectedAmount?.toLocaleString()}đ)
-                                                </span>
-                                              ) : match.collectedAmount > 0 ? (
-                                                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
-                                                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                                                  Mới thu {match.collectedAmount?.toLocaleString()} / {match.totalAmount?.toLocaleString()}đ (còn {match.pendingSharesCount} người)
-                                                </span>
-                                              ) : (
-                                                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
-                                                  <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-                                                  Chưa thu được tiền (0đ)
-                                                </span>
-                                              )}
-                                            </div>
+                                            👤 Người ứng: {payerGroup.payerName}
+                                            {payerGroup.isManager ? " (Quản lý nhóm)" : " (Thành viên)"}
+                                          </Badge>
+                                        </div>
 
-                                            <div className="flex flex-col sm:items-end justify-center gap-1 shrink-0">
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <span className="text-muted-foreground">
+                                            {payerGroup.matches?.length || 0} trận:
+                                          </span>
+                                          <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                            {payerGroup.totalAmount?.toLocaleString()} VND
+                                          </strong>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-6 text-[11px] px-2 text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800 gap-1 font-medium"
+                                            disabled={settlingPayerKey === `${item.groupId}_${payerGroup.payerName}`}
+                                            onClick={() => handleSettlePayerMatches(item.groupId, payerGroup.payerName, payerGroup.matches)}
+                                          >
+                                            {settlingPayerKey === `${item.groupId}_${payerGroup.payerName}` ? (
+                                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                            ) : (
+                                              <Check className="h-3 w-3 mr-1" />
+                                            )}
+                                            Đã hoàn tất cả ({payerGroup.matches?.length || 0} trận)
+                                          </Button>
+                                        </div>
+                                      </div>
+
+                                      {/* Matches List for this Payer */}
+                                      <div className="divide-y divide-border/50">
+                                        {payerGroup.matches?.map((match: any) => {
+                                          const matchDate = match.date ? new Date(match.date) : null;
+                                          const dateFormatted = matchDate && !isNaN(matchDate.getTime())
+                                            ? matchDate.toLocaleDateString("vi-VN", {
+                                                weekday: "short",
+                                                day: "2-digit",
+                                                month: "2-digit",
+                                                year: "numeric",
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                              })
+                                            : (match.date || "Trận đấu");
+
+                                          return (
+                                            <div
+                                              key={match.id}
+                                              className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-muted/30 transition-colors"
+                                            >
                                               <div className="flex items-center gap-2">
-                                                {match.payerShareAmount > 0 && !match.payerSharePaid && (
-                                                  <span className="text-[11px] text-muted-foreground line-through">
-                                                    {(match.grossAmount ?? match.totalAmount)?.toLocaleString()}đ
+                                                <Checkbox
+                                                  checked={selectedMatchIds.has(match.id)}
+                                                  onCheckedChange={() => toggleMatchSelection(match.id)}
+                                                  aria-label={`Chọn trận ${match.id}`}
+                                                  className="h-4 w-4 rounded shrink-0"
+                                                />
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                  <span className="font-semibold text-foreground">
+                                                    📅 {dateFormatted}
                                                   </span>
-                                                )}
-                                                <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                                                  {(match.netPayoutAmount ?? match.totalAmount)?.toLocaleString()} VND
-                                                </span>
-                                              </div>
-                                              {match.payerShareAmount > 0 && (
-                                                <div className="text-[10px]">
-                                                  {match.payerSharePaid ? (
-                                                    <span className="text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
-                                                      Phần người ứng: {match.payerShareAmount?.toLocaleString()}đ (Đã nộp PayOS)
+                                                  {match.venueName && (
+                                                    <span className="text-muted-foreground">
+                                                      • {match.venueName}
+                                                    </span>
+                                                  )}
+                                                  {/* Collection Progress Badge */}
+                                                  {match.isFullyCollected ? (
+                                                    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
+                                                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                                      Đã thu đủ ({match.collectedAmount?.toLocaleString()}đ)
+                                                    </span>
+                                                  ) : match.collectedAmount > 0 ? (
+                                                    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
+                                                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                                      Mới thu {match.collectedAmount?.toLocaleString()} / {match.totalAmount?.toLocaleString()}đ (còn {match.pendingSharesCount} người)
                                                     </span>
                                                   ) : (
-                                                    <span className="text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
-                                                      Trừ phần người ứng: -{match.payerShareAmount?.toLocaleString()}đ
+                                                    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700">
+                                                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                                                      Chưa thu được tiền (0đ)
                                                     </span>
                                                   )}
                                                 </div>
-                                              )}
-                                              <Button
-                                                size="sm"
-                                                variant="outline"
-                                                className="h-6 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800"
-                                                disabled={settlingMatchId === match.id}
-                                                onClick={() =>
-                                                  handleSettleSingleMatch(
-                                                    match,
-                                                    item.groupId,
-                                                    payerGroup.payerName
-                                                  )
-                                                }
-                                              >
-                                                {settlingMatchId === match.id ? (
-                                                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                                ) : (
-                                                  <Check className="h-3 w-3 mr-1" />
+                                              </div>
+
+                                              <div className="flex flex-col sm:items-end justify-center gap-1 shrink-0">
+                                                <div className="flex items-center gap-2">
+                                                  {match.payerShareAmount > 0 && !match.payerSharePaid && (
+                                                    <span className="text-[11px] text-muted-foreground line-through">
+                                                      {(match.grossAmount ?? match.totalAmount)?.toLocaleString()}đ
+                                                    </span>
+                                                  )}
+                                                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                                    {(match.netPayoutAmount ?? match.totalAmount)?.toLocaleString()} VND
+                                                  </span>
+                                                </div>
+                                                {match.payerShareAmount > 0 && (
+                                                  <div className="text-[10px]">
+                                                    {match.payerSharePaid ? (
+                                                      <span className="text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                                                        Phần người ứng: {match.payerShareAmount?.toLocaleString()}đ (Đã nộp PayOS)
+                                                      </span>
+                                                    ) : (
+                                                      <span className="text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+                                                        Trừ phần người ứng: -{match.payerShareAmount?.toLocaleString()}đ
+                                                      </span>
+                                                    )}
+                                                  </div>
                                                 )}
-                                                Đã hoàn ({(match.netPayoutAmount ?? match.totalAmount)?.toLocaleString()}đ)
-                                              </Button>
+                                                <div className="flex items-center gap-1.5">
+                                                  {item.payoutRecipient?.accountNumber && (
+                                                    <Button
+                                                      size="sm"
+                                                      variant="outline"
+                                                      className="h-6 text-[11px] px-2 text-primary hover:bg-primary/10 border-primary/30 gap-1 font-medium"
+                                                      onClick={() => openSingleMatchQr(item, match)}
+                                                      title="Quét mã QR chuyển khoản đúng số tiền và nội dung cho trận này"
+                                                    >
+                                                      <QrCode className="h-3 w-3 text-primary" />
+                                                      Quét QR
+                                                    </Button>
+                                                  )}
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-6 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800"
+                                                    disabled={settlingMatchId === match.id}
+                                                    onClick={() =>
+                                                      handleSettleSingleMatch(
+                                                        match,
+                                                        item.groupId,
+                                                        payerGroup.payerName
+                                                      )
+                                                    }
+                                                  >
+                                                    {settlingMatchId === match.id ? (
+                                                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                                    ) : (
+                                                      <Check className="h-3 w-3 mr-1" />
+                                                    )}
+                                                    Đã hoàn ({(match.netPayoutAmount ?? match.totalAmount)?.toLocaleString()}đ)
+                                                  </Button>
+                                                </div>
+                                              </div>
                                             </div>
-                                          </div>
-                                        );
-                                      })}
+                                          );
+                                        })}
+                                      </div>
                                     </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
 
                                 {/* 2. Owner Payers: Hidden by default, collapsible */}
                                 {ownerPayerGroups.length > 0 ? (
@@ -2338,7 +2638,7 @@ const Groups = () => {
                                   size="sm"
                                   variant="outline"
                                   className="h-7 text-xs gap-1"
-                                  onClick={() => setSelectedGroupQr(item)}
+                                  onClick={() => openGroupQr(item)}
                                 >
                                   <QrCode className="h-3.5 w-3.5 text-primary" />
                                   Xem VietQR tổng
@@ -2462,71 +2762,166 @@ const Groups = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog Xem VietQR Tổng cho nhóm */}
-      <Dialog open={!!selectedGroupQr} onOpenChange={(open) => !open && setSelectedGroupQr(null)}>
-        <DialogContent className="max-w-md">
+      {/* Dialog Xem & Quét VietQR Hoàn tiền ứng sân (1 trận hoặc nhiều trận) */}
+      <Dialog open={!!settlementQr} onOpenChange={(open) => !open && setSettlementQr(null)}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Quét mã VietQR chuyển tiền cho Quản lý nhóm</DialogTitle>
+            <div className="flex items-center gap-2">
+              <QrCode className="h-5 w-5 text-emerald-600" />
+              <DialogTitle>Quét mã VietQR chuyển tiền hoàn ứng</DialogTitle>
+            </div>
             <DialogDescription>
-              Mã QR đã gắn sẵn tổng số tiền của tất cả các trận chờ hoàn tiền cho nhóm <strong>{selectedGroupQr?.groupName}</strong>.
+              {settlementQr?.matches?.length === 1
+                ? `Mã QR đã gắn sẵn đúng số tiền (${settlementQr?.amount?.toLocaleString()} VND) và nội dung chuyển khoản theo trận.`
+                : `Mã QR gộp đã gắn sẵn đúng tổng số tiền (${settlementQr?.amount?.toLocaleString()} VND) cho ${settlementQr?.matches?.length || 0} trận.`}
             </DialogDescription>
           </DialogHeader>
 
-          {selectedGroupQr && (
-            <div className="flex flex-col items-center gap-3 p-4 bg-muted/20 border rounded-xl">
-              <img
-                src={
-                  selectedGroupQr.payoutRecipient?.qrCodeUrl ||
-                  `https://img.vietqr.io/image/${selectedGroupQr.payoutRecipient?.bankBin}-${selectedGroupQr.payoutRecipient?.accountNumber}-compact.png?amount=${
-                    selectedGroupQr.pendingAmount || 0
-                  }&addInfo=${encodeURIComponent(
-                    `HOAN TIEN SAN ${selectedGroupQr.groupName.slice(0, 15)}`,
-                  )}&accountName=${encodeURIComponent(selectedGroupQr.payoutRecipient?.accountHolder || "")}`
-                }
-                alt="VietQR Payout"
-                className="w-52 h-52 object-contain rounded-lg bg-white p-2 border shadow-xs"
-              />
-              <div className="w-full text-center space-y-1">
-                <p className="font-semibold text-foreground text-sm">
-                  {selectedGroupQr.payoutRecipient?.bankName}
-                </p>
-                <div className="flex items-center justify-center gap-2">
-                  <span className="font-mono font-bold text-lg text-primary">
-                    {selectedGroupQr.payoutRecipient?.accountNumber}
-                  </span>
+          {settlementQr && (
+            <div className="space-y-4">
+              {settlementQr.recipient?.accountNumber && settlementQr.recipient?.bankBin ? (
+                <div className="flex flex-col items-center gap-3 p-4 bg-muted/20 border rounded-xl">
+                  {/* Banner hướng dẫn: Quét là chuyển ngay */}
+                  <div className="w-full text-center py-1.5 px-3 rounded-md bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-medium">
+                    ✨ Quét bằng App Ngân Hàng: Tự động điền đúng người nhận, số tiền & nội dung (không cần nhập tay).
+                  </div>
+
+                  {/* VietQR Image */}
+                  <div className="relative group">
+                    <img
+                      src={getVietQrUrl(settlementQr.recipient, settlementQr.amount, settlementQr.memo)}
+                      alt="VietQR Payout"
+                      className="w-64 h-64 sm:w-72 sm:h-72 object-contain rounded-xl bg-white p-2.5 border shadow-sm"
+                    />
+                  </div>
+
+                  {/* Thông tin chuyển khoản chi tiết */}
+                  <div className="w-full space-y-2 pt-1 text-xs">
+                    <div className="flex items-center justify-between p-2 rounded bg-background border">
+                      <span className="text-muted-foreground">Ngân hàng:</span>
+                      <strong className="text-foreground font-semibold">
+                        {settlementQr.recipient.bankName || settlementQr.recipient.bankBin}
+                      </strong>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded bg-background border">
+                      <span className="text-muted-foreground">Số tài khoản:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-sm text-primary">
+                          {settlementQr.recipient.accountNumber}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          title="Sao chép số tài khoản"
+                          onClick={() => {
+                            navigator.clipboard.writeText(settlementQr.recipient.accountNumber || "");
+                            toast({ title: "Đã sao chép số tài khoản" });
+                          }}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded bg-background border">
+                      <span className="text-muted-foreground">Chủ tài khoản:</span>
+                      <strong className="text-foreground uppercase font-semibold">
+                        {settlementQr.recipient.accountHolder}
+                      </strong>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded bg-emerald-500/10 border border-emerald-500/20">
+                      <span className="text-emerald-800 dark:text-emerald-300 font-medium">Số tiền chuyển:</span>
+                      <div className="flex items-center gap-1.5">
+                        <strong className="text-sm font-bold text-emerald-700 dark:text-emerald-400">
+                          {settlementQr.amount.toLocaleString()} VND
+                        </strong>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-emerald-700 dark:text-emerald-400"
+                          title="Sao chép số tiền"
+                          onClick={() => {
+                            navigator.clipboard.writeText(String(settlementQr.amount));
+                            toast({ title: "Đã sao chép số tiền" });
+                          }}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded bg-background border">
+                      <span className="text-muted-foreground">Nội dung CK:</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-foreground">{settlementQr.memo}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          title="Sao chép nội dung chuyển khoản"
+                          onClick={() => {
+                            navigator.clipboard.writeText(settlementQr.memo);
+                            toast({ title: "Đã sao chép nội dung chuyển khoản" });
+                          }}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Danh sách các trận trong QR này */}
+                  <div className="w-full space-y-1.5 pt-1">
+                    <p className="text-[11px] font-semibold text-muted-foreground">
+                      Bao gồm {settlementQr.matches.length} trận:
+                    </p>
+                    <div className="max-h-32 overflow-y-auto divide-y border rounded bg-background p-1.5 text-[11px]">
+                      {settlementQr.matches.map((m: any) => {
+                        const mDate = m.date ? new Date(m.date) : null;
+                        const dateLabel = mDate && !isNaN(mDate.getTime())
+                          ? mDate.toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" })
+                          : "Trận đấu";
+                        return (
+                          <div key={m.id} className="py-1 flex items-center justify-between gap-1">
+                            <span className="text-foreground">
+                              📅 {dateLabel} {m.venueName ? `• ${m.venueName}` : ""}
+                            </span>
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                              {(m.netPayoutAmount ?? m.totalAmount)?.toLocaleString()}đ
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Nút xác nhận hoàn tiền sau khi chuyển */}
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    title="Sao chép số tài khoản"
-                    onClick={() => {
-                      navigator.clipboard.writeText(selectedGroupQr.payoutRecipient?.accountNumber || "");
-                      toast({ title: "Đã sao chép số tài khoản" });
-                    }}
+                    className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                    disabled={batchSettlingGid === settlementQr.groupId}
+                    onClick={() => handleConfirmSettleFromQr()}
                   >
-                    <Copy className="h-3.5 w-3.5" />
+                    {batchSettlingGid === settlementQr.groupId ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                    )}
+                    Tôi đã chuyển khoản thành công · Xác nhận hoàn tiền
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground uppercase">
-                  {selectedGroupQr.payoutRecipient?.accountHolder}
-                </p>
-                <p className="text-base font-bold text-emerald-600 dark:text-emerald-400 pt-1">
-                  Tổng tiền: {selectedGroupQr.pendingAmount?.toLocaleString()} VND ({selectedGroupQr.pendingCount} trận)
-                </p>
-              </div>
-
-              <Button
-                className="w-full mt-2"
-                disabled={batchSettlingGid === selectedGroupQr.groupId}
-                onClick={() => handleBatchSettleGroup(selectedGroupQr)}
-              >
-                {batchSettlingGid === selectedGroupQr.groupId ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4 mr-1.5" />
-                )}
-                Xác nhận đã chuyển khoản thành công
-              </Button>
+              ) : (
+                <div className="p-4 border border-dashed rounded-lg bg-amber-50/30 text-center space-y-2">
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                    ⚠️ Nhóm chưa cấu hình thông tin nhận hoàn tiền
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Vui lòng vào mục Cài đặt của nhóm <strong>{settlementQr.groupName}</strong> và nhập thông tin tại <em>"Thông tin nhận hoàn tiền ứng sân (VietQR / Ngân hàng)"</em> để tạo mã QR tự động.
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

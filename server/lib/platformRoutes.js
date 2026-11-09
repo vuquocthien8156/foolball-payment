@@ -792,7 +792,7 @@ function createPlatformRouter({ db, auth, FieldValue }) {
     for (const mDoc of matchDocs) {
       if (!mDoc.exists) continue;
       const m = mDoc.data();
-      const grossAmount = Number(m.totalAmount) || 0;
+      const grossAmount = getMatchGrossAmount(m);
       let payerShareAmount = 0;
       let payerName = null;
 
